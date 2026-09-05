@@ -21,7 +21,7 @@ import type {
   StatKey,
   Stats,
 } from '@engine/types';
-import { bigActionCost, effectiveStats, hasKeyword } from '@engine/systems';
+import { bigActionCost, effectiveStats, elementMultiplierFor, hasKeyword } from '@engine/systems';
 import { appendLog } from './log.js';
 import { makeContext, fireInstanceTriggers, fireOwnedTriggers, runEffects } from './triggers.js';
 import { defOfInstance, drawCards, moveInstance, safeDef, trashInstance } from './zones.js';
@@ -256,7 +256,15 @@ export function playCard(
   for (const kw of mods.grantKeywords) {
     if (!inst.addedKeywords.includes(kw)) inst.addedKeywords.push(kw);
   }
-  const multiplier = Math.max(0, mods.multiplier * (opts.multiplier ?? 1));
+  // B74/B75: a printed stat line is produced here, not by `{op:'gain'}`, so the
+  // Five Elements multiplier has to be composed in at this point or a card whose
+  // whole output is `stats` (every Resource) never sees it. Called after the
+  // element has been pushed onto `playedThisTurn`, so the pairing reads the
+  // previous card. `elementMultiplierFor` returns 1 unless the anomaly is live.
+  const multiplier = Math.max(
+    0,
+    mods.multiplier * (opts.multiplier ?? 1) * elementMultiplierFor(s, player, iid),
+  );
 
   // 4. Stat line.
   s = applyStats(s, player, effectiveStats(s, iid), multiplier, mods.multiplyStats, depth);

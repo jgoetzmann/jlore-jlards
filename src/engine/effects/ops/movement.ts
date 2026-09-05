@@ -13,8 +13,8 @@ import {
   type OpResult,
   type Pre,
 } from '../opkit';
-import { createInstance, moveInstance, shuffleZone, type Position } from '@engine/core/zones';
-import { fireEvent } from '../triggers';
+import { createInstance, moveInstance, type Position } from '@engine/core/zones';
+import { fireEvent, shuffleWithTrigger } from '../triggers';
 import { poolCandidates, resolveDefIdSpec, sampleOne } from '../pools';
 import { matchesDefFilter } from '../select';
 
@@ -260,7 +260,9 @@ export function opRecruit(s: GameState, item: QueuedEffect, q: QueuedEffect[]): 
       moveInstance(s, iid, pid, toZone);
       log(s, 'recruit', { iid, from: fromZone, to: toZone }, pid);
     }
-    shuffleZone(s, pid, fromZone);
+    // B42: the source zone is shuffled afterwards, and that shuffle is a real
+    // shuffle event (C1).
+    shuffleWithTrigger(s, item, q, pid, fromZone);
   }
   return 'ok';
 }
@@ -296,9 +298,8 @@ export function opShuffle(s: GameState, item: QueuedEffect, q: QueuedEffect[]): 
   const players = resolveWho(s, node.who, item.player, rng);
   commitRng(s, rng);
   for (const pid of players) {
-    shuffleZone(s, pid, zone);
+    shuffleWithTrigger(s, item, q, pid, zone);
     log(s, 'shuffleZone', { zone }, pid);
-    fireEvent(s, q, item, 'onShuffle', null, pid);
   }
   return 'ok';
 }

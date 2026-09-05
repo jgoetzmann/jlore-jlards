@@ -49,12 +49,16 @@ export function expireShopTimers(state: GameState): void {
     if (pile.locks.length !== beforeLocks) {
       appendLog(state, 'unlock', null, { pileId, reason: 'expired' });
     }
+    // B56: a cost mod's `expiresOnTurn` is the last turn it still bites, so it
+    // survives that turn and goes here at the start of the next one. (A lock's
+    // `expiresOnTurn` is the first turn it is already gone, hence the `>` above
+    // and the `>=` here.)
     pile.costMods = pile.costMods.filter(
-      (m) => m.expiresOnTurn === null || m.expiresOnTurn > state.turn,
+      (m) => m.expiresOnTurn === null || m.expiresOnTurn >= state.turn,
     );
   }
   state.shop.globalCostMods = state.shop.globalCostMods.filter(
-    (m) => m.expiresOnTurn === null || m.expiresOnTurn > state.turn,
+    (m) => m.expiresOnTurn === null || m.expiresOnTurn >= state.turn,
   );
 }
 

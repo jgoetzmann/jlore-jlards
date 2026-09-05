@@ -7,6 +7,7 @@ import { evalAmount } from '../evaluate';
 import { commitRng, ctxFor, resolvePiles, resolveTargets, takeRng, type OpResult, type Pre } from '../opkit';
 import { isPileSelector } from '../select';
 import { fireEvent } from '../triggers';
+import { resetComboInPlace } from '@engine/systems/combo.js';
 
 function pileTops(s: GameState, pileIds: string[]): InstanceId[] {
   const out: InstanceId[] = [];
@@ -134,13 +135,15 @@ export function opSetKeyword(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   return 'ok';
 }
 
-/** B71: Crime Wave zeroes the combo counter mid-turn. */
+/**
+ * B71: Crime Wave zeroes the combo counter mid-turn. It must zero the *live*
+ * counter `comboCount` reads, not just the stored `player.combo` field, or the
+ * derived count keeps climbing off `playedThisTurn`.
+ */
 export function opResetCombo(s: GameState, item: QueuedEffect): OpResult {
   const node = item.node;
   if (node.op !== 'resetCombo') return 'ok';
-  const p = s.players[item.player];
-  if (!p) return 'ok';
-  p.combo = 0;
+  if (!resetComboInPlace(s, item.player)) return 'ok';
   log(s, 'resetCombo', {}, item.player);
   return 'ok';
 }

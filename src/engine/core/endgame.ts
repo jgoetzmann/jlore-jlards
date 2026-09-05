@@ -94,8 +94,17 @@ export function noteEndCondition(state: GameState, triggerer: PlayerId | null): 
   const res = evaluateEnd(state);
   if (!res.ended) return state;
 
-  // A "last player standing" or hard-turn end is immediate, not a lap of honour.
-  if (res.reason === 'lastPlayerStanding' || res.reason === 'hardEndTurn') {
+  // The lap of honour (B15) exists so that a *player-triggered* end — someone
+  // emptying a pile — still gives everyone equal turns. A clock-triggered end
+  // is already equal by construction, so extending it just makes the configured
+  // limit mean `x + playerCount`. Those finish immediately.
+  if (
+    res.reason === 'lastPlayerStanding' ||
+    res.reason === 'hardEndTurn' ||
+    res.reason === 'countdown' ||
+    res.reason === 'deathsDoor' ||
+    res.reason === 'doomsday'
+  ) {
     return finishGame(state, res.reason);
   }
 

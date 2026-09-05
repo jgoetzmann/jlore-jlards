@@ -115,12 +115,16 @@ export function resolvePrompt(
   if (prompt.id !== promptId) return state;
   if (prompt.player !== player) return state;
 
-  let picked = keys;
-  if (!isValidResolution(prompt, picked)) {
-    // Fall back to the timeout default rather than rejecting a live match.
-    picked = prompt.defaultKeys.filter((k) => validKeysFor(prompt).includes(k));
-    if (!isValidResolution(prompt, picked)) picked = validKeysFor(prompt).slice(0, prompt.min);
+  // B30: a resolve carrying a key that was never offered is rejected and leaves
+  // the prompt standing, per `error.style`. Substituting the timeout default
+  // here made a bogus resolve indistinguishable from a legitimate one — for a
+  // default Discover the substitution is exactly `[options[0].key]`. A timeout
+  // resolves by passing `prompt.defaultKeys` explicitly, which validates.
+  if (!isValidResolution(prompt, keys)) {
+    appendLog(state, 'resolveRejected', player, { promptId, keys, reason: 'keyNotOffered' });
+    return state;
   }
+  const picked = keys;
 
   let s = state;
   s.pending = null;

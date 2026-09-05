@@ -258,17 +258,11 @@ export function trashPile(state: GameState, pileId: PileId): GameState {
       });
       continue;
     }
-    next = moveInstance(next, iid, 'trash');
-    const after = next.instances[iid];
-    if (after && after.zone !== 'trash') {
-      next = {
-        ...next,
-        instances: {
-          ...next.instances,
-          [iid]: { ...after, zone: 'trash', pileId: undefined },
-        },
-      };
-    }
+    // `moveInstance` (core/zones) mutates the draft in place and returns void
+    // per Addendum A5. `next` is already a detached clone from `withPile`, so
+    // mutating it here is safe and no post-move fixup is needed: the move sets
+    // `zone`, `owner` and clears `pileId` itself.
+    moveInstance(next, iid, inst.owner, 'trash');
   }
   return appendLog(next, 'pileTrashed', { pileId, count: doomed.length });
 }

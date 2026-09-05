@@ -240,19 +240,37 @@ function applyNode(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pr
 // The queue
 // ---------------------------------------------------------------------------
 
+/**
+ * B37: the configured budget is taken literally, including 0 — a budget of 0
+ * resolves nothing at all. Only a missing, negative or non-finite value falls
+ * back to the default.
+ */
 function budget(s: GameState): number {
   const n = s.config && typeof s.config.effectNodeBudget === 'number' ? s.config.effectNodeBudget : 200;
-  return n > 0 ? n : 200;
+  return Number.isFinite(n) && n >= 0 ? n : 200;
 }
 
+/**
+ * B38: the boundary is exclusive. A node at exactly `recursionDepth` still
+ * resolves; only something deeper than that fizzles.
+ */
 function maxDepth(s: GameState): number {
   const n = s.config && typeof s.config.recursionDepth === 'number' ? s.config.recursionDepth : 8;
-  return n > 0 ? n : 8;
+  return Number.isFinite(n) && n >= 0 ? n : 8;
 }
 
-function runQueue(s: GameState, q: QueuedEffect[]): GameState {
+/** The entry depth a context resolves at, floored at 0. */
+function entryDepthOf(ctx: { depth: number }): number {
+  return Number.isFinite(ctx.depth) && ctx.depth > 0 ? Math.floor(ctx.depth) : 0;
+}
+
+/**
+ * `depthCap` is absolute: the entry depth plus `config.recursionDepth`, so a
+ * context handed in at exactly `recursionDepth` still gets its own nesting
+ * allowance while nesting inside one resolution stays capped (B38).
+ */
+function runQueue(s: GameState, q: QueuedEffect[], depthCap: number): GameState {
   const cap = budget(s);
-  const depthCap = maxDepth(s);
 
   while (q.length > 0) {
     if (s.pending) {
@@ -287,7 +305,7 @@ function runQueue(s: GameState, q: QueuedEffect[]): GameState {
   if (!s.pending && s.queue.length > 0) {
     const parked = s.queue;
     s.queue = [];
-    return runQueue(s, parked);
+    return runQueue(s, parked, depthCap);
   }
 
   return s;
@@ -316,6 +334,15 @@ export function resolveEffects(state: GameState, nodes: EffectNode[], ctx: Effec
   const s = cloneState(state);
   if (!nodes || nodes.length === 0) return s;
 
+  // B38: a context deeper than the cap resolves nothing and logs a fizzle. At
+  // exactly the cap it still resolves, boundary included.
+  const entryDepth = entryDepthOf(ctx);
+  const cap = maxDepth(s);
+  if (entryDepth > cap) {
+    log(s, 'fizzle', { reason: 'recursionDepth', depth: entryDepth, cap }, ctx.player);
+    return s;
+  }
+
   const items = itemsFor(nodes, ctx);
 
   if (s.pending) {
@@ -324,7 +351,7 @@ export function resolveEffects(state: GameState, nodes: EffectNode[], ctx: Effec
     return s;
   }
 
-  return runQueue(s, items);
+  return runQueue(s, items, entryDepth + cap);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +433,7 @@ export function resumeFromPrompt(state: GameState, keys: string[]): GameState {
 
   const parked = s.queue;
   s.queue = [];
-  return runQueue(s, q.concat(parked));
+  return runQueue(s, q.concat(parked), entryDepthOf(ctx) + maxDepth(s));
 }
 
 /** Convenience for callers holding only a player and a node list. */

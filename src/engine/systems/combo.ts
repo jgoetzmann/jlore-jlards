@@ -20,14 +20,32 @@ import type {
 } from '@engine/types';
 import { defOf, pushLog, tryGetCard, withInstance, withPlayer } from './internal';
 
-const OFFSET_KEY = 'comboOffset';
+/** Cards already played when the counter was last zeroed mid-turn. */
+export const COMBO_OFFSET_KEY = 'comboOffset';
+/** The turn that offset belongs to. A stale offset from an older turn is ignored. */
+export const COMBO_OFFSET_TURN_KEY = 'comboOffsetTurn';
+
+const OFFSET_KEY = COMBO_OFFSET_KEY;
+
+/**
+ * The live reset offset, or 0 when the stored one belongs to an earlier turn.
+ * Turn cleanup empties `playedThisTurn` but does not touch player counters, so
+ * the offset carries its own turn stamp rather than relying on being wiped.
+ */
+export function comboOffsetOf(state: GameState, player: PlayerId): number {
+  const p = state.players[player];
+  if (!p) return 0;
+  const stamp = p.counters[COMBO_OFFSET_TURN_KEY];
+  if (typeof stamp === 'number' && stamp !== state.turn) return 0;
+  const offset = p.counters[OFFSET_KEY] ?? 0;
+  return offset > 0 ? offset : 0;
+}
 
 /** Cards played this turn, after any mid-turn reset (B71). */
 export function comboCount(state: GameState, player: PlayerId): number {
   const p = state.players[player];
   if (!p) return 0;
-  const offset = p.counters[OFFSET_KEY] ?? 0;
-  return Math.max(0, p.playedThisTurn.length - offset);
+  return Math.max(0, p.playedThisTurn.length - comboOffsetOf(state, player));
 }
 
 /**
@@ -41,7 +59,7 @@ export function comboCount(state: GameState, player: PlayerId): number {
 export function comboAtPlay(state: GameState, player: PlayerId, iid: InstanceId): number {
   const p = state.players[player];
   if (!p) return 0;
-  const offset = p.counters[OFFSET_KEY] ?? 0;
+  const offset = comboOffsetOf(state, player);
   const idx = p.playedThisTurn.lastIndexOf(iid);
   if (idx < 0) return Math.max(1, p.playedThisTurn.length - offset + 1);
   return Math.max(0, idx + 1 - offset);
@@ -58,7 +76,7 @@ export function recordPlay(state: GameState, player: PlayerId, iid: InstanceId):
   const p = state.players[player];
   if (!p) return state;
   const played = [...p.playedThisTurn, iid];
-  const offset = p.counters[OFFSET_KEY] ?? 0;
+  const offset = comboOffsetOf(state, player);
   const combo = Math.max(0, played.length - offset);
   let next = withPlayer(state, player, (pl) => ({ ...pl, playedThisTurn: played, combo }));
   next = withInstance(next, iid, (inst) => ({ ...inst, playedOnTurn: next.turn }));
@@ -72,9 +90,27 @@ export function resetCombo(state: GameState, player: PlayerId): GameState {
   const next = withPlayer(state, player, (pl) => ({
     ...pl,
     combo: 0,
-    counters: { ...pl.counters, [OFFSET_KEY]: pl.playedThisTurn.length },
+    counters: {
+      ...pl.counters,
+      [OFFSET_KEY]: pl.playedThisTurn.length,
+      [COMBO_OFFSET_TURN_KEY]: state.turn,
+    },
   }));
   return pushLog(next, 'resetCombo', player, {});
+}
+
+/**
+ * The same reset, written straight onto a draft the interpreter is mutating
+ * (SPEC.md A5). `{op:'resetCombo'}` runs inside `resolveEffects`, which owns a
+ * draft and discards returned states, so it needs the in-place form.
+ */
+export function resetComboInPlace(state: GameState, player: PlayerId): boolean {
+  const p = state.players[player];
+  if (!p) return false;
+  p.combo = 0;
+  p.counters[OFFSET_KEY] = p.playedThisTurn.length;
+  p.counters[COMBO_OFFSET_TURN_KEY] = state.turn;
+  return true;
 }
 
 /** Start of turn: history and offset both clear (B71). */
@@ -83,6 +119,7 @@ export function clearComboForTurn(state: GameState, player: PlayerId): GameState
   if (!p) return state;
   const counters = { ...p.counters };
   delete counters[OFFSET_KEY];
+  delete counters[COMBO_OFFSET_TURN_KEY];
   return withPlayer(state, player, (pl) => ({
     ...pl,
     playedThisTurn: [],

@@ -18,6 +18,7 @@ import {
   type EffectContext,
 } from './runtime';
 import { evalCondition } from './evaluate';
+import { discardInstance, shuffleZone, trashInstance } from '@engine/core/zones';
 
 /** Events that only ever fire on the instance they happened to. */
 const SELF_EVENTS: ReadonlySet<TriggerEvent> = new Set<TriggerEvent>([
@@ -118,4 +119,62 @@ export function fireEvent(
       log(s, 'trigger', { event, iid, defId: i.defId }, owner);
     }
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Zone events (reconcile cluster C1)
+// ---------------------------------------------------------------------------
+//
+// The surviving `core/zones.ts` moves an instance without firing anything, so
+// the effects side wraps its own calls into it. These are the only places the
+// interpreter trashes, discards or shuffles, which is what keeps CN Developer,
+// Potato, Grapevine, Garlic, Chonker and the rest of the onTrash / onDiscard
+// cards alive on the effects path.
+
+/** Trash, then fire `onTrash` — only when the trash actually happened (B40). */
+export function trashWithTrigger(
+  s: GameState,
+  item: QueuedEffect,
+  q: QueuedEffect[],
+  iid: InstanceId,
+  actor?: PlayerId,
+): boolean {
+  const before = s.instances[iid];
+  const owner = actor ?? before?.owner ?? item.player;
+  const done = trashInstance(s, iid);
+  if (done) fireEvent(s, q, item, 'onTrash', iid, owner);
+  return done;
+}
+
+/**
+ * Discard, then fire `onDiscard`. A Temporary card is trashed by the discard
+ * (B11), so `onTrash` fires as well when the card ended up in the trash.
+ */
+export function discardWithTrigger(
+  s: GameState,
+  item: QueuedEffect,
+  q: QueuedEffect[],
+  iid: InstanceId,
+  actor?: PlayerId,
+): void {
+  const before = s.instances[iid];
+  if (!before) return;
+  const owner = actor ?? before.owner ?? item.player;
+  discardInstance(s, iid);
+  fireEvent(s, q, item, 'onDiscard', iid, owner);
+  const after = s.instances[iid];
+  if (after && after.zone === 'trash') fireEvent(s, q, item, 'onTrash', iid, owner);
+}
+
+/** Shuffle a zone, then fire the table-wide `onShuffle`. */
+export function shuffleWithTrigger(
+  s: GameState,
+  item: QueuedEffect,
+  q: QueuedEffect[],
+  player: PlayerId,
+  zone: Zone,
+): void {
+  shuffleZone(s, player, zone);
+  fireEvent(s, q, item, 'onShuffle', null, player);
 }

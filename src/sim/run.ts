@@ -22,6 +22,7 @@ import type {
   WinConditionKind,
 } from '@engine/types';
 import { createMatch, finalScores, isGameOver, reduce } from '@engine/index';
+import { countdownTarget } from '@engine/meta';
 import { botAction } from './bot';
 
 /** Hard turn ceiling for a simulated match (B112). */
@@ -189,6 +190,14 @@ export function simulateMatchDetailed(
 
   let state: GameState = createMatch(cfg, players, seed);
 
+  // B112: the run stops AT the ceiling, so a reported `turns` is never above it.
+  // A countdown match also stops on its own clock: `checkEndCondition` already
+  // calls the game over at `turn >= countdownTarget`, so every turn past that is
+  // padding. `countdownTarget` is the engine's own function, defaults included.
+  const clock = cfg.winCondition.kind === 'countdown' ? countdownTarget(state) : MAX_TURNS;
+  const turnLimit = Math.max(1, Math.min(MAX_TURNS, clock));
+  const turnLimitReason = turnLimit < MAX_TURNS ? 'countdown' : 'turnCap';
+
   const buysByCard: Record<CardDefId, number> = {};
   const discoverOffered: Record<CardDefId, number> = {};
   const discoverPicked: Record<CardDefId, number> = {};
@@ -219,14 +228,17 @@ export function simulateMatchDetailed(
   let lastActive = state.activePlayer;
   turnsTaken[lastActive] = (turnsTaken[lastActive] === undefined ? 0 : turnsTaken[lastActive]) + 1;
   let cappedOut = false;
+  let clockReason: string | null = null;
 
   while (!isGameOver(state) && !state.ended) {
-    if (state.turn > MAX_TURNS) {
-      cappedOut = true;
+    if (state.turn >= turnLimit) {
+      clockReason = turnLimitReason;
+      cappedOut = turnLimit >= MAX_TURNS;
       break;
     }
     if (steps >= MAX_STEPS) {
       cappedOut = true;
+      clockReason = 'stepCap';
       break;
     }
 
@@ -314,7 +326,13 @@ export function simulateMatchDetailed(
     for (const defId of Object.keys(owned)) bump(winnerBuys, defId, owned[defId]);
   }
 
-  const endReason = state.endReason ? state.endReason : cappedOut ? 'turnCap' : 'unknown';
+  const endReason = state.endReason
+    ? state.endReason
+    : clockReason
+      ? clockReason
+      : cappedOut
+        ? 'turnCap'
+        : 'unknown';
 
   return {
     seed,

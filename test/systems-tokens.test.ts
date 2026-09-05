@@ -216,7 +216,7 @@ describe('B64 - self-counting cards keep a per-player per-defId play count', () 
       'Journey to the Moon',
       'Wish Upon the Stars',
       'Coal',
-      'Runebinder',
+      'Runebinder of Jlore',
     ]) {
       expect(cardNamed(name), name).toBeDefined();
     }

@@ -536,3 +536,26 @@ being removed, so the catalog stays complete:
 The scorer weights: money needed to reach the next affordable pile, Actions
 remaining, VP gap to the leader, and Library height. Deterministic, seeded,
 sub-millisecond.
+
+### SB-41. Does a clock-triggered end condition get the lap of honour?
+
+**Resolved: no.** `countdown`, Death's Door, the Doomsday Counter, and any
+`hardEndTurn` finish the game **immediately**. Only a player-triggered end — a
+pile emptying — gets the B15 lap of honour.
+
+Reasoning: the lap exists so that when a *player* ends the game, everyone still
+gets equal turns. A clock-triggered end is already equal by construction, so
+extending it does nothing for fairness and instead makes `winCondition.x` mean
+`x + playerCount` — a Countdown match configured for 12 turns was ending on turn
+14 with 2 players. A turn limit that isn't the turn limit is worse than either
+rule applied consistently.
+
+Death's Door already read this way in the source doc ("the game ends at the end
+of turn `10 × playerCount`", no lap mentioned), so this makes the deliberate
+Countdown variant agree with its own anomaly counterpart.
+
+VP-threshold ends (`duel`, `crown`, Aim for the Moon, Heavy is the Crown) **keep
+the lap**, because those are player-triggered: one player crossing a threshold
+should not deny the others their turn in the round.
+
+Code: `noteEndCondition()` in `src/engine/core/endgame.ts`.

@@ -15,8 +15,8 @@ import { costOf, isLocked } from '@engine/shop';
 import { log, opponentsOf, tryGetCard } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { commitRng, ctxFor, resolvePiles, takeRng, type OpResult, type Pre } from '../opkit';
-import { createInstance, moveToPile, trashInstance } from '@engine/core/zones';
-import { fireEvent } from '../triggers';
+import { createInstance, moveToPile } from '@engine/core/zones';
+import { fireEvent, trashWithTrigger } from '../triggers';
 import { pileCost } from '../select';
 import { resolveDefIdSpec } from '../pools';
 
@@ -191,7 +191,7 @@ export function opTrashPile(s: GameState, item: QueuedEffect, q: QueuedEffect[],
   for (const pileId of piles) {
     const pile = s.shop.piles[pileId];
     if (!pile) continue;
-    for (const iid of pile.cards.slice()) trashInstance(s, iid);
+    for (const iid of pile.cards.slice()) trashWithTrigger(s, item, q, iid, item.player);
     log(s, 'trashPile', { pileId }, item.player);
     if (pile.cards.length === 0) fireEvent(s, q, item, 'onPileEmpty', null, item.player);
   }

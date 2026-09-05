@@ -66,14 +66,18 @@ export {
 // --- S-COMBO ----------------------------------------------------------------
 
 export {
+  COMBO_OFFSET_KEY,
+  COMBO_OFFSET_TURN_KEY,
   clearComboForTurn,
   comboAtPlay,
+  comboOffsetOf,
   comboClauseSuppressed,
   comboClausesOf,
   distinctPlayedThisTurn,
   meetsCombo,
   recordPlay,
   resetCombo,
+  resetComboInPlace,
   stealComboClause,
 } from './combo';
 
@@ -131,17 +135,20 @@ export {
 
 export {
   DESTROYS,
+  DONGFANG,
   ELEMENT_CYCLE,
   GENERATES,
   applyMultiplier,
   assignElement,
   consumeMultiplier,
   elementMultiplier,
+  elementMultiplierFor,
   elementOf,
   elementOfInstance,
   hasInPlay,
   multipliedGain,
   pendingMultiplier,
+  previousElementOf,
   queueMultiplyNext,
   recordElement,
 } from './multiplier';

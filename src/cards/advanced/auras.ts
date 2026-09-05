@@ -353,7 +353,7 @@ export const auras: AuraDefinition[] = [
         on: 'startOfTurn',
         effects: [
           { op: 'gain', stat: 'actions', amount: 1 },
-          { op: 'draw', amount: 3 },
+          { op: 'gain', stat: 'cards', amount: 3 },
         ],
       },
     ],
@@ -459,7 +459,7 @@ export const auras: AuraDefinition[] = [
       {
         on: 'startOfTurn',
         effects: [
-          { op: 'draw', amount: 3 },
+          { op: 'gain', stat: 'cards', amount: 3 },
           { op: 'gain', stat: 'actions', amount: 1 },
         ],
       },

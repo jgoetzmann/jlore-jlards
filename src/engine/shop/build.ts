@@ -40,6 +40,18 @@ export const POINTS_SHOP: { defId: CardDefId; cost: number }[] = [
   { defId: 'jlore', cost: 8 },
 ];
 
+/**
+ * B44 vs B54. The basic shops guarantee fixed prices, but a `costOverride` sits
+ * *above* the variant `costDelta` layer in B54's order and throws it away, so a
+ * pinned Gold pile could never be moved by Universal Buff!. A pile whose card
+ * already prints the guaranteed price therefore ships unpinned -- B44 holds
+ * from the printed cost -- and the pin appears only if the catalog ever drifts.
+ */
+function pinnedCostFor(defId: CardDefId, required: number): number | undefined {
+  const def = safeGetCard(defId);
+  return def && def.cost.money === required ? undefined : required;
+}
+
 function emptyPile(id: PileId, shop: Pile['shop'], startingSize: number, costOverride?: number): Pile {
   const pile: Pile = {
     id,
@@ -156,14 +168,14 @@ export function buildShop(state: GameState, rng: Rng): GameState {
   for (const entry of RESOURCE_SHOP) {
     if (!safeGetCard(entry.defId)) continue;
     const size = basicPileSize(entry.defId, players, scale);
-    next = addPile(next, 'resource', entry.defId, size, entry.cost);
+    next = addPile(next, 'resource', entry.defId, size, pinnedCostFor(entry.defId, entry.cost));
   }
 
   // --- B44: Points Shop, fixed contents and fixed prices ---
   for (const entry of POINTS_SHOP) {
     if (!safeGetCard(entry.defId)) continue;
     const size = basicPileSize(entry.defId, players, scale);
-    next = addPile(next, 'points', entry.defId, size, entry.cost);
+    next = addPile(next, 'points', entry.defId, size, pinnedCostFor(entry.defId, entry.cost));
   }
 
   // --- SB-14: the whole Prophet Shop, every match ---

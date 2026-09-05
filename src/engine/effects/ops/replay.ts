@@ -9,18 +9,62 @@ import type {
   CardDefinition,
   GameState,
   InstanceId,
+  PlayerId,
   QueuedEffect,
   StatKey,
 } from '@engine/types';
 import { childItems, log, pushFront, tryGetCard } from '../runtime';
 import { effectiveStats } from '@engine/systems/buff.js';
+import { elementMultiplierFor, elementOfInstance } from '@engine/systems/multiplier.js';
 import { hasKeyword } from '@engine/systems/keywords.js';
 import { resolveTargets, type OpResult, type Pre } from '../opkit';
 import { drawCards, moveInstance, trashInstance } from '@engine/core/zones';
-import { fireEvent } from '../triggers';
+import { fireEvent, trashWithTrigger } from '../triggers';
 import { matchesFilter } from '../select';
 
 const GUARD_PREFIX = '__playing:';
+const POD_PREFIX = '__playOnDraw:';
+
+/**
+ * C1 / SB-35: the surviving `core/zones.ts` moves cards without firing events,
+ * so the effects side fires them around its own calls into it.
+ *
+ * Every freshly drawn instance gets its `onDraw` triggers, and a PlayOnDraw
+ * card resolves immediately. The cascade is capped by `config.recursionDepth`
+ * and a card may not trigger its own Play-on-Draw again inside one chain.
+ */
+export function resolveDrawn(
+  s: GameState,
+  item: QueuedEffect,
+  q: QueuedEffect[],
+  player: PlayerId,
+  drawn: readonly InstanceId[],
+): void {
+  if (drawn.length === 0) return;
+  for (const iid of drawn) fireEvent(s, q, item, 'onDraw', iid, player);
+
+  const cap = typeof s.config.recursionDepth === 'number' ? s.config.recursionDepth : 8;
+  if (item.depth + 1 > cap) return;
+
+  for (const iid of drawn) {
+    const i = s.instances[iid];
+    if (!i || i.zone !== 'hand') continue;
+    if (!hasKeyword(s, iid, 'PlayOnDraw')) continue;
+    const guard = POD_PREFIX + iid;
+    if (item.vars[guard]) continue;
+    const child: QueuedEffect = {
+      node: item.node,
+      player: i.owner ?? player,
+      sourceIid: item.sourceIid,
+      depth: item.depth + 1,
+      multiplier: item.multiplier,
+      vars: { ...item.vars, [guard]: 1 },
+    };
+    log(s, 'playOnDraw', { iid, defId: i.defId }, child.player);
+    resolveCardPlay(s, child, q, iid, true);
+    if (s.pending) break;
+  }
+}
 
 function multiplierFor(s: GameState, player: string, base: number, stats: StatKey[] | undefined): number {
   const p = s.players[player];
@@ -62,7 +106,9 @@ function applyStatLine(
   if (typeof stats.actions === 'number') p.actions += scale(stats.actions);
   if (typeof stats.vp === 'number') p.vp += scale(stats.vp);
   if (typeof stats.prophet === 'number') p.prophet = Math.max(0, p.prophet + scale(stats.prophet));
-  if (typeof stats.cards === 'number' && stats.cards > 0) drawCards(s, player, scale(stats.cards));
+  if (typeof stats.cards === 'number' && stats.cards > 0) {
+    resolveDrawn(s, item, q, player, drawCards(s, player, scale(stats.cards)));
+  }
 }
 
 /**
@@ -99,7 +145,18 @@ export function resolveCardPlay(
     p.playCounts[i.defId] = prior + 1;
   }
 
-  const mult = multiplierFor(s, player, item.multiplier > 0 ? item.multiplier : 1, undefined);
+  // B74/B75: one hook. The queued NextCardMod factor and the Five Elements
+  // factor compose into the single number the stat line and the effect body
+  // both scale by, so `{op:'multiplyNext', factor:3}` and a generative element
+  // produce exactly the same result.
+  const mult =
+    multiplierFor(s, player, item.multiplier > 0 ? item.multiplier : 1, undefined) *
+    elementMultiplierFor(s, player, iid);
+
+  // The element on the table advances only after the pairing has been read.
+  const played = elementOfInstance(s, iid);
+  if (played !== null) p.lastElement = played;
+
   applyStatLine(s, item, q, player, iid, mult);
 
   const body = def.effects.concat(i.extraEffects);
@@ -135,9 +192,9 @@ export function opPlayCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     const alreadyInPlay = i.zone === 'play';
     const played = resolveCardPlay(s, item, q, iid, !alreadyInPlay);
     if (!played) continue;
-    if (node.thenTrash) trashInstance(s, iid);
+    if (node.thenTrash) trashWithTrigger(s, item, q, iid);
     else if (hasKeyword(s, iid, 'Flimsy') && !hasKeyword(s, iid, 'Indestructible')) {
-      trashInstance(s, iid);
+      trashWithTrigger(s, item, q, iid);
     }
   }
   return 'ok';
@@ -156,7 +213,7 @@ export function opReplayPlayedThisTurn(s: GameState, item: QueuedEffect, q: Queu
 
   for (const iid of targets) {
     resolveCardPlay(s, item, q, iid, false);
-    if (node.thenTrash) trashInstance(s, iid);
+    if (node.thenTrash) trashWithTrigger(s, item, q, iid);
   }
   log(s, 'replayPlayedThisTurn', { count: targets.length }, item.player);
   return 'ok';

@@ -72,6 +72,13 @@ export function codexSeedIds(): CardDefId[] {
 /**
  * B94 — per player. Two players at the same table get different options from
  * the same Discover.
+ *
+ * The only ids dropped here are this match's win-condition exclusions (SB-28 /
+ * SB-29, and only under a VP threshold). `excludeFromPools` is deliberately
+ * *not* filtered: a Known Universe is what the player has met (B92), and an
+ * Unfathomable card met in the Prophet Shop has been met. B33 is enforced where
+ * it belongs, on the pool sampler (`isPoolBlocked` in effects/pools.ts), which
+ * every Discover and random pull already runs through.
  */
 export function knownUniverse(state: GameState, player: PlayerId): CardDefId[] {
   const p = state.players[player];
@@ -87,13 +94,7 @@ export function knownUniverse(state: GameState, player: PlayerId): CardDefId[] {
   const out: CardDefId[] = [];
   for (const id of set) {
     if (banned.has(id)) continue;
-    let def;
-    try {
-      def = getCard(id);
-    } catch {
-      continue;
-    }
-    if (def.excludeFromPools) continue;
+    if (!definitionExists(id)) continue;
     out.push(id);
   }
   return out.sort();

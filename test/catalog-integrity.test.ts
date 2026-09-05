@@ -189,9 +189,9 @@ describe('cards — catalog integrity', () => {
     expect(cards.filter((c) => c.rarity === 'basic')).toHaveLength(7);
   });
 
-  test('B98: all 24 Prophet Shop cards are present', () => {
+  test('B98: all 23 Prophet Shop cards are present', () => {
     const prophet = cards.filter((c) => c.shop === 'prophet');
-    expect(prophet).toHaveLength(24);
+    expect(prophet).toHaveLength(23);
   });
 
   test('B99: every card with a Prophet cost carries both a threshold and a drain', () => {

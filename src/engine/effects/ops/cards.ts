@@ -5,7 +5,9 @@ import type { GameState, PlayerId, QueuedEffect, StatKey } from '@engine/types';
 import { log, resolveWho } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { ctxFor, resolveTargets, takeRng, commitRng, type OpResult, type Pre } from '../opkit';
-import { discardInstance, drawCards, millCards, trashInstance } from '@engine/core/zones';
+import { drawCards, millCards } from '@engine/core/zones';
+import { discardWithTrigger, trashWithTrigger } from '../triggers';
+import { resolveDrawn } from './replay';
 
 function addStat(s: GameState, player: PlayerId, stat: StatKey, delta: number): void {
   const p = s.players[player];
@@ -48,7 +50,9 @@ export function opGain(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
 
   for (const pid of players) {
     if (node.stat === 'cards') {
-      if (delta > 0) drawCards(s, pid, delta);
+      // C1: the zone layer no longer fires onDraw / Play-on-Draw, so the draw
+      // is wrapped here (SB-35).
+      if (delta > 0) resolveDrawn(s, item, q, pid, drawCards(s, pid, delta));
       continue;
     }
     addStat(s, pid, node.stat, delta);
@@ -67,7 +71,7 @@ export function opDraw(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const rng = takeRng(s);
   const players = resolveWho(s, node.who, item.player, rng);
   if (node.who === 'randomOpponent') commitRng(s, rng);
-  for (const pid of players) drawCards(s, pid, n);
+  for (const pid of players) resolveDrawn(s, item, q, pid, drawCards(s, pid, n));
   return 'ok';
 }
 
@@ -88,7 +92,7 @@ export function opDiscard(s: GameState, item: QueuedEffect, q: QueuedEffect[], p
   if (node.op !== 'discard') return 'ok';
   const targets = resolveTargets(s, item, q, node.target, pre, 'Discard');
   if (targets === null) return 'suspend';
-  for (const iid of targets) discardInstance(s, iid);
+  for (const iid of targets) discardWithTrigger(s, item, q, iid);
   return 'ok';
 }
 
@@ -108,7 +112,7 @@ export function opDiscardDownTo(s: GameState, item: QueuedEffect, q: QueuedEffec
     while (p.hand.length > target) {
       const iid = p.hand[p.hand.length - 1];
       const before = p.hand.length;
-      discardInstance(s, iid);
+      discardWithTrigger(s, item, q, iid, pid);
       if (p.hand.length >= before) {
         // The instance refused to leave the hand; stop rather than spin.
         break;
@@ -125,6 +129,6 @@ export function opTrash(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre
   if (node.op !== 'trash') return 'ok';
   const targets = resolveTargets(s, item, q, node.target, pre, 'Trash');
   if (targets === null) return 'suspend';
-  for (const iid of targets) trashInstance(s, iid);
+  for (const iid of targets) trashWithTrigger(s, item, q, iid);
   return 'ok';
 }

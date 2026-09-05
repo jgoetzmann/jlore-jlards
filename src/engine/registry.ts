@@ -47,8 +47,15 @@ function ensureBootstrap(): void {
   }
 }
 
+/**
+ * Addendum A3. Merges into the registry, overwriting by `id`, and never refuses
+ * or ignores a call made after first access -- tests mint inert definitions
+ * this way and Homebrew-style runtime definitions use the same door. The
+ * bootstrap runs first so registering before anybody reads the registry adds to
+ * the catalog instead of replacing it.
+ */
 export function registerCards(defs: CardDefinition[]): void {
-  bootstrapped = true;
+  ensureBootstrap();
   for (const def of defs) {
     if (!def || typeof def.id !== 'string') continue;
     if (!cardMap.has(def.id)) cardOrder.push(def.id);

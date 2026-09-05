@@ -77,10 +77,27 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
   function assignSeat(seatId: string): PlayerId | null {
     const existing = seats.get(seatId);
     if (existing) return existing;
-    const pid = nextFreeSeat();
+    // A seat id that is already a player id in this match claims itself, so a
+    // hotseat client (and the tests) address seats by the name the match uses.
+    const pid =
+      current.playerOrder.includes(seatId) && !claimed.has(seatId)
+        ? (seatId as PlayerId)
+        : nextFreeSeat();
     if (!pid) return null;
     seats.set(seatId, pid);
     claimed.add(pid);
+    return pid;
+  }
+
+  /**
+   * Where a seat's view is posted. A player that no client has claimed yet is
+   * addressed by its own player id, so the opening position is on the wire
+   * before anybody says hello (B109).
+   */
+  function addressOf(pid: PlayerId): string {
+    for (const [seatId, seated] of seats) {
+      if (seated === pid) return seatId;
+    }
     return pid;
   }
 
@@ -121,10 +138,15 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
       .catch(() => undefined);
   }
 
-  /** One filtered view per seat, after every state change. B109. */
+  /**
+   * One filtered view per seat in the match, after every state change (B109).
+   * The roster is `playerOrder`, never the set of clients that have said hello
+   * -- a seat nobody has claimed still gets its view, addressed to its player
+   * id, and no seat outside the match is ever addressed.
+   */
   function publishAll(): void {
     if (stopped) return;
-    for (const [seatId, pid] of seats) publishTo(seatId, pid);
+    for (const pid of current.playerOrder) publishTo(addressOf(pid), pid);
     lastPublishedSignature = signature();
     maybeSnapshot();
   }

@@ -76,6 +76,13 @@ function dispatch(s: GameState, action: GameAction): GameState {
     return logReject(s, 'malformedAction', null, {});
   }
 
+  // `start` is answered by `reduce` before a draft ever exists, so it cannot
+  // reach here. Rejecting it explicitly also narrows the union: `start` is the
+  // one variant with no `player`, and every branch below reads `action.player`.
+  if (action.type === 'start') {
+    return logReject(s, 'unexpectedStart', null, { action: action.type });
+  }
+
   if (s.ended) {
     return logReject(s, 'gameOver', actor, { action: action.type });
   }

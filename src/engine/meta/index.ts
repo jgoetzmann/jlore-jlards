@@ -9,7 +9,12 @@
 import type { AnomalyId, CardDefId, GameState, PlayerId } from '@engine/types';
 import type { Rng } from '@engine/rng';
 
-import { rollAnomaly as rollAnomalyImpl, applyAnomalySetup as applyAnomalySetupImpl } from './anomalies.js';
+import { makeRng } from '@engine/rng';
+import {
+  rollAnomaly as rollAnomalyImpl,
+  applyAnomalySetup as applyAnomalySetupImpl,
+  anomalyStartOfTurn as anomalyStartOfTurnImpl,
+} from './anomalies.js';
 import { checkEndCondition as checkEndConditionImpl } from './wincon.js';
 import { scoreFinal as scoreFinalImpl } from './scoring.js';
 import { knownUniverse as knownUniverseImpl, entireUniverse as entireUniverseImpl } from './codex.js';
@@ -53,9 +58,28 @@ export function entireUniverse(): CardDefId[] {
   return entireUniverseImpl();
 }
 
-/** B80 — the aura half of the start-of-turn window. */
+/**
+ * B80 — the meta slice's whole start-of-turn window, in order.
+ *
+ * `## Surface` gives this slice exactly one per-turn entry point, so the
+ * anomaly half of the window (B86-B89: Cash Injection at turn 5, the Battle
+ * Royale cull every 15 turns, the per-player first-turn grants) runs here too,
+ * ahead of the aura triggers. The core turn loop calls this after the stat
+ * reset (B3) and before any card trigger, which is the order B80 asks for.
+ *
+ * Randomness is drawn from `(seed, rngCursor)` and the advanced cursor is
+ * written back, so `reduce` stays pure (B2, SB-31). A match with no anomaly
+ * consumes no randomness and takes no branch here.
+ */
 export function auraStartOfTurn(state: GameState, player: PlayerId): GameState {
-  return auraStartOfTurnImpl(state, player);
+  let s = state;
+  if (s.anomaly !== null) {
+    const rng = makeRng(s.seed, s.rngCursor);
+    s = anomalyStartOfTurnImpl(s, player, rng);
+    const cursor = rng.cursor();
+    if (cursor !== s.rngCursor) s = { ...s, rngCursor: cursor };
+  }
+  return auraStartOfTurnImpl(s, player);
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +101,7 @@ export {
   fadingBlossomKeyword,
   getAnomaly,
   randomUniverseCards,
+  rollableAnomalyIds,
   MUTEX_GROUPS,
 } from './anomalies.js';
 export type { AnomalyDef, AnomalyGroup } from './anomalies.js';
@@ -114,7 +139,7 @@ export {
   VP_THRESHOLD_EXCLUSIONS,
 } from './codex.js';
 
-export { displayText, isMeowActive, meowify, MEOW_ANOMALY_ID } from './meow.js';
+export { applyMeowText, displayText, isMeowActive, meowify, MEOW_ANOMALY_ID } from './meow.js';
 
 export {
   deckDiamondCount,

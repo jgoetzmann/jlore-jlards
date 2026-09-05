@@ -10,7 +10,8 @@
  */
 import type { CardDefinition, CardDefId, EffectNode, GameState, PlayerId, Rarity } from '@engine/types';
 import { perfectCardFor, winningDeckFor } from '@engine/meta';
-import { fuseDefinitions } from '@engine/systems';
+import { fusedDefinition } from '@engine/systems';
+import { getCard } from '@engine/registry';
 import { rarityPullWeight } from '@engine/shop';
 
 /**
@@ -18,14 +19,17 @@ import { rarityPullWeight } from '@engine/shop';
  * prompt; a hit replaces the sampled pool with these ids.
  */
 export const simSubstitutes: Record<CardDefId, (state: GameState, player: PlayerId) => CardDefId[]> = {
-  zephrys: (state, player) => [perfectCardFor(state, player)],
+  zephrys: (state, player) => {
+    const pick = perfectCardFor(state, player);
+    return pick === null ? [] : [pick];
+  },
   second_time_around: (state, player) => winningDeckFor(state, player).slice(0, 3),
   infinite_realities: (state, player) => winningDeckFor(state, player),
 };
 
 /** SB-13 fusion hook: fuse the given component definitions into one card. */
 export function fuseForCard(components: CardDefId[]): CardDefinition {
-  return fuseDefinitions(components);
+  return fusedDefinition(components.map((id) => getCard(id)));
 }
 
 /** Hearthstone pack odds expressed over the shop's own rarity pull weights. */

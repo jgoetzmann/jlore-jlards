@@ -83,14 +83,14 @@ export function opDiscover(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
 
   log(s, 'discoverOffered', { defIds: offered, pick }, item.player);
 
-  if (offered.length <= pick) {
-    pushChosen(s, item, q, offered, node.then ?? []);
-    return 'ok';
-  }
-
+  // B31: a pool with fewer members than `count` offers what it holds - one card
+  // is still a one-option prompt, never a silent auto-pick and never three
+  // copies of the same card. `min` and `max` are both `pick`, clamped to what
+  // is actually on the table so the prompt is always satisfiable.
   const options: PromptOption[] = offered.map((defId, idx) =>
     optionForDef(defId, idx, node.displayAs),
   );
+  const want = Math.max(1, Math.min(pick, options.length));
 
   const prompt: Prompt = {
     id: promptId(s),
@@ -98,11 +98,11 @@ export function opDiscover(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     player: item.player,
     prompt: node.prompt ?? 'Discover',
     options,
-    min: pick,
-    max: pick,
+    min: want,
+    max: want,
     then: node.then ?? [],
     ctx: payloadFrom(item, 'discover', { node, then: node.then ?? [], perChoice: true }),
-    defaultKeys: options.slice(0, pick).map((o) => o.key),
+    defaultKeys: options.slice(0, want).map((o) => o.key),
   };
   return suspend(s, q, prompt);
 }

@@ -23,10 +23,26 @@ import { expiryTurnFor } from './locks';
 /** Floors default to 0 unless a card names its own ("Minimum (1)", "minimum 0"). */
 export const DEFAULT_COST_FLOOR = 0;
 
-/** A mod still bites while its named turn has not arrived. */
+/**
+ * B56. A cost mod's `expiresOnTurn` names the **last turn it still bites**: it
+ * applies for the whole of that turn and is swept when that turn ends. That is
+ * one turn earlier than a `PileLock`'s `expiresOnTurn`, which names the first
+ * turn the lock is already gone -- see `costModExpiryFor` below, which converts
+ * between the two conventions so both durations mean the same span of play.
+ */
 export function costModIsActive(state: GameState, mod: CostMod): boolean {
   if (mod.expiresOnTurn === null || mod.expiresOnTurn === undefined) return true;
-  return state.turn < mod.expiresOnTurn;
+  return state.turn <= mod.expiresOnTurn;
+}
+
+/**
+ * The last turn a mod of this duration still bites. `expiryTurnFor` returns the
+ * first turn a lock of the same duration is gone, so a cost mod's turn is one
+ * lower.
+ */
+export function costModExpiryFor(state: GameState, duration: Duration): number | null {
+  const gone = expiryTurnFor(state, duration);
+  return gone === null ? null : gone - 1;
 }
 
 function appliesToBuyer(mod: CostMod, buyer: PlayerId): boolean {
@@ -118,7 +134,7 @@ export function makeCostMod(
   const mod: CostMod = {
     id: `cm_${state.turn}_${state.logSeq}_${seed}`,
     floor: opts.floor ?? DEFAULT_COST_FLOOR,
-    expiresOnTurn: expiryTurnFor(state, duration),
+    expiresOnTurn: costModExpiryFor(state, duration),
     source,
   };
   if (opts.delta !== undefined) mod.delta = opts.delta;

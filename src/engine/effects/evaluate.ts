@@ -18,6 +18,108 @@ export function needsCounts(expr: string): boolean {
   return expr.indexOf('count') >= 0;
 }
 
+// ---------------------------------------------------------------------------
+// Comparison operators (SPEC.md Addendum A1)
+// ---------------------------------------------------------------------------
+
+/**
+ * `Condition.expr` and `Amount.expr` gain `> >= < <= == !=`, each yielding 1 or
+ * 0, so a card can say `handSize > 3` at all. A condition is true when its
+ * expression is non-zero, which is exactly what `evalCondition` already did, so
+ * every expression authored before this stays valid.
+ *
+ * Comparisons bind looser than every arithmetic operator and associate left to
+ * right. `evaluateExpr` itself stays arithmetic-only and still throws on a
+ * comparison character (B28), so this lives here rather than in the shared
+ * evaluator: the split happens before the arithmetic parser ever sees the text.
+ */
+const COMPARISONS: readonly string[] = ['>=', '<=', '==', '!=', '>', '<'];
+
+interface Comparison {
+  index: number;
+  op: string;
+}
+
+/** The last top-level comparison operator in `src`, or null when there is none. */
+function findComparison(src: string): Comparison | null {
+  let depth = 0;
+  let found: Comparison | null = null;
+  for (let i = 0; i < src.length; i += 1) {
+    const c = src.charAt(i);
+    if (c === '(') {
+      depth += 1;
+      continue;
+    }
+    if (c === ')') {
+      depth -= 1;
+      continue;
+    }
+    if (depth !== 0) continue;
+    const two = src.slice(i, i + 2);
+    if (two === '>=' || two === '<=' || two === '==' || two === '!=') {
+      found = { index: i, op: two };
+      i += 1;
+      continue;
+    }
+    if (c === '>' || c === '<') found = { index: i, op: c };
+  }
+  return found;
+}
+
+/** True when the whole string is one redundant parenthesised group. */
+function isWrapped(src: string): boolean {
+  const t = src.trim();
+  if (t.length < 2 || t.charAt(0) !== '(' || t.charAt(t.length - 1) !== ')') return false;
+  let depth = 0;
+  for (let i = 0; i < t.length; i += 1) {
+    const c = t.charAt(i);
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) return i === t.length - 1;
+    }
+  }
+  return false;
+}
+
+function compare(op: string, a: number, b: number): number {
+  if (op === '>') return a > b ? 1 : 0;
+  if (op === '<') return a < b ? 1 : 0;
+  if (op === '>=') return a >= b ? 1 : 0;
+  if (op === '<=') return a <= b ? 1 : 0;
+  if (op === '==') return a === b ? 1 : 0;
+  return a !== b ? 1 : 0;
+}
+
+/**
+ * `evaluateExpr` plus A1's comparison operators. Everything without a
+ * comparison goes straight through to the shared evaluator untouched.
+ */
+export function evalExprValue(expr: string, vars: Record<string, number>): number {
+  const found = findComparison(expr);
+  if (!found) {
+    if (isWrapped(expr)) {
+      const inner = expr.trim().slice(1, -1);
+      if (findComparison(inner)) return evalExprValue(inner, vars);
+    }
+    return evaluateExpr(expr, vars);
+  }
+  const left = expr.slice(0, found.index);
+  const right = expr.slice(found.index + found.op.length);
+  if (left.trim() === '' || right.trim() === '') {
+    throw new Error('comparison is missing an operand: ' + expr);
+  }
+  return compare(found.op, evalExprValue(left, vars), evalExprValue(right, vars));
+}
+
+/** True when an expression mentions a comparison operator at all. */
+export function hasComparison(expr: string): boolean {
+  for (const op of COMPARISONS) {
+    if (expr.indexOf(op) >= 0) return true;
+  }
+  return false;
+}
+
 /** The merged variable record an expression sees. */
 export function evalVars(state: GameState, ctx: EffectContext, expr?: string): Record<string, number> {
   const withCounts = expr ? needsCounts(expr) : false;
@@ -28,7 +130,7 @@ export function evalAmount(state: GameState, amount: Amount, ctx: EffectContext)
   if (typeof amount === 'number') return Number.isFinite(amount) ? amount : 0;
   if (!amount || typeof amount !== 'object' || typeof amount.expr !== 'string') return 0;
   try {
-    const v = evaluateExpr(amount.expr, evalVars(state, ctx, amount.expr));
+    const v = evalExprValue(amount.expr, evalVars(state, ctx, amount.expr));
     return Number.isFinite(v) ? v : 0;
   } catch {
     // Authoring errors are caught by the catalog validator. At the table a bad
@@ -71,7 +173,7 @@ export function evalCondition(state: GameState, cond: Condition, ctx: EffectCont
   if (typeof cond.expr === 'string') {
     let v = 0;
     try {
-      v = evaluateExpr(cond.expr, evalVars(state, ctx, cond.expr));
+      v = evalExprValue(cond.expr, evalVars(state, ctx, cond.expr));
     } catch {
       return false;
     }

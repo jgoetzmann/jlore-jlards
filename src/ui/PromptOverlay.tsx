@@ -94,10 +94,13 @@ export function PromptOverlay({
     );
   }
 
-  const ordering = ORDERING_TYPES.has(pending.type);
-  const min = typeof pending.min === 'number' ? pending.min : 1;
-  const max = typeof pending.max === 'number' ? pending.max : Math.max(min, 1);
-  const required = ordering ? pending.options.length : min;
+  // The union is narrowed once, into a const, so every closure below sees a Prompt.
+  const prompt: Prompt = pending;
+
+  const ordering = ORDERING_TYPES.has(prompt.type);
+  const min = typeof prompt.min === 'number' ? prompt.min : 1;
+  const max = typeof prompt.max === 'number' ? prompt.max : Math.max(min, 1);
+  const required = ordering ? prompt.options.length : min;
   const ready = picked.length >= required && picked.length <= Math.max(max, required);
 
   function toggle(key: string): void {
@@ -113,23 +116,23 @@ export function PromptOverlay({
   }
 
   function submit(keys: string[]): void {
-    onAction({ type: 'resolve', player: playerId, promptId: pending.id, keys });
+    onAction({ type: 'resolve', player: playerId, promptId: prompt.id, keys });
   }
 
   return (
-    <div className={`prompt-overlay prompt-type-${pending.type}`}>
+    <div className={`prompt-overlay prompt-type-${prompt.type}`}>
       <div className="prompt-card">
-        <h3 className="prompt-title">{pending.prompt || promptTitle(pending.type)}</h3>
+        <h3 className="prompt-title">{prompt.prompt || promptTitle(prompt.type)}</h3>
         <div className="prompt-meta">
           {ordering
-            ? `Click all ${pending.options.length} in order`
+            ? `Click all ${prompt.options.length} in order`
             : min === max
               ? `Pick ${min}`
               : `Pick ${min}–${max}`}
         </div>
 
         <div className="prompt-options">
-          {pending.options.map((opt) => (
+          {prompt.options.map((opt) => (
             <OptionButton
               key={opt.key}
               option={opt}
@@ -138,7 +141,7 @@ export function PromptOverlay({
               onToggle={() => toggle(opt.key)}
             />
           ))}
-          {pending.options.length === 0 && (
+          {prompt.options.length === 0 && (
             <div className="prompt-none">no options — confirm to continue</div>
           )}
         </div>
@@ -147,7 +150,7 @@ export function PromptOverlay({
           <button
             type="button"
             className="prompt-confirm"
-            disabled={pending.options.length > 0 && !ready}
+            disabled={prompt.options.length > 0 && !ready}
             onClick={() => submit(picked)}
           >
             Confirm
@@ -157,11 +160,11 @@ export function PromptOverlay({
               Skip
             </button>
           )}
-          {pending.defaultKeys.length > 0 && (
+          {prompt.defaultKeys.length > 0 && (
             <button
               type="button"
               className="prompt-default"
-              onClick={() => submit(pending.defaultKeys)}
+              onClick={() => submit(prompt.defaultKeys)}
             >
               Take default
             </button>

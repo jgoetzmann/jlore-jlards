@@ -27,6 +27,10 @@ import { pushLog, withPlayer } from './internal';
 // Five Elements (B75)
 // ---------------------------------------------------------------------------
 
+/** Dongfang Youxi Sheji, snake_case of the display name (SPEC.md A2). */
+export const DONGFANG: string = 'dongfang_youxi_sheji';
+
+
 /** Generative cycle: Wood feeds Fire, Fire feeds Earth, and so on round. */
 export const GENERATES: Record<Element, Element> = {
   wood: 'fire',
@@ -79,6 +83,51 @@ export function elementOfInstance(state: GameState, iid: InstanceId): Element | 
 export function recordElement(state: GameState, player: PlayerId, element: Element | null): GameState {
   if (!state.players[player]) return state;
   return withPlayer(state, player, (p) => ({ ...p, lastElement: element }));
+}
+
+/**
+ * The element that was on the table *before* `iid` was played.
+ *
+ * `player.lastElement` is advanced the moment a card reaches the play area, so
+ * by the time a stat line or an effect body resolves it already names the card
+ * currently resolving, not the one before it. The ordered play history is the
+ * honest source: walk back from `iid` to the nearest earlier card that carries
+ * an element. Falls back to `lastElement` for an effect with no source card,
+ * which is the right answer when nothing is mid-play.
+ */
+export function previousElementOf(
+  state: GameState,
+  player: PlayerId,
+  iid: InstanceId | null,
+): Element | null {
+  const p = state.players[player];
+  if (!p) return null;
+  if (iid === null) return p.lastElement;
+  const at = p.playedThisTurn.lastIndexOf(iid);
+  if (at < 0) return p.lastElement;
+  for (let k = at - 1; k >= 0; k -= 1) {
+    const earlier = elementOfInstance(state, p.playedThisTurn[k]);
+    if (earlier !== null) return earlier;
+  }
+  // Nothing earlier this turn carries an element: fall back to what carried
+  // over from an earlier turn, unless that is this card's own element.
+  const own = elementOfInstance(state, iid);
+  return p.lastElement === own ? null : p.lastElement;
+}
+
+/**
+ * The Five Elements factor for the card `iid` resolving right now (B75).
+ * Returns 1 whenever Dongfang Youxi Sheji is not the match's anomaly, so every
+ * caller can multiply by it unconditionally.
+ */
+export function elementMultiplierFor(
+  state: GameState,
+  player: PlayerId,
+  iid: InstanceId | null,
+): number {
+  if (state.anomaly !== DONGFANG) return 1;
+  if (iid === null) return 1;
+  return elementMultiplier(previousElementOf(state, player, iid), elementOfInstance(state, iid));
 }
 
 // ---------------------------------------------------------------------------
@@ -151,9 +200,7 @@ export function pendingMultiplier(
   if (hasInPlay(state, player, HONEST_LIVING) && (stat === null || stat === 'money')) mult *= 2;
 
   // 6. Five Elements. Applied last because ×0 must survive everything above it.
-  if (state.anomaly === 'dongfang_youxi_sheji' && iid !== null) {
-    mult *= elementMultiplier(p.lastElement, elementOfInstance(state, iid));
-  }
+  mult *= elementMultiplierFor(state, player, iid);
 
   return mult;
 }

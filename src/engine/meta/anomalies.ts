@@ -36,6 +36,7 @@ import { cloneState } from '@engine/core/clone.js';
 import { makeInstance, pushLog, withPlayer, livePlayers } from './util.js';
 import { entireUniverse, stripExcludedFromShop, noteSeenAll } from './codex.js';
 import { manifestAura } from './auras.js';
+import { applyMeowText, MEOW_ANOMALY_ID } from './meow.js';
 import { liveVp } from './scoring.js';
 
 export type AnomalyGroup =
@@ -140,14 +141,25 @@ export function canCombine(a: AnomalyId, b: AnomalyId): boolean {
   return !MUTEX_GROUPS.includes(da.group);
 }
 
+/** Anomalies the blind roller may return — see `rollAnomaly`. */
+export function rollableAnomalyIds(): AnomalyId[] {
+  return anomalies.filter((a) => a.minPlayers <= 1).map((a) => a.id);
+}
+
 /**
  * B81 — one roll, one anomaly, or null. `chance` is the probability an anomaly
  * rolls at all (§8.1's interim 30%).
+ *
+ * The signature carries no seat count, so the roll is restricted to anomalies
+ * that are legal at every table size. Battle Royale needs 3+ seats (B88) and
+ * therefore has to be asked for by name through `createMatch`'s `anomaly`
+ * argument; rolling it blind would produce a match whose anomaly is silently
+ * swapped out at 2 seats.
  */
 export function rollAnomaly(rng: Rng, chance: number): AnomalyId | null {
   const roll = rng.next();
   if (roll >= chance) return null;
-  const ids = anomalyIds();
+  const ids = rollableAnomalyIds();
   if (ids.length === 0) return null;
   return rng.pick(ids);
 }
@@ -196,6 +208,11 @@ function replaceDeck(
   const p = next.players[player];
   if (!p) return state;
 
+  // Setup deals the opening hand after the anomaly patch, so at match start
+  // there is nothing in hand yet and nothing to redeal. When this runs against
+  // an already-dealt match, give the player back the hand size they held.
+  const handSize = p.hand.length;
+
   for (const iid of [...p.library, ...p.hand, ...p.gy, ...p.play]) {
     delete next.instances[iid];
   }
@@ -212,7 +229,8 @@ function replaceDeck(
   }
   // makeInstance returns fresh top-level objects; re-point the player array.
   next = withPlayer(next, player, (q) => ({ ...q, library: rng.shuffle(made) }));
-  next = drawCards(next, player, OPENING_HAND);
+  // `drawCards` returns the ids it drew and moves them on the state in place.
+  if (handSize > 0) drawCards(next, player, Math.min(handSize, made.length));
   return pushLog(next, 'startingDeckReplaced', { defIds }, player);
 }
 
@@ -401,7 +419,9 @@ export function applyAnomalySetup(state: GameState, anomalyId: AnomalyId, rng: R
 
   // --- other --------------------------------------------------------------
   if (id === 'dongfang_youxi_sheji') next = assignElements(next, rng);
-  // MEOW MEOW MEOW is display-only: nothing to patch (see meow.ts).
+  // B89 — MEOW MEOW MEOW is display-only: it rewrites the text every view
+  // renders and touches no cost, stat, keyword or effect (see meow.ts).
+  if (id === MEOW_ANOMALY_ID) next = applyMeowText(next);
 
   // SB-28 / SB-29: VP-threshold matches drop Prophesized Jlore and Mercenary 280.
   next = stripExcludedFromShop(next);
@@ -435,7 +455,8 @@ export function applyTurnModifiers(state: GameState, player: PlayerId): GameStat
     vp: q.vp + (mod.vp ?? 0),
   }));
   const cards = mod.cards ?? 0;
-  if (cards > 0) next = drawCards(next, player, cards);
+  // `drawCards` mutates the draft and returns the drawn ids, not a state.
+  if (cards > 0) drawCards(next, player, cards);
   if (cards < 0) next = discardRandomFromHand(next, player, -cards);
   return next;
 }
@@ -475,8 +496,16 @@ export function anomalyStartOfTurn(state: GameState, player: PlayerId, rng: Rng)
     next = battleRoyaleTick(next);
   }
 
+  // B89 — instances minted after setup have no filtered text yet.
+  if (next.anomaly === MEOW_ANOMALY_ID) next = applyMeowText(next);
+
+  // Turn 1 is already under way when the anomaly is stamped onto the match
+  // (`createMatch` opens it), so the per-player grants start from turn 2 and the
+  // opening seat collects its own one lap later. Firing on turn 1 instead would
+  // hand the opening seat an aura or a card that no other seat has yet, and B90
+  // reads the board the moment `createMatch` returns.
   const p = next.players[player];
-  if (p && !p.counters.anomalyFirstTurnDone) {
+  if (p && next.turn > 1 && !p.counters.anomalyFirstTurnDone) {
     next = withPlayer(next, player, (q) => ({
       ...q,
       counters: { ...q.counters, anomalyFirstTurnDone: 1 },
