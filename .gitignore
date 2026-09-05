@@ -1,0 +1,7 @@
+.fullsend/
+node_modules/
+dist/
+.vercel/
+*.local
+.env
+telemetry/
