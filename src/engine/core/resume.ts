@@ -12,6 +12,13 @@ import { appendLog } from './log.js';
 import { makeContext, runEffects } from './triggers.js';
 import { createInstance } from './zones.js';
 
+/**
+ * How many prompts one player may resolve in a single turn before the chain is
+ * treated as a cycle and fizzled. Generous: a Discover-heavy turn spends fewer
+ * than a dozen.
+ */
+const PROMPT_BUDGET_PER_TURN = 60;
+
 /** Keys the player is allowed to send back for a pending prompt. */
 export function validKeysFor(prompt: Prompt): string[] {
   return prompt.options.map((o) => o.key);
@@ -125,6 +132,27 @@ export function resolvePrompt(
     return state;
   }
   const picked = keys;
+
+  // Cycle guard. `config.effectNodeBudget` counts nodes within one resolution,
+  // but every resume starts a fresh one — so a card whose prompt leads to
+  // another prompt can loop forever without ever exhausting anything, which is
+  // the one path the depth cap does not cover. Prompts are per-turn and a
+  // Discover-heavy turn uses well under a dozen, so the ceiling only bites on a
+  // genuine cycle. The turn stamp is needed because the turn loop clears
+  // `playedThisTurn` but not player counters.
+  const guard = state.players[player];
+  if (guard) {
+    const stamped = guard.counters['promptTurn'] === state.turn;
+    const used = (stamped ? (guard.counters['promptsThisTurn'] ?? 0) : 0) + 1;
+    guard.counters['promptTurn'] = state.turn;
+    guard.counters['promptsThisTurn'] = used;
+    if (used > PROMPT_BUDGET_PER_TURN) {
+      state.pending = null;
+      state.queue = [];
+      appendLog(state, 'promptFizzle', player, { promptId, used, cap: PROMPT_BUDGET_PER_TURN });
+      return state;
+    }
+  }
 
   let s = state;
   s.pending = null;

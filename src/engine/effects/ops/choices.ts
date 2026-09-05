@@ -189,7 +189,15 @@ export function opChoose(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
     min: 1,
     max: 1,
     then: [],
-    ctx: payloadFrom(item, 'choose', { node }),
+    // The resume path reads the picked branch's effects off `optionEffects`,
+    // keyed by the same index string used for the option keys. Without this a
+    // `{op:'choose'}` prompt resolves to nothing and ~17 card clauses across a
+    // dozen cards (Archivist, Jalshi, Night on the Town, Plandemic, Throttle
+    // Markets, The Curator, ...) silently do half of what they print.
+    ctx: payloadFrom(item, 'choose', {
+      node,
+      optionEffects: Object.fromEntries(options.map((o, i) => [String(i), o.effects])),
+    }),
     defaultKeys: ['0'],
   };
   return suspend(s, q, prompt);
