@@ -10,7 +10,8 @@
 
 import type { CardDefId, GameState, PlayerId, Rarity } from '@engine/types';
 import { allCards, getCard } from '@engine/registry';
-import { cloneState, pushLog } from './util.js';
+import { cloneState } from '@engine/core/clone.js';
+import { pushLog } from './util.js';
 
 /** SB-28 / SB-29: these two are pulled under any VP-threshold win condition. */
 export const VP_THRESHOLD_EXCLUSIONS: readonly CardDefId[] = ['prophesized_jlore', 'mercenary_280'];

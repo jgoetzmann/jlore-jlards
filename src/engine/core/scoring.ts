@@ -13,7 +13,8 @@
  */
 
 import type { GameState, InstanceId, PlayerId } from '@engine/types';
-import { deckOf, printedVp, safeDef } from './zones.js';
+import { statOf } from '@engine/systems';
+import { deckOf, safeDef } from './zones.js';
 
 export function deckSizeOf(state: GameState, player: PlayerId): number {
   return deckOf(state, player).length;
@@ -29,7 +30,7 @@ export function turnsTakenBy(state: GameState, player: PlayerId): number {
 export function vpOnInstance(state: GameState, iid: InstanceId): number {
   const inst = state.instances[iid];
   if (!inst) return 0;
-  let total = printedVp(state, iid);
+  let total = statOf(state, iid, 'vp');
   total += inst.counters['vp'] ?? 0;
   // Ascendant Spread and friends bank their real value in `secret`.
   if (inst.secret && typeof inst.secret['vp'] === 'number') total += inst.secret['vp'];

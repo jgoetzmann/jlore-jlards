@@ -47,7 +47,7 @@ import {
   unique,
   withInstance,
 } from './internal';
-import { moveInstance } from './zoneops';
+import { moveInstance } from '@engine/core/zones';
 
 /** The card that refuses to fuse. */
 export const CHOPPED_CHUZZ: CardDefId = 'chopped_chuzz';
@@ -151,7 +151,7 @@ export function fuseInstances(state: GameState, iids: InstanceId[]): GameState {
   const chuzz = present.filter((iid) => next.instances[iid].defId === CHOPPED_CHUZZ);
   const components = present.filter((iid) => next.instances[iid].defId !== CHOPPED_CHUZZ);
   for (const iid of chuzz) {
-    next = moveInstance(next, iid, next.instances[iid].owner, 'trash');
+    moveInstance(next, iid, next.instances[iid].owner, 'trash');
     next = pushLog(next, 'fuseRefused', next.instances[iid].owner, { iid, defId: CHOPPED_CHUZZ });
   }
 
@@ -212,7 +212,7 @@ export function fuseInstances(state: GameState, iids: InstanceId[]): GameState {
   }));
 
   for (const iid of consumed) {
-    next = moveInstance(next, iid, next.instances[iid].owner, 'aside');
+    moveInstance(next, iid, next.instances[iid].owner, 'aside');
   }
 
   return pushLog(next, 'fuse', next.instances[host].owner, {

@@ -13,19 +13,32 @@ import {
   type OpResult,
   type Pre,
 } from '../opkit';
-import {
-  createInstance,
-  moveInstance,
-  noteCodex,
-  shuffleZone,
-  sortLibraryByCost,
-  type Position,
-} from '../zones';
+import { createInstance, moveInstance, shuffleZone, type Position } from '@engine/core/zones';
 import { fireEvent } from '../triggers';
 import { poolCandidates, resolveDefIdSpec, sampleOne } from '../pools';
 import { matchesDefFilter } from '../select';
 
 const OWNED: Zone[] = ['library', 'hand', 'gy', 'play'];
+
+/** Add a defId to a player's codex the first time they meet it (B92). */
+function noteCodex(s: GameState, player: string, defId: CardDefId): void {
+  const p = s.players[player];
+  if (!p) return;
+  if (p.codex.indexOf(defId) < 0) p.codex.push(defId);
+}
+
+function sortLibraryByCost(s: GameState, player: string, descending: boolean): void {
+  const p = s.players[player];
+  if (!p) return;
+  const priceOf = (iid: InstanceId): number => {
+    const i = s.instances[iid];
+    return i ? defCost(s, i.defId) : 0;
+  };
+  p.library = p.library
+    .slice()
+    .sort((a, b) => (descending ? priceOf(b) - priceOf(a) : priceOf(a) - priceOf(b)));
+  log(s, 'sortLibrary', { player, descending }, player);
+}
 
 export function opMoveTo(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre): OpResult {
   const node = item.node;
@@ -36,7 +49,7 @@ export function opMoveTo(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
     const i = s.instances[iid];
     if (!i) continue;
     const owner = OWNED.indexOf(node.zone) >= 0 ? i.owner ?? item.player : i.owner;
-    moveInstance(s, iid, node.zone, { owner, position: node.position as Position | undefined });
+    moveInstance(s, iid, owner, node.zone, node.position as Position | undefined);
     log(s, 'moveTo', { iid, defId: i.defId, zone: node.zone }, owner);
   }
   return 'ok';
@@ -56,12 +69,12 @@ export function opCreateCard(s: GameState, item: QueuedEffect, q: QueuedEffect[]
     for (let k = 0; k < count; k += 1) {
       const defId = resolveDefIdSpec(s, node.defId, { ...ctx, player: pid }, rng);
       if (!defId) continue;
-      const iid = createInstance(s, defId, OWNED.indexOf(node.to) >= 0 ? pid : null, node.to, {
-        keywords: node.keywords,
-        counters: node.counters,
-        statDelta: node.statDelta,
-        position: node.position as Position | undefined,
-      });
+      const made = createInstance(s, defId, OWNED.indexOf(node.to) >= 0 ? pid : null, node.to);
+      const iid = made.iid;
+      if (node.keywords) made.addedKeywords = [...node.keywords];
+      if (node.counters) made.counters = { ...node.counters };
+      if (node.statDelta) made.statDelta = { ...node.statDelta };
+      if (node.position) moveInstance(s, iid, made.owner, node.to, node.position as Position);
       noteCodex(s, pid, defId);
       const p = s.players[pid];
       if (p) p.cardsGainedThisTurn += 1;
@@ -92,7 +105,7 @@ export function opGainCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
       for (let k = 0; k < count; k += 1) {
         const defId = sampleOne(s, (node.from as { pool: PoolSpec }).pool, { ...ctx, player: pid }, rng);
         if (!defId) continue;
-        const iid = createInstance(s, defId, OWNED.indexOf(node.to) >= 0 ? pid : null, node.to);
+        const iid = createInstance(s, defId, OWNED.indexOf(node.to) >= 0 ? pid : null, node.to).iid;
         noteCodex(s, pid, defId);
         const p = s.players[pid];
         if (p) p.cardsGainedThisTurn += 1;
@@ -124,7 +137,7 @@ export function opGainCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
         p.money -= price;
       }
 
-      moveInstance(s, iid, node.to, { owner: OWNED.indexOf(node.to) >= 0 ? pid : null });
+      moveInstance(s, iid, OWNED.indexOf(node.to) >= 0 ? pid : null, node.to);
       noteCodex(s, pid, i.defId);
       const p2 = s.players[pid];
       if (p2) p2.cardsGainedThisTurn += 1;
@@ -152,10 +165,10 @@ export function opCopyCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     const src = s.instances[iid];
     if (!src) continue;
     const keywords = src.addedKeywords.concat(node.keywords ?? []);
-    const copyIid = createInstance(s, src.defId, OWNED.indexOf(node.to) >= 0 ? owner : null, node.to, {
-      keywords: uniq(keywords),
-      statDelta: { ...src.statDelta },
-    });
+    const copy = createInstance(s, src.defId, OWNED.indexOf(node.to) >= 0 ? owner : null, node.to);
+    const copyIid = copy.iid;
+    copy.addedKeywords = uniq(keywords);
+    copy.statDelta = { ...src.statDelta };
     noteCodex(s, owner, src.defId);
     const p = s.players[owner];
     if (p) p.cardsGainedThisTurn += 1;
@@ -244,7 +257,7 @@ export function opRecruit(s: GameState, item: QueuedEffect, q: QueuedEffect[]): 
       if (matchesInstance(s, iid, node.filter)) found.push(iid);
     }
     for (const iid of found) {
-      moveInstance(s, iid, toZone, { owner: pid });
+      moveInstance(s, iid, pid, toZone);
       log(s, 'recruit', { iid, from: fromZone, to: toZone }, pid);
     }
     shuffleZone(s, pid, fromZone);

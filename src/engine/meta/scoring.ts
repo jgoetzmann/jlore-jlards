@@ -21,6 +21,7 @@ import type {
 } from '@engine/types';
 import { getCard } from '@engine/registry';
 import { evalAmount } from '@engine/effects';
+import { statOf } from '@engine/systems/buff.js';
 import { deckIidsOf } from './util.js';
 
 export const CONSTELLATION_ID: CardDefId = 'constellation';
@@ -36,15 +37,6 @@ function defOf(defId: CardDefId): CardDefinition | null {
 
 export function isEndOfGame(def: CardDefinition): boolean {
   return def.tags.includes('EndOfGame');
-}
-
-/** Printed VP for one instance: definition + match variant + instance delta. */
-export function printedVp(state: GameState, iid: InstanceId): number {
-  const inst = state.instances[iid];
-  if (!inst) return 0;
-  const def = defOf(inst.defId);
-  const variant = state.variants[inst.defId];
-  return (def?.stats.vp ?? 0) + (variant?.statDelta.vp ?? 0) + (inst.statDelta.vp ?? 0);
 }
 
 /** VP scored onto the instance itself (Ascendant Spread, scoreOnCard). */
@@ -183,7 +175,7 @@ export function scoreFor(state: GameState, player: PlayerId): number {
       endOfGameIids.push(iid);
       continue;
     }
-    total += printedVp(state, iid);
+    total += statOf(state, iid, 'vp');
   }
 
   // Constellations resolve first: they consume cards the other scorers read.
@@ -204,7 +196,7 @@ export function scoreFor(state: GameState, player: PlayerId): number {
     }
     const def = defOf(inst.defId);
     if (!def) continue;
-    total += printedVp(state, iid);
+    total += statOf(state, iid, 'vp');
     for (const trigger of def.triggers) {
       if (trigger.on !== 'gameEnd') continue;
       total += sumVpGains(state, player, iid, trigger.effects, 0);

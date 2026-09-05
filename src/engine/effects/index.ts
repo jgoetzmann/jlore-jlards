@@ -20,7 +20,8 @@ import type {
   QueuedEffect,
   Selector,
 } from '@engine/types';
-import { cloneState, log, type EffectContext } from './runtime';
+import { log, type EffectContext } from './runtime';
+import { cloneState } from '@engine/core/clone.js';
 import { evalAmount as evalAmountImpl, evalCondition as evalConditionImpl } from './evaluate';
 import { selectInstances as selectInstancesImpl } from './select';
 import type { OpResult, Pre, ResumePayload } from './opkit';
@@ -67,7 +68,6 @@ import {
 } from './ops/misc';
 
 export type { EffectContext };
-export { cloneState } from './runtime';
 export { selectPiles, matchesFilter, matchesDefFilter, NAMED_FILTERS } from './select';
 export { buildVars } from './context';
 export { samplePool, poolCandidates } from './pools';

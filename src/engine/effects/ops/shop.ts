@@ -15,7 +15,7 @@ import { costOf, isLocked } from '@engine/shop';
 import { log, opponentsOf, tryGetCard } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { commitRng, ctxFor, resolvePiles, takeRng, type OpResult, type Pre } from '../opkit';
-import { createInstance, trashInstance } from '../zones';
+import { createInstance, moveToPile, trashInstance } from '@engine/core/zones';
 import { fireEvent } from '../triggers';
 import { pileCost } from '../select';
 import { resolveDefIdSpec } from '../pools';
@@ -176,7 +176,7 @@ export function opReplenishPile(s: GameState, item: QueuedEffect, q: QueuedEffec
     if (!defId) continue;
     const need = Math.max(0, pile.startingSize - pile.cards.length);
     for (let k = 0; k < need; k += 1) {
-      createInstance(s, defId, null, 'shop', { pileId, position: 'bottom' });
+      moveToPile(s, createInstance(s, defId, null, 'shop').iid, pileId, 'bottom');
     }
     if (need > 0) log(s, 'replenishPile', { pileId, added: need, defId }, item.player);
   }
@@ -191,7 +191,7 @@ export function opTrashPile(s: GameState, item: QueuedEffect, q: QueuedEffect[],
   for (const pileId of piles) {
     const pile = s.shop.piles[pileId];
     if (!pile) continue;
-    for (const iid of pile.cards.slice()) trashInstance(s, iid, q, item);
+    for (const iid of pile.cards.slice()) trashInstance(s, iid);
     log(s, 'trashPile', { pileId }, item.player);
     if (pile.cards.length === 0) fireEvent(s, q, item, 'onPileEmpty', null, item.player);
   }
@@ -246,7 +246,7 @@ export function opAddToPileTop(s: GameState, item: QueuedEffect, q: QueuedEffect
     for (let k = 0; k < count; k += 1) {
       const defId = resolveDefIdSpec(s, node.defId, ctx, rng);
       if (!defId) continue;
-      createInstance(s, defId, null, 'shop', { pileId, position: 'top' });
+      moveToPile(s, createInstance(s, defId, null, 'shop').iid, pileId, 'top');
       log(s, 'addToPileTop', { pileId, defId }, item.player);
     }
     if (typeof node.costOverride === 'number') pile.costOverride = node.costOverride;

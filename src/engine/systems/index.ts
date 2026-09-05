@@ -205,4 +205,3 @@ export {
   scaleStats,
 } from './internal';
 
-export { attachToPile, moveInstance, wholeDeck } from './zoneops';

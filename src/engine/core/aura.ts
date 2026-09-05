@@ -7,17 +7,12 @@
  * B79 A player holds at most one Hypercelestial aura.
  */
 
-import type { AuraId, AuraInstance, AuraTier, GameState, PlayerId } from '@engine/types';
+import type { AuraId, AuraInstance, GameState, PlayerId } from '@engine/types';
 import { getAura, hasAura } from '@engine/registry';
 import { appendLog } from './log.js';
 import { makeContext, runEffects } from './triggers.js';
 
 export const HEROIC_ACTIVATION_COST = 2;
-
-function tierOf(auraId: AuraId): AuraTier {
-  if (!hasAura(auraId)) return 'celestial';
-  return getAura(auraId).tier;
-}
 
 export function activationCostOf(auraId: AuraId): number {
   if (!hasAura(auraId)) return HEROIC_ACTIVATION_COST;
@@ -65,40 +60,6 @@ export function activateAura(state: GameState, player: PlayerId, auraId: AuraId)
     s = runEffects(s, def.effects, makeContext(player, null, 0, 1, {}));
   }
   return s;
-}
-
-/**
- * B76 / B78 / B79: one Heroic, one Hypercelestial, unlimited Celestial.
- * Manifesting a second capped aura replaces the one already held.
- */
-export function manifestAura(state: GameState, player: PlayerId, auraId: AuraId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  const tier = tierOf(auraId);
-
-  if (tier === 'heroic' || tier === 'hypercelestial') {
-    const replaced = p.field.filter((a) => tierOf(a.auraId) === tier);
-    if (replaced.length) {
-      p.field = p.field.filter((a) => tierOf(a.auraId) !== tier);
-      appendLog(state, 'auraReplaced', player, {
-        tier,
-        removed: replaced.map((a) => a.auraId),
-      });
-    }
-  } else if (p.field.some((a) => a.auraId === auraId)) {
-    // Celestials are unlimited but a duplicate of the same aura is pointless.
-    return state;
-  }
-
-  const instance: AuraInstance = {
-    auraId,
-    owner: player,
-    usedThisTurn: false,
-    counters: {},
-  };
-  p.field.push(instance);
-  appendLog(state, 'manifestAura', player, { auraId, tier });
-  return state;
 }
 
 export function activatableAuras(state: GameState, player: PlayerId): AuraId[] {

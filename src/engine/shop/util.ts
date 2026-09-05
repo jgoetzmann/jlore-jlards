@@ -1,9 +1,5 @@
 /**
- * Shop slice internals: state cloning, logging, instance ids, pile identity.
- *
- * Everything in the shop slice treats GameState as immutable. These helpers do
- * the shallow copy-on-write dance once so the rest of the slice can stay
- * readable.
+ * Shop slice internals: logging, instance ids, pile identity.
  */
 
 import type {
@@ -15,9 +11,9 @@ import type {
   Pile,
   PileId,
   PlayerId,
-  ShopState,
 } from '@engine/types';
 import { getCard } from '@engine/registry';
+import { deepClone } from '@engine/core/clone.js';
 
 /** Pile ids are built as `<shop>:<defId>`. Nothing outside this slice parses them. */
 export const PILE_ID_SEP = ':';
@@ -57,20 +53,7 @@ export function nextIid(seq: number): InstanceId {
   return `i_${String(seq).padStart(4, '0')}`;
 }
 
-/** Shallow clone with a fresh shop container. Piles themselves are shared until written. */
-export function cloneState(state: GameState): GameState {
-  const shop: ShopState = {
-    piles: { ...state.shop.piles },
-    order: {
-      resource: [...state.shop.order.resource],
-      points: [...state.shop.order.points],
-      prophet: [...state.shop.order.prophet],
-      draft: [...state.shop.order.draft],
-    },
-    globalCostMods: [...state.shop.globalCostMods],
-  };
-  return { ...state, shop };
-}
+export { cloneState } from '@engine/core/clone.js';
 
 export function clonePile(pile: Pile): Pile {
   return {
@@ -81,14 +64,11 @@ export function clonePile(pile: Pile): Pile {
   };
 }
 
-/** Copy-on-write a single pile into a cloned state. */
+/** Rewrite a single pile on a detached copy of the state. */
 export function withPile(state: GameState, pileId: PileId, mutate: (pile: Pile) => void): GameState {
-  const existing = state.shop.piles[pileId];
-  if (!existing) return state;
-  const next = cloneState(state);
-  const pile = clonePile(existing);
-  mutate(pile);
-  next.shop.piles[pileId] = pile;
+  if (!state.shop.piles[pileId]) return state;
+  const next = deepClone(state);
+  mutate(next.shop.piles[pileId]);
   return next;
 }
 

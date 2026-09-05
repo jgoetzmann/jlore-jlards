@@ -14,15 +14,11 @@ export {
   discardInstance,
   drawCards,
   drawOne,
-  effectiveStats,
-  hasKeyword,
   instOf,
-  keywordsOf,
   millCards,
   moveInstance,
   moveToPile,
   nextInstanceId,
-  printedVp,
   reshuffleGyIntoLibrary,
   safeDef,
   shuffleLibrary,
@@ -61,7 +57,6 @@ export {
   activationCostOf,
   auraOf,
   canActivateAura,
-  manifestAura,
   HEROIC_ACTIVATION_COST,
 } from './aura.js';
 

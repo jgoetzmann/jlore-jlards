@@ -27,6 +27,7 @@ import { legalActions } from '@engine/index';
 import { makeRng } from '@engine/rng';
 import { getCard } from '@engine/registry';
 import { costOf } from '@engine/shop/index';
+import { effectiveDefStats, effectiveStats } from '@engine/systems';
 
 // ---------------------------------------------------------------------------
 // Small read-only helpers over state. None of these mutate anything.
@@ -50,32 +51,6 @@ export function instanceDef(state: GameState, iid: InstanceId): CardDefinition |
 
 function num(v: number | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function addStats(a: Stats | undefined, b: Stats | undefined): Stats {
-  return {
-    money: num(a?.money) + num(b?.money),
-    buys: num(a?.buys) + num(b?.buys),
-    actions: num(a?.actions) + num(b?.actions),
-    cards: num(a?.cards) + num(b?.cards),
-    vp: num(a?.vp) + num(b?.vp),
-    prophet: num(a?.prophet) + num(b?.prophet),
-  };
-}
-
-/** Printed stats + match-wide variant delta + this instance's own delta. */
-export function effectiveStats(state: GameState, iid: InstanceId): Stats {
-  const inst = state.instances ? state.instances[iid] : undefined;
-  if (!inst) return {};
-  const def = defOrNull(inst.defId);
-  const variant = state.variants ? state.variants[inst.defId] : undefined;
-  return addStats(addStats(def ? def.stats : undefined, variant ? variant.statDelta : undefined), inst.statDelta);
-}
-
-/** Printed stats + match-wide variant delta, for a definition with no instance. */
-export function definitionStats(state: GameState, def: CardDefinition): Stats {
-  const variant = state.variants ? state.variants[def.id] : undefined;
-  return addStats(def.stats, variant ? variant.statDelta : undefined);
 }
 
 function hasType(def: CardDefinition | null, t: string): boolean {
@@ -118,7 +93,7 @@ function pointsValue(st: Stats): number {
  */
 export function cardValue(state: GameState, def: CardDefinition | null, late: boolean): number {
   if (!def) return 0;
-  const st = definitionStats(state, def);
+  const st = effectiveDefStats(state, def.id);
   const econ = economyValue(st);
   const pts = pointsValue(st);
   const effectCount = def.effects ? def.effects.length : 0;
@@ -200,7 +175,7 @@ export function buyScore(state: GameState, player: PlayerId, pileId: PileId, lat
   if (def.cost && def.cost.prophet) score += 40;
   // Negative-cost cards pay the buyer (B55): worth taking for the credit.
   if (cost < 0) score += 10 * -cost;
-  const st = definitionStats(state, def);
+  const st = effectiveDefStats(state, def.id);
   if (!late && num(st.vp) > 0 && economyValue(st) === 0) score -= 60;
   if (num(st.vp) < 0) score -= late ? 120 : 40;
   return score;

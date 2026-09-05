@@ -13,14 +13,13 @@ import type {
   CardInstance,
   GameState,
   InstanceId,
-  Keyword,
   PileId,
   PlayerId,
-  Stats,
   Zone,
 } from '@engine/types';
 import { getCard, hasCard } from '@engine/registry';
 import { makeRng } from '@engine/rng';
+import { hasKeyword } from '@engine/systems/keywords.js';
 import { appendLog } from './log.js';
 
 export type Position = 'top' | 'bottom' | 'random' | { index: number };
@@ -77,50 +76,6 @@ export function deckOf(state: GameState, player: PlayerId): InstanceId[] {
   const p = state.players[player];
   if (!p) return [];
   return [...p.library, ...p.hand, ...p.gy, ...p.play];
-}
-
-// ---------------------------------------------------------------------------
-// Keywords and stats
-// ---------------------------------------------------------------------------
-
-export function hasKeyword(state: GameState, iid: InstanceId, kw: Keyword): boolean {
-  const inst = state.instances[iid];
-  if (!inst) return false;
-  if (inst.removedKeywords.includes(kw)) return false;
-  if (inst.addedKeywords.includes(kw)) return true;
-  return safeDef(inst.defId).keywords.includes(kw);
-}
-
-export function keywordsOf(state: GameState, iid: InstanceId): Keyword[] {
-  const inst = state.instances[iid];
-  if (!inst) return [];
-  const base = new Set<Keyword>(safeDef(inst.defId).keywords);
-  for (const k of inst.addedKeywords) base.add(k);
-  for (const k of inst.removedKeywords) base.delete(k);
-  return [...base];
-}
-
-/** Printed stats + match-wide variant delta + per-instance delta. */
-export function effectiveStats(state: GameState, iid: InstanceId): Stats {
-  const inst = state.instances[iid];
-  if (!inst) return {};
-  const def = safeDef(inst.defId);
-  const variant = state.variants[inst.defId];
-  const out: Stats = {};
-  const keys: (keyof Stats)[] = ['money', 'buys', 'actions', 'cards', 'vp', 'prophet'];
-  for (const k of keys) {
-    const v = (def.stats[k] ?? 0) + (variant?.statDelta[k] ?? 0) + (inst.statDelta[k] ?? 0);
-    if (v !== 0) out[k] = v;
-  }
-  return out;
-}
-
-export function printedVp(state: GameState, iid: InstanceId): number {
-  const inst = state.instances[iid];
-  if (!inst) return 0;
-  const def = safeDef(inst.defId);
-  const variant = state.variants[inst.defId];
-  return (def.stats.vp ?? 0) + (variant?.statDelta.vp ?? 0) + (inst.statDelta.vp ?? 0);
 }
 
 // ---------------------------------------------------------------------------

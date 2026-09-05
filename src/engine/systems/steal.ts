@@ -18,7 +18,7 @@
 import type { GameState, InstanceId, PlayerId, Zone } from '@engine/types';
 import type { Rng } from '@engine/rng';
 import { allIids, blankInstance, copyInstance, mintInstance, pushLog, tryGetCard } from './internal';
-import { attach, detach, wholeDeck } from './zoneops';
+import { deckOf, moveInstance } from '@engine/core/zones';
 import { isUnfathomable } from './keywords';
 
 /**
@@ -42,8 +42,8 @@ export function stealInstance(
   const victim = inst.owner;
   if (victim === thief && inst.zone === to) return state;
 
-  let next = attach(detach(state, iid), iid, thief, to, position);
-  next = pushLog(next, 'steal', thief, { iid, defId: inst.defId, from: victim, to });
+  moveInstance(state, iid, thief, to, position);
+  let next = pushLog(state, 'steal', thief, { iid, defId: inst.defId, from: victim, to });
   return next;
 }
 
@@ -68,8 +68,8 @@ export function copyToOwn(
   if (!tryGetCard(inst.defId)) return state;
 
   const minted = mintInstance(state, blankInstance(inst.defId, thief, to));
-  let next = attach(minted.state, minted.iid, thief, to, position);
-  next = pushLog(next, 'copyCard', thief, { source: iid, copy: minted.iid, defId: inst.defId, to });
+  moveInstance(minted.state, minted.iid, thief, to, position);
+  let next = pushLog(minted.state, 'copyCard', thief, { source: iid, copy: minted.iid, defId: inst.defId, to });
   return next;
 }
 
@@ -102,8 +102,8 @@ export function copyToOwnWithState(
     playedOnTurn: null,
   });
 
-  let next = attach(minted.state, minted.iid, thief, to, 'top');
-  next = pushLog(next, 'copyCard', thief, { source: iid, copy: minted.iid, defId: inst.defId, to, withState: true });
+  moveInstance(minted.state, minted.iid, thief, to, 'top');
+  let next = pushLog(minted.state, 'copyCard', thief, { source: iid, copy: minted.iid, defId: inst.defId, to, withState: true });
   return next;
 }
 
@@ -173,5 +173,5 @@ export function mostExpensiveStealable(
 
 /** Total cards an opponent holds across their whole deck — for scaling reads. */
 export function opponentDeckSize(state: GameState, victim: PlayerId): number {
-  return wholeDeck(state, victim).length;
+  return deckOf(state, victim).length;
 }

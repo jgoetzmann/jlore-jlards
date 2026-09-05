@@ -1,9 +1,9 @@
 /**
- * Shared plumbing for the effect interpreter: the resolution context, deep
- * cloning for purity, logging, seeded randomness, and the small def/instance
+ * Shared plumbing for the effect interpreter: the resolution context,
+ * logging, seeded randomness, and the small def/instance
  * readers every op needs.
  *
- * Nothing here reaches for Math.random, Date.now or new Date (B117).
+ * All randomness comes from the seeded rng in `withRng` (B117).
  */
 import type {
   CardDefinition,
@@ -11,13 +11,10 @@ import type {
   CardVariant,
   GameState,
   InstanceId,
-  Keyword,
   LogEntry,
   PlayerId,
   PlayerState,
   QueuedEffect,
-  Stats,
-  StatKey,
   Who,
   Zone,
   EffectNode,
@@ -82,28 +79,6 @@ export function pushFront(q: QueuedEffect[], items: QueuedEffect[]): void {
 export function pushBack(q: QueuedEffect[], items: QueuedEffect[]): void {
   if (items.length === 0) return;
   q.push(...items);
-}
-
-// ---------------------------------------------------------------------------
-// Purity
-// ---------------------------------------------------------------------------
-
-function cloneValue(v: unknown): unknown {
-  if (v === null || typeof v !== 'object') return v;
-  if (Array.isArray(v)) {
-    const out: unknown[] = new Array(v.length);
-    for (let i = 0; i < v.length; i += 1) out[i] = cloneValue(v[i]);
-    return out;
-  }
-  const src = v as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const k of Object.keys(src)) out[k] = cloneValue(src[k]);
-  return out;
-}
-
-/** Structural deep clone. `reduce` never mutates its input (B2). */
-export function cloneState(s: GameState): GameState {
-  return cloneValue(s) as GameState;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,43 +157,6 @@ export function instanceCost(s: GameState, iid: InstanceId): number {
     if (pile && typeof pile.costOverride === 'number') return pile.costOverride;
   }
   return defCost(s, i.defId);
-}
-
-const STAT_KEYS: StatKey[] = ['money', 'buys', 'actions', 'cards', 'vp', 'prophet'];
-
-export function effectiveStats(s: GameState, iid: InstanceId): Stats {
-  const i = s.instances[iid];
-  const out: Stats = {};
-  if (!i) return out;
-  const def = tryGetCard(i.defId);
-  const variant = variantOf(s, i.defId);
-  for (const k of STAT_KEYS) {
-    const a = def && typeof def.stats[k] === 'number' ? (def.stats[k] as number) : 0;
-    const b = variant && typeof variant.statDelta[k] === 'number' ? (variant.statDelta[k] as number) : 0;
-    const c = typeof i.statDelta[k] === 'number' ? (i.statDelta[k] as number) : 0;
-    const total = a + b + c;
-    if (total !== 0) out[k] = total;
-  }
-  return out;
-}
-
-export function effectiveKeywords(s: GameState, iid: InstanceId): Keyword[] {
-  const i = s.instances[iid];
-  if (!i) return [];
-  const def = tryGetCard(i.defId);
-  const set = new Set<Keyword>(def ? def.keywords : []);
-  for (const k of i.addedKeywords) set.add(k);
-  for (const k of i.removedKeywords) set.delete(k);
-  return Array.from(set);
-}
-
-export function hasKeyword(s: GameState, iid: InstanceId, kw: Keyword): boolean {
-  const i = s.instances[iid];
-  if (!i) return false;
-  if (i.removedKeywords.indexOf(kw) >= 0) return false;
-  if (i.addedKeywords.indexOf(kw) >= 0) return true;
-  const def = tryGetCard(i.defId);
-  return !!def && def.keywords.indexOf(kw) >= 0;
 }
 
 export function counterOf(s: GameState, iid: InstanceId, key: string): number {

@@ -27,7 +27,8 @@ import type {
 } from '@engine/types';
 import { getAura, allAuras } from '@engine/registry';
 import { resolveEffects } from '@engine/effects';
-import { cloneState, pushLog, withPlayer } from './util.js';
+import { cloneState } from '@engine/core/clone.js';
+import { pushLog, withPlayer } from './util.js';
 
 export const HEROIC_ACTIVATION_COST = 2;
 
@@ -83,12 +84,10 @@ export function auraIdsForTier(tier: AuraTier): AuraId[] {
 
 /** Drop an aura off a player's field. */
 export function removeAura(state: GameState, player: PlayerId, auraId: AuraId): GameState {
-  if (!hasAura(state, player, auraId)) return state;
-  const next = withPlayer(state, player, (p) => ({
-    ...p,
-    field: p.field.filter((a) => a.auraId !== auraId),
-  }));
-  return pushLog(next, 'auraRemoved', { auraId }, player);
+  const p = state.players[player];
+  if (!p || !hasAura(state, player, auraId)) return state;
+  p.field = p.field.filter((a) => a.auraId !== auraId);
+  return pushLog(state, 'auraRemoved', { auraId }, player);
 }
 
 function newInstance(player: PlayerId, auraId: AuraId, boundDefId?: CardDefId): AuraInstance {
@@ -115,51 +114,29 @@ export function manifestAura(
   tier: AuraTier,
   boundDefId?: CardDefId,
 ): GameState {
-  if (!state.players[player]) return state;
+  const p = state.players[player];
+  if (!p) return state;
   const realTier = tierOf(auraId, tier);
 
-  let next = state;
-
-  if (realTier === 'heroic') {
-    const held = heroicOf(next, player);
-    if (held && held.auraId !== auraId) {
-      next = removeAura(next, player, held.auraId);
-      next = pushLog(next, 'auraReplaced', { tier: 'heroic', replaced: held.auraId, with: auraId }, player);
-    } else if (held && held.auraId === auraId) {
-      return pushLog(next, 'auraRefreshed', { auraId }, player);
+  if (realTier === 'heroic' || realTier === 'hypercelestial') {
+    const held = realTier === 'heroic' ? heroicOf(state, player) : hypercelestialOf(state, player);
+    if (held && held.auraId === auraId) return pushLog(state, 'auraRefreshed', { auraId }, player);
+    if (held) {
+      removeAura(state, player, held.auraId);
+      pushLog(state, 'auraReplaced', { tier: realTier, replaced: held.auraId, with: auraId }, player);
     }
-  } else if (realTier === 'hypercelestial') {
-    const held = hypercelestialOf(next, player);
-    if (held && held.auraId !== auraId) {
-      next = removeAura(next, player, held.auraId);
-      next = pushLog(next, 'auraReplaced', { tier: 'hypercelestial', replaced: held.auraId, with: auraId }, player);
-    } else if (held && held.auraId === auraId) {
-      return pushLog(next, 'auraRefreshed', { auraId }, player);
-    }
-  } else if (hasAura(next, player, auraId)) {
+  } else {
     // Unlimited Celestials, but a second copy of the same one is a refresh.
-    if (auraId === OUTSTANDING_DEBT_ID) {
-      next = withPlayer(next, player, (p) => ({
-        ...p,
-        field: p.field.map((a) =>
-          a.auraId === auraId ? { ...a, turnsRemaining: OUTSTANDING_DEBT_TURNS } : a,
-        ),
-      }));
+    const held = p.field.find((a) => a.auraId === auraId);
+    if (held) {
+      if (auraId === OUTSTANDING_DEBT_ID) held.turnsRemaining = OUTSTANDING_DEBT_TURNS;
+      if (boundDefId !== undefined) held.boundDefId = boundDefId;
+      return pushLog(state, 'auraRefreshed', { auraId }, player);
     }
-    if (boundDefId !== undefined) {
-      next = withPlayer(next, player, (p) => ({
-        ...p,
-        field: p.field.map((a) => (a.auraId === auraId ? { ...a, boundDefId } : a)),
-      }));
-    }
-    return pushLog(next, 'auraRefreshed', { auraId }, player);
   }
 
-  next = withPlayer(next, player, (p) => ({
-    ...p,
-    field: [...p.field, newInstance(player, auraId, boundDefId)],
-  }));
-  return pushLog(next, 'auraManifested', { auraId, tier: realTier }, player);
+  p.field.push(newInstance(player, auraId, boundDefId));
+  return pushLog(state, 'auraManifested', { auraId, tier: realTier }, player);
 }
 
 /** Bind Oathbound Memory to a definition id (Infini Scepter). */

@@ -135,7 +135,6 @@ export {
   accruedVp,
   isEndOfGame,
   liveVp,
-  printedVp,
   scoreFor,
   winnersOf,
   CONSTELLATION_ID,

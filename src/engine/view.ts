@@ -34,7 +34,8 @@ import * as Meta from '@engine/meta';
 import { isLocked } from '@engine/shop';
 import { canPlayCard } from './core/play.js';
 import { canBuyPile, priceFor } from './core/buy.js';
-import { effectiveStats, keywordsOf, safeDef, topOfPile } from './core/zones.js';
+import { effectiveKeywords, effectiveStats } from '@engine/systems';
+import { safeDef, topOfPile } from './core/zones.js';
 import { getAura, hasAura } from './registry.js';
 
 const MAX_LOG_ENTRIES = 250;
@@ -134,7 +135,7 @@ export function cardView(
     types: [...def.types],
     subtypes: [...def.subtypes],
     rarity: def.rarity,
-    keywords: inst ? keywordsOf(state, iid) : [...def.keywords],
+    keywords: inst ? effectiveKeywords(state, iid) : [...def.keywords],
     stats: inst ? effectiveStats(state, iid) : { ...def.stats },
     text: inst ? renderCardText(state, iid, viewer) : def.text,
     counters,

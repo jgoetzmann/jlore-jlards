@@ -12,16 +12,11 @@ import type {
   QueuedEffect,
   StatKey,
 } from '@engine/types';
-import {
-  childItems,
-  effectiveStats,
-  hasKeyword,
-  log,
-  pushFront,
-  tryGetCard,
-} from '../runtime';
+import { childItems, log, pushFront, tryGetCard } from '../runtime';
+import { effectiveStats } from '@engine/systems/buff.js';
+import { hasKeyword } from '@engine/systems/keywords.js';
 import { resolveTargets, type OpResult, type Pre } from '../opkit';
-import { drawCards, moveInstance, trashInstance } from '../zones';
+import { drawCards, moveInstance, trashInstance } from '@engine/core/zones';
 import { fireEvent } from '../triggers';
 import { matchesFilter } from '../select';
 
@@ -67,7 +62,7 @@ function applyStatLine(
   if (typeof stats.actions === 'number') p.actions += scale(stats.actions);
   if (typeof stats.vp === 'number') p.vp += scale(stats.vp);
   if (typeof stats.prophet === 'number') p.prophet = Math.max(0, p.prophet + scale(stats.prophet));
-  if (typeof stats.cards === 'number' && stats.cards > 0) drawCards(s, player, scale(stats.cards), q, item);
+  if (typeof stats.cards === 'number' && stats.cards > 0) drawCards(s, player, scale(stats.cards));
 }
 
 /**
@@ -96,7 +91,7 @@ export function resolveCardPlay(
   if (!p) return false;
 
   if (moveToPlay) {
-    moveInstance(s, iid, 'play', { owner: player });
+    moveInstance(s, iid, player, 'play');
     i.playedOnTurn = s.turn;
     p.playedThisTurn.push(iid);
     p.combo += 1;
@@ -140,9 +135,9 @@ export function opPlayCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     const alreadyInPlay = i.zone === 'play';
     const played = resolveCardPlay(s, item, q, iid, !alreadyInPlay);
     if (!played) continue;
-    if (node.thenTrash) trashInstance(s, iid, q, item);
+    if (node.thenTrash) trashInstance(s, iid);
     else if (hasKeyword(s, iid, 'Flimsy') && !hasKeyword(s, iid, 'Indestructible')) {
-      trashInstance(s, iid, q, item);
+      trashInstance(s, iid);
     }
   }
   return 'ok';
@@ -161,7 +156,7 @@ export function opReplayPlayedThisTurn(s: GameState, item: QueuedEffect, q: Queu
 
   for (const iid of targets) {
     resolveCardPlay(s, item, q, iid, false);
-    if (node.thenTrash) trashInstance(s, iid, q, item);
+    if (node.thenTrash) trashInstance(s, iid);
   }
   log(s, 'replayPlayedThisTurn', { count: targets.length }, item.player);
   return 'ok';

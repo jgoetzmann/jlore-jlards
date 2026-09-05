@@ -21,18 +21,10 @@ import type {
   StatKey,
   Stats,
 } from '@engine/types';
-import { bigActionCost } from '@engine/systems';
+import { bigActionCost, effectiveStats, hasKeyword } from '@engine/systems';
 import { appendLog } from './log.js';
 import { makeContext, fireInstanceTriggers, fireOwnedTriggers, runEffects } from './triggers.js';
-import {
-  defOfInstance,
-  drawCards,
-  effectiveStats,
-  hasKeyword,
-  moveInstance,
-  safeDef,
-  trashInstance,
-} from './zones.js';
+import { defOfInstance, drawCards, moveInstance, safeDef, trashInstance } from './zones.js';
 
 export interface PlayOptions {
   /** Skip the Action cost (Play on Draw, Play on Buy, replay effects). */

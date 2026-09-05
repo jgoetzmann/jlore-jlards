@@ -5,7 +5,7 @@ import type { GameState, PlayerId, QueuedEffect, StatKey } from '@engine/types';
 import { log, resolveWho } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { ctxFor, resolveTargets, takeRng, commitRng, type OpResult, type Pre } from '../opkit';
-import { discardInstance, drawCards, millCards, trashInstance } from '../zones';
+import { discardInstance, drawCards, millCards, trashInstance } from '@engine/core/zones';
 
 function addStat(s: GameState, player: PlayerId, stat: StatKey, delta: number): void {
   const p = s.players[player];
@@ -48,7 +48,7 @@ export function opGain(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
 
   for (const pid of players) {
     if (node.stat === 'cards') {
-      if (delta > 0) drawCards(s, pid, delta, q, item);
+      if (delta > 0) drawCards(s, pid, delta);
       continue;
     }
     addStat(s, pid, node.stat, delta);
@@ -67,7 +67,7 @@ export function opDraw(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const rng = takeRng(s);
   const players = resolveWho(s, node.who, item.player, rng);
   if (node.who === 'randomOpponent') commitRng(s, rng);
-  for (const pid of players) drawCards(s, pid, n, q, item);
+  for (const pid of players) drawCards(s, pid, n);
   return 'ok';
 }
 
@@ -79,7 +79,7 @@ export function opMill(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const rng = takeRng(s);
   const players = resolveWho(s, node.who, item.player, rng);
   if (node.who === 'randomOpponent') commitRng(s, rng);
-  for (const pid of players) millCards(s, pid, n, q, item);
+  for (const pid of players) millCards(s, pid, n);
   return 'ok';
 }
 
@@ -88,7 +88,7 @@ export function opDiscard(s: GameState, item: QueuedEffect, q: QueuedEffect[], p
   if (node.op !== 'discard') return 'ok';
   const targets = resolveTargets(s, item, q, node.target, pre, 'Discard');
   if (targets === null) return 'suspend';
-  for (const iid of targets) discardInstance(s, iid, q, item);
+  for (const iid of targets) discardInstance(s, iid);
   return 'ok';
 }
 
@@ -108,7 +108,7 @@ export function opDiscardDownTo(s: GameState, item: QueuedEffect, q: QueuedEffec
     while (p.hand.length > target) {
       const iid = p.hand[p.hand.length - 1];
       const before = p.hand.length;
-      discardInstance(s, iid, q, item);
+      discardInstance(s, iid);
       if (p.hand.length >= before) {
         // The instance refused to leave the hand; stop rather than spin.
         break;
@@ -125,6 +125,6 @@ export function opTrash(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre
   if (node.op !== 'trash') return 'ok';
   const targets = resolveTargets(s, item, q, node.target, pre, 'Trash');
   if (targets === null) return 'suspend';
-  for (const iid of targets) trashInstance(s, iid, q, item);
+  for (const iid of targets) trashInstance(s, iid);
   return 'ok';
 }

@@ -16,7 +16,8 @@ import type { GameState, InstanceId, NextCardMod, PileId, PlayerId, Zone } from 
 import { canBuy as shopCanBuy, costOf, isLocked } from '@engine/shop';
 import { appendLog } from './log.js';
 import { fireInstanceTriggers, fireOwnedTriggers } from './triggers.js';
-import { hasKeyword, moveInstance, safeDef, topOfPile } from './zones.js';
+import { hasKeyword } from '@engine/systems';
+import { moveInstance, safeDef, topOfPile } from './zones.js';
 import { playCard } from './play.js';
 import { noteEndCondition } from './endgame.js';
 

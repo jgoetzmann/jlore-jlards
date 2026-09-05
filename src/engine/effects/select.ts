@@ -21,10 +21,10 @@ import type {
 } from '@engine/types';
 import type { Rng } from '@engine/rng';
 import { allCards } from '@engine/registry';
+import { effectiveKeywords } from '@engine/systems/keywords.js';
 import {
   asArray,
   defCost,
-  effectiveKeywords,
   instanceCost,
   peekRng,
   resolveWho,

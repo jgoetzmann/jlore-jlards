@@ -17,7 +17,7 @@
 
 import type { CardDefId, GameState, InstanceId, PlayerId, Zone } from '@engine/types';
 import { pushLog, withInstance, withInstances, withPlayer } from './internal';
-import { moveInstance, wholeDeck } from './zoneops';
+import { deckOf, moveInstance } from '@engine/core/zones';
 
 // ---------------------------------------------------------------------------
 // Per-player, per-definition play counts (B64)
@@ -179,8 +179,8 @@ export function moveKeepingCounters(
   const keptDelta = { ...before.statDelta };
   const keptExtra = [...before.extraEffects];
 
-  let next = moveInstance(state, iid, owner, zone, position);
-  next = withInstance(next, iid, (inst) => ({
+  moveInstance(state, iid, owner, zone, position);
+  let next = withInstance(state, iid, (inst) => ({
     ...inst,
     counters: carried,
     addedKeywords: keptAdded,
@@ -197,7 +197,7 @@ export function moveKeepingCounters(
  */
 export function counterTotalForPlayer(state: GameState, player: PlayerId, key: string): number {
   let total = 0;
-  for (const iid of wholeDeck(state, player)) {
+  for (const iid of deckOf(state, player)) {
     total += state.instances[iid]?.counters[key] ?? 0;
   }
   return total;
@@ -209,5 +209,5 @@ export function instancesWithCounter(
   player: PlayerId,
   key: string,
 ): InstanceId[] {
-  return wholeDeck(state, player).filter((iid) => (state.instances[iid]?.counters[key] ?? 0) > 0);
+  return deckOf(state, player).filter((iid) => (state.instances[iid]?.counters[key] ?? 0) > 0);
 }

@@ -5,7 +5,6 @@
 import type {
   AuraDefinition,
   AuraId,
-  AuraInstance,
   AuraTier,
   GameState,
   Prompt,
@@ -13,6 +12,7 @@ import type {
   QueuedEffect,
 } from '@engine/types';
 import { allAuras, getAura } from '@engine/registry';
+import { manifestAura } from '@engine/meta/auras.js';
 import { childItems, log, pushFront, resolveWho } from '../runtime';
 import {
   commitRng,
@@ -40,33 +40,6 @@ function auraPool(tier: AuraTier): AuraDefinition[] {
   }
 }
 
-export function manifest(s: GameState, player: string, auraId: AuraId, tier: AuraTier): boolean {
-  const p = s.players[player];
-  if (!p) return false;
-  const def = safeAura(auraId);
-  const realTier = def ? def.tier : tier;
-
-  if (p.field.some((a) => a.auraId === auraId)) return false;
-
-  if (realTier === 'heroic' || realTier === 'hypercelestial') {
-    p.field = p.field.filter((a) => {
-      const held = safeAura(a.auraId);
-      const heldTier = held ? held.tier : 'celestial';
-      return heldTier !== realTier;
-    });
-  }
-
-  const instance: AuraInstance = {
-    auraId,
-    owner: player,
-    usedThisTurn: false,
-    counters: {},
-  };
-  p.field.push(instance);
-  log(s, 'manifestAura', { auraId, tier: realTier }, player);
-  return true;
-}
-
 export function opManifestAura(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre): OpResult {
   const node = item.node;
   if (node.op !== 'manifestAura') return 'ok';
@@ -76,7 +49,7 @@ export function opManifestAura(s: GameState, item: QueuedEffect, q: QueuedEffect
   commitRng(s, rngWho);
 
   if (pre && pre.keys && pre.keys.length > 0) {
-    for (const pid of players) manifest(s, pid, pre.keys[0], node.tier);
+    for (const pid of players) manifestAura(s, pid, pre.keys[0], node.tier);
     return 'ok';
   }
 
@@ -91,7 +64,7 @@ export function opManifestAura(s: GameState, item: QueuedEffect, q: QueuedEffect
   }
 
   if (node.auraId) {
-    for (const pid of players) manifest(s, pid, node.auraId, node.tier);
+    for (const pid of players) manifestAura(s, pid, node.auraId, node.tier);
     return 'ok';
   }
 
@@ -106,13 +79,13 @@ export function opManifestAura(s: GameState, item: QueuedEffect, q: QueuedEffect
   commitRng(s, rng);
 
   if (!node.discover) {
-    for (const pid of players) manifest(s, pid, shuffled[0], node.tier);
+    for (const pid of players) manifestAura(s, pid, shuffled[0], node.tier);
     return 'ok';
   }
 
   const offered = shuffled.slice(0, Math.min(3, shuffled.length));
   if (offered.length === 1) {
-    for (const pid of players) manifest(s, pid, offered[0], node.tier);
+    for (const pid of players) manifestAura(s, pid, offered[0], node.tier);
     return 'ok';
   }
 
