@@ -162,21 +162,6 @@ export function perfectCardFor(state: GameState, player: PlayerId): CardDefId | 
   return bestId;
 }
 
-/**
- * Second Time Around — the same scorer, ranked, so the Discover offers the top
- * `count` rather than a random three.
- */
-export function rankedKnownUniverse(
-  state: GameState,
-  player: PlayerId,
-  count: number,
-): CardDefId[] {
-  const pool = knownUniverse(state, player)
-    .map((id) => ({ id, score: scoreCandidate(state, player, id) }))
-    .sort((a, b) => (b.score - a.score) || (a.id < b.id ? -1 : 1));
-  return pool.slice(0, Math.max(0, count)).map((e) => e.id);
-}
-
 const DECK_SHAPE: { axis: 'money' | 'cards' | 'actions' | 'vp'; want: number }[] = [
   { axis: 'money', want: 6 },
   { axis: 'cards', want: 5 },

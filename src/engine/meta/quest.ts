@@ -17,13 +17,11 @@ import type {
   EffectNode,
   GameState,
   PlayerId,
-  QuestState,
 } from '@engine/types';
 import { getCard } from '@engine/registry';
 import { resolveEffects } from '@engine/effects';
 import { deckIidsOf, pushLog, withPlayer } from './util.js';
 
-export const IN_TOO_DEEP_AURA_ID = 'in_too_deep';
 export const TURN_PREFIX = 'turn:';
 
 export type QuestPredicate = 'deckDiamonds' | 'deckUnique' | 'none';
@@ -185,16 +183,6 @@ export function getFloor(id: string): QuestFloor | null {
   return FLOOR_BY_ID[id] ?? null;
 }
 
-/** One instance at a time: starting a second quest is a no-op. */
-export function startQuest(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  if (p.quest !== null) return pushLog(state, 'questAlreadyRunning', { floor: p.quest.floor }, player);
-  const quest: QuestState = { floor: '1', progress: {}, completedFloors: [] };
-  const next = withPlayer(state, player, (q) => ({ ...q, quest }));
-  return pushLog(next, 'questStarted', { floor: '1' }, player);
-}
-
 // ---------------------------------------------------------------------------
 // Deck-state predicates
 // ---------------------------------------------------------------------------
@@ -235,12 +223,6 @@ function predicateValue(state: GameState, player: PlayerId, predicate: QuestPred
 // ---------------------------------------------------------------------------
 // Progress and completion
 // ---------------------------------------------------------------------------
-
-function currentFloor(state: GameState, player: PlayerId): QuestFloor | null {
-  const q = state.players[player]?.quest;
-  if (!q) return null;
-  return getFloor(q.floor);
-}
 
 /**
  * Complete the current floor: bank the reward, record it, descend to the first
@@ -347,35 +329,4 @@ export function questStartOfTurn(state: GameState, player: PlayerId): GameState 
   }));
   next = settleFloor(next, player);
   return next;
-}
-
-/** Floor 4c reads the money still in hand when the turn closes. */
-export function questEndOfTurn(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p || p.quest === null) return state;
-  let next = state;
-  if (p.money >= 12) next = questProgress(next, player, 'endTurnMoney12', 1);
-  return settleFloor(next, player);
-}
-
-/** Floor 5 — the quest holder actually won. */
-export function questOnWin(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p || p.quest === null) return state;
-  return questProgress(state, player, 'winGame', 1);
-}
-
-/** The floor a player is standing on, for the view layer. */
-export function questSummary(
-  state: GameState,
-  player: PlayerId,
-): { floor: string; quest: string; have: number; need: number } | null {
-  const floor = currentFloor(state, player);
-  const q = state.players[player]?.quest;
-  if (!floor || !q) return null;
-  const have =
-    floor.predicate === 'none'
-      ? q.progress[floor.counterKey] ?? 0
-      : predicateValue(state, player, floor.predicate);
-  return { floor: floor.id, quest: floor.quest, have, need: floor.target };
 }

@@ -11,7 +11,7 @@ import type {
   PlayerId,
   QueuedEffect,
 } from '@engine/types';
-import { costOf, isLocked } from '@engine/shop';
+import { costOf } from '@engine/shop';
 import { log, opponentsOf, tryGetCard } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { commitRng, ctxFor, resolvePiles, takeRng, type OpResult, type Pre } from '../opkit';
@@ -281,13 +281,4 @@ export function opMergePiles(s: GameState, item: QueuedEffect, q: QueuedEffect[]
     fireEvent(s, q, item, 'onPileEmpty', null, item.player);
   }
   return 'ok';
-}
-
-export function pileIsLocked(s: GameState, pileId: PileId): boolean {
-  try {
-    return isLocked(s, pileId);
-  } catch {
-    const pile = s.shop.piles[pileId];
-    return !!pile && pile.locks.length > 0;
-  }
 }

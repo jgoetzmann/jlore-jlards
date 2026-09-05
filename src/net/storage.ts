@@ -87,10 +87,6 @@ export function setSeatId(seatId: string): void {
   writeCookie(SEAT_COOKIE, seatId, SEAT_MAX_AGE_SECONDS);
 }
 
-export function getRoomCode(): string | null {
-  return readCookie(ROOM_COOKIE);
-}
-
 export function setRoomCode(code: string): void {
   writeCookie(ROOM_COOKIE, code, SEAT_MAX_AGE_SECONDS);
 }
@@ -210,15 +206,3 @@ export function clearSnapshot(): void {
 // ---------------------------------------------------------------------------
 
 const memory = new Map<string, unknown>();
-
-export function memGet<T>(key: string): T | undefined {
-  return memory.get(key) as T | undefined;
-}
-
-export function memSet(key: string, value: unknown): void {
-  memory.set(key, value);
-}
-
-export function memClear(): void {
-  memory.clear();
-}

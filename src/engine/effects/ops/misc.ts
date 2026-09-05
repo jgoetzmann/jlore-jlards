@@ -4,7 +4,7 @@
 import type { GameState, InstanceId, QueuedEffect } from '@engine/types';
 import { bumpCounter, log } from '../runtime';
 import { evalAmount } from '../evaluate';
-import { commitRng, ctxFor, resolvePiles, resolveTargets, takeRng, type OpResult, type Pre } from '../opkit';
+import { ctxFor, resolvePiles, resolveTargets, type OpResult, type Pre } from '../opkit';
 import { isPileSelector } from '../select';
 import { fireEvent } from '../triggers';
 import { resetComboInPlace } from '@engine/systems/combo.js';
@@ -184,9 +184,4 @@ export function opQuestProgress(s: GameState, item: QueuedEffect): OpResult {
 
 export function opNoop(): OpResult {
   return 'ok';
-}
-
-export function consumeRngNoop(s: GameState): void {
-  const r = takeRng(s);
-  commitRng(s, r);
 }

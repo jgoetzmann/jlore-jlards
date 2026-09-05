@@ -12,8 +12,8 @@
  * entire drawback; a single Corrosion must not be able to undo that.
  */
 
-import type { GameState, InstanceId, Keyword, Zone } from '@engine/types';
-import { defOf, pushLog, withInstance, withInstances } from './internal';
+import type { GameState, InstanceId, Keyword } from '@engine/types';
+import { defOf, pushLog, withInstance } from './internal';
 
 /** printed + added - removed, deduped, in a stable order. */
 export function effectiveKeywords(state: GameState, iid: InstanceId): Keyword[] {
@@ -71,74 +71,7 @@ export function setKeyword(state: GameState, iid: InstanceId, kw: Keyword, on: b
   return on ? grantKeyword(state, iid, kw) : stripKeyword(state, iid, kw);
 }
 
-/** Grant the same keyword to a batch of instances. */
-export function grantKeywordMany(
-  state: GameState,
-  iids: readonly InstanceId[],
-  kw: Keyword,
-): GameState {
-  return withInstances(state, iids, (i) => ({
-    ...i,
-    addedKeywords: i.addedKeywords.includes(kw) ? i.addedKeywords : [...i.addedKeywords, kw],
-    removedKeywords: i.removedKeywords.filter((k) => k !== kw),
-  }));
-}
-
-/** B40: Indestructible beats every trash source. */
-export function canBeTrashed(state: GameState, iid: InstanceId): boolean {
-  return !hasKeyword(state, iid, 'Indestructible');
-}
-
-/**
- * Where a card goes after it finishes resolving.
- *
- * Indestructible wins over both Flimsy and Temporary, so an Indestructible
- * Flimsy card goes to GY (B12 / SB-16). Otherwise Flimsy and Temporary both
- * trash on play, and everything else goes to GY.
- */
-export function destinationAfterPlay(state: GameState, iid: InstanceId): Zone {
-  if (hasKeyword(state, iid, 'Indestructible')) return 'gy';
-  if (hasKeyword(state, iid, 'Flimsy')) return 'trash';
-  if (hasKeyword(state, iid, 'Temporary')) return 'trash';
-  return 'gy';
-}
-
-/**
- * Where a card goes when discarded. Temporary is strictly stronger than Flimsy:
- * it trashes on discard too (B11). Indestructible still wins.
- */
-export function destinationAfterDiscard(state: GameState, iid: InstanceId): Zone {
-  if (hasKeyword(state, iid, 'Indestructible')) return 'gy';
-  if (hasKeyword(state, iid, 'Temporary')) return 'trash';
-  return 'gy';
-}
-
-/** True when playing this card destroys it (B10, B11, and not B12). */
-export function trashesOnPlay(state: GameState, iid: InstanceId): boolean {
-  return destinationAfterPlay(state, iid) === 'trash';
-}
-
-/** True when discarding this card destroys it. */
-export function trashesOnDiscard(state: GameState, iid: InstanceId): boolean {
-  return destinationAfterDiscard(state, iid) === 'trash';
-}
-
 /** SB-8: an Unfathomable card is excluded from every pool, copy and steal route. */
 export function isUnfathomable(state: GameState, iid: InstanceId): boolean {
   return hasKeyword(state, iid, 'Unfathomable');
-}
-
-/** Play on Buy: resolves on purchase, costs no Action. */
-export function playsOnBuy(state: GameState, iid: InstanceId): boolean {
-  return hasKeyword(state, iid, 'PlayOnBuy');
-}
-
-/**
- * Play on Draw, capped by SB-35: a card may not trigger its own Play-on-Draw
- * within one resolution chain, and the chain is bounded by
- * `config.recursionDepth` like everything else.
- */
-export function playsOnDraw(state: GameState, iid: InstanceId, depth: number): boolean {
-  if (depth >= state.config.recursionDepth) return false;
-  return hasKeyword(state, iid, 'PlayOnDraw');
 }

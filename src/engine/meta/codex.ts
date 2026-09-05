@@ -55,12 +55,6 @@ export function poolExclusions(state: GameState): Set<CardDefId> {
   return out;
 }
 
-/** Entire Universe narrowed by this match's exclusions. */
-export function entireUniverseIn(state: GameState): CardDefId[] {
-  const banned = poolExclusions(state);
-  return entireUniverse().filter((id) => !banned.has(id));
-}
-
 /** The Basic + Common + Rare seed set (SB-18, B93). */
 export function codexSeedIds(): CardDefId[] {
   return allCards()
@@ -100,21 +94,6 @@ export function knownUniverse(state: GameState, player: PlayerId): CardDefId[] {
   return out.sort();
 }
 
-/** B92 — one player saw one card. Idempotent. */
-export function noteSeen(state: GameState, player: PlayerId, defId: CardDefId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  const inMatch = state.defsInMatch.includes(defId) ? state.defsInMatch : [...state.defsInMatch, defId];
-  if (p.codex.includes(defId)) {
-    return inMatch === state.defsInMatch ? state : { ...state, defsInMatch: inMatch };
-  }
-  return {
-    ...state,
-    defsInMatch: inMatch,
-    players: { ...state.players, [player]: { ...p, codex: [...p.codex, defId] } },
-  };
-}
-
 /**
  * B92 — the card appeared in the match, so every seated player has now seen it.
  * This is the hook for shop build, reveals, and any public play.
@@ -136,20 +115,6 @@ export function noteSeenAll(state: GameState, defIds: CardDefId[]): GameState {
   }
   if (fresh.length > 0) next = pushLog(next, 'codexSeen', { defIds: fresh });
   return next;
-}
-
-/** Apply the SB-18 seed to every seated player. Called at match setup. */
-export function seedCodexes(state: GameState): GameState {
-  if (!state.config.seedCodexWithCommons) return state;
-  const seed = codexSeedIds();
-  const next = cloneState(state);
-  for (const pid of next.playerOrder) {
-    const p = next.players[pid];
-    if (!p) continue;
-    const have = new Set(p.codex);
-    for (const id of seed) if (!have.has(id)) p.codex.push(id);
-  }
-  return pushLog(next, 'codexSeeded', { count: seed.length });
 }
 
 /**

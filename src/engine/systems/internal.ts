@@ -142,17 +142,6 @@ export function addStats(a: Stats | undefined, b: Stats | undefined): Stats {
   return out;
 }
 
-/** Multiply every present stat line by k, rounding to an integer. */
-export function scaleStats(a: Stats, k: number): Stats {
-  const out: Stats = {};
-  for (const key of ALL_STAT_KEYS) {
-    const v = a[key];
-    if (v === undefined) continue;
-    out[key] = Math.round(v * k);
-  }
-  return out;
-}
-
 /**
  * Add `delta` to one stat line, creating the line when the card prints the stat
  * as 0 or does not print it at all (B70 / SB-17).
@@ -163,21 +152,9 @@ export function bumpStat(stats: Stats, stat: StatKey, delta: number): Stats {
   return out;
 }
 
-/** Stable order for anything that must be reproducible from a seed. */
-export function sortedIids(iids: readonly InstanceId[]): InstanceId[] {
-  return [...iids].sort();
-}
-
 /** Every instance id in the match, in a stable order. */
 export function allIids(state: GameState): InstanceId[] {
   return Object.keys(state.instances).sort();
-}
-
-/** The pile an instance sits in, or null when it is not in a shop. */
-export function pileOf(state: GameState, iid: InstanceId): PileId | null {
-  const inst = state.instances[iid];
-  if (!inst || inst.zone !== 'shop') return null;
-  return inst.pileId ?? null;
 }
 
 /** Every instance id currently stacked in a pile, top first. */
@@ -281,28 +258,9 @@ export function unique<T>(xs: readonly T[]): T[] {
   return out;
 }
 
-/** The player who owns an instance, or null for shop cards. */
-export function ownerOf(state: GameState, iid: InstanceId): PlayerId | null {
-  return state.instances[iid]?.owner ?? null;
-}
-
 /** Definition behind an instance, or null when the instance/def is unknown. */
 export function defOf(state: GameState, iid: InstanceId): CardDefinition | null {
   const inst = state.instances[iid];
   if (!inst) return null;
   return tryGetCard(inst.defId);
-}
-
-/** Instance ids a player controls in the named zone. */
-export function zoneOf(state: GameState, playerId: PlayerId, zone: Zone): InstanceId[] {
-  const p = state.players[playerId];
-  if (!p) return [];
-  if (zone === 'library') return [...p.library];
-  if (zone === 'hand') return [...p.hand];
-  if (zone === 'gy') return [...p.gy];
-  if (zone === 'play') return [...p.play];
-  return allIids(state).filter((iid) => {
-    const i = state.instances[iid];
-    return i.owner === playerId && i.zone === zone;
-  });
 }

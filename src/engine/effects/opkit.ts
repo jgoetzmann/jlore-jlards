@@ -28,8 +28,6 @@ export interface Pre {
   defIds?: string[];
 }
 
-export type OpFn = (s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre) => OpResult;
-
 export interface ResumePayload extends Record<string, unknown> {
   mode: 'targets' | 'piles' | 'discover' | 'choose' | 'select';
   player: string;
@@ -218,12 +216,4 @@ export function resolvePiles(
   const out = selectPilesWith(s, sel, ctx, rng);
   if (sel && sel.pick === 'random') commitRng(s, rng);
   return out;
-}
-
-/** Record whether this node did anything, for `{ifPrevious:true}`. */
-export function markDid(item: QueuedEffect, q: QueuedEffect[], did: boolean): void {
-  for (const next of q) {
-    next.vars = { ...next.vars, __previousDidSomething: did ? 1 : 0 };
-    break;
-  }
 }

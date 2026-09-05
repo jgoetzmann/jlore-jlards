@@ -22,19 +22,6 @@ export function needsCounts(expr: string): boolean {
 // Comparison operators (SPEC.md Addendum A1)
 // ---------------------------------------------------------------------------
 
-/**
- * `Condition.expr` and `Amount.expr` gain `> >= < <= == !=`, each yielding 1 or
- * 0, so a card can say `handSize > 3` at all. A condition is true when its
- * expression is non-zero, which is exactly what `evalCondition` already did, so
- * every expression authored before this stays valid.
- *
- * Comparisons bind looser than every arithmetic operator and associate left to
- * right. `evaluateExpr` itself stays arithmetic-only and still throws on a
- * comparison character (B28), so this lives here rather than in the shared
- * evaluator: the split happens before the arithmetic parser ever sees the text.
- */
-const COMPARISONS: readonly string[] = ['>=', '<=', '==', '!=', '>', '<'];
-
 interface Comparison {
   index: number;
   op: string;
@@ -112,14 +99,6 @@ export function evalExprValue(expr: string, vars: Record<string, number>): numbe
   return compare(found.op, evalExprValue(left, vars), evalExprValue(right, vars));
 }
 
-/** True when an expression mentions a comparison operator at all. */
-export function hasComparison(expr: string): boolean {
-  for (const op of COMPARISONS) {
-    if (expr.indexOf(op) >= 0) return true;
-  }
-  return false;
-}
-
 /** The merged variable record an expression sees. */
 export function evalVars(state: GameState, ctx: EffectContext, expr?: string): Record<string, number> {
   const withCounts = expr ? needsCounts(expr) : false;
@@ -137,21 +116,6 @@ export function evalAmount(state: GameState, amount: Amount, ctx: EffectContext)
     // expression is worth 0, never a thrown match.
     return 0;
   }
-}
-
-/** Amount rounded down to a whole card / stat count, never negative. */
-export function evalCount(state: GameState, amount: Amount | undefined, ctx: EffectContext, fallback: number): number {
-  if (amount === undefined) return fallback;
-  const raw = evalAmount(state, amount, ctx);
-  const n = Math.floor(raw);
-  return n < 0 ? 0 : n;
-}
-
-/** Signed amount, floored toward zero, used for stat deltas. */
-export function evalSigned(state: GameState, amount: Amount | undefined, ctx: EffectContext, fallback: number): number {
-  if (amount === undefined) return fallback;
-  const raw = evalAmount(state, amount, ctx);
-  return raw < 0 ? Math.ceil(raw) : Math.floor(raw);
 }
 
 /**
@@ -225,5 +189,3 @@ function selectForCondition(state: GameState, cond: Condition, ctx: EffectContex
   if (!cond.has) return [];
   return selectNs.selectInstancesWith(state, cond.has.target, ctx, null);
 }
-
-export const PREVIOUS_DID_SOMETHING = PREV_KEY;

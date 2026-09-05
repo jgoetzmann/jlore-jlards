@@ -1,7 +1,7 @@
 /**
  * Movement and creation ops.
  */
-import type { CardDefId, GameState, InstanceId, PileId, PoolSpec, QueuedEffect, Zone } from '@engine/types';
+import type { CardDefId, GameState, InstanceId, PoolSpec, QueuedEffect, Zone } from '@engine/types';
 import { defCost, log, resolveWho, tryGetCard, uniq } from '../runtime';
 import { evalAmount } from '../evaluate';
 import {
@@ -328,8 +328,4 @@ export function opReveal(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
   }
   if (defIds.length > 0) log(s, 'reveal', { iids: targets, defIds }, item.player);
   return 'ok';
-}
-
-export function pileIdsOf(s: GameState): PileId[] {
-  return Object.keys(s.shop.piles);
 }

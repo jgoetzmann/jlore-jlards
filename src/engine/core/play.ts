@@ -74,12 +74,12 @@ export function canPlayCard(state: GameState, player: PlayerId, iid: InstanceId)
 // Stats
 // ---------------------------------------------------------------------------
 
-export function addProphet(state: GameState, player: PlayerId, amount: number, allowNegative = false): void {
+export function addProphet(state: GameState, player: PlayerId, amount: number): void {
   const p = state.players[player];
   if (!p) return;
   p.prophet += amount;
   // B60: Prophet is clamped at 0, and never resets between turns.
-  if (!allowNegative && p.prophet < 0) p.prophet = 0;
+  if (p.prophet < 0) p.prophet = 0;
 }
 
 /**

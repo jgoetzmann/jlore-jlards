@@ -14,7 +14,7 @@ import { checkEndCondition } from '@engine/meta';
 import { appendLog } from './log.js';
 import { fireTableTriggers, makeContext, runEffects } from './triggers.js';
 import { computeScores, determineWinners, endOfGameCards } from './scoring.js';
-import { safeDef, topOfPile } from './zones.js';
+import { topOfPile } from './zones.js';
 
 /** The Jlore pile: the Points pile whose cards are Jlore. */
 export function jlorePileId(state: GameState): PileId | null {
@@ -156,9 +156,4 @@ export function finishGame(state: GameState, reason: string): GameState {
   }
   appendLog(s, 'gameEnd', null, detail);
   return s;
-}
-
-/** Convenience for effects that end the game outright ({op:'endGame'}). */
-export function endGameNow(state: GameState, reason: string): GameState {
-  return finishGame(state, reason);
 }

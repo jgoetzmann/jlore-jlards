@@ -112,35 +112,6 @@ export function getAnomaly(id: AnomalyId): AnomalyDef | null {
   return BY_ID[id] ?? null;
 }
 
-export function anomalyIds(): AnomalyId[] {
-  return anomalies.map((a) => a.id);
-}
-
-export function anomaliesInGroup(group: AnomalyGroup): AnomalyDef[] {
-  return anomalies.filter((a) => a.group === group);
-}
-
-/**
- * B82 / SB-11 — two anomalies may never be combined when they share a mutex
- * group. Kept as a predicate so a later "Chaotic" roll can reuse it.
- */
-export const MUTEX_GROUPS: readonly AnomalyGroup[] = [
-  'startingDeck',
-  'endCondition',
-  'startingAura',
-  'stat',
-  'shop',
-];
-
-export function canCombine(a: AnomalyId, b: AnomalyId): boolean {
-  if (a === b) return false;
-  const da = getAnomaly(a);
-  const db = getAnomaly(b);
-  if (!da || !db) return false;
-  if (da.group !== db.group) return true;
-  return !MUTEX_GROUPS.includes(da.group);
-}
-
 /** Anomalies the blind roller may return — see `rollAnomaly`. */
 export function rollableAnomalyIds(): AnomalyId[] {
   return anomalies.filter((a) => a.minPlayers <= 1).map((a) => a.id);
@@ -194,8 +165,6 @@ const ECONOMIC_HEDGE: CardDefId[] = [
 ];
 
 const ELEMENTS: readonly Element[] = ['water', 'wood', 'fire', 'earth', 'metal'];
-
-const OPENING_HAND = 5;
 
 /** Drop every instance a player owns and rebuild their deck from defIds. */
 function replaceDeck(
@@ -294,20 +263,6 @@ function grantFlimsyToAll(state: GameState): GameState {
     if (!inst.addedKeywords.includes('Flimsy')) inst.addedKeywords.push('Flimsy');
   }
   return next;
-}
-
-/** Fading Blossom keeps applying to cards created after setup. */
-export function fadingBlossomKeyword(state: GameState, iid: InstanceId): GameState {
-  if (state.anomaly !== 'fading_blossom') return state;
-  const inst = state.instances[iid];
-  if (!inst || inst.addedKeywords.includes('Flimsy')) return state;
-  return {
-    ...state,
-    instances: {
-      ...state.instances,
-      [iid]: { ...inst, addedKeywords: [...inst.addedKeywords, 'Flimsy'] },
-    },
-  };
 }
 
 function assignElements(state: GameState, rng: Rng): GameState {
@@ -441,44 +396,6 @@ function withPlayerCounters(state: GameState, key: string, value: number): GameS
 // Per-turn hooks
 // ---------------------------------------------------------------------------
 
-/** B85 — the deltas the turn reset adds on top of 1 Action / 1 Buy / 0 Money. */
-export function applyTurnModifiers(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  const mod = p.turnModifiers;
-  let next = withPlayer(state, player, (q) => ({
-    ...q,
-    money: q.money + (mod.money ?? 0),
-    buys: q.buys + (mod.buys ?? 0),
-    actions: q.actions + (mod.actions ?? 0),
-    prophet: Math.max(0, q.prophet + (mod.prophet ?? 0)),
-    vp: q.vp + (mod.vp ?? 0),
-  }));
-  const cards = mod.cards ?? 0;
-  // `drawCards` mutates the draft and returns the drawn ids, not a state.
-  if (cards > 0) drawCards(next, player, cards);
-  if (cards < 0) next = discardRandomFromHand(next, player, -cards);
-  return next;
-}
-
-function discardRandomFromHand(state: GameState, player: PlayerId, n: number): GameState {
-  const p = state.players[player];
-  if (!p || p.hand.length === 0) return state;
-  const moved = p.hand.slice(0, Math.min(n, p.hand.length));
-  let next = withPlayer(state, player, (q) => ({
-    ...q,
-    hand: q.hand.filter((iid) => !moved.includes(iid)),
-    gy: [...q.gy, ...moved],
-  }));
-  const instances = { ...next.instances };
-  for (const iid of moved) {
-    const inst = instances[iid];
-    if (inst) instances[iid] = { ...inst, zone: 'gy' };
-  }
-  next = { ...next, instances };
-  return pushLog(next, 'anomalyLessCards', { discarded: moved.length }, player);
-}
-
 /**
  * The anomaly half of the start-of-turn window: Cash Injection at turn 5,
  * Battle Royale culls, and the first-turn anomalies (Audience Choice, Sliced
@@ -579,37 +496,4 @@ export function battleRoyaleTick(state: GameState): GameState {
     }));
   }
   return pushLog(next, 'battleRoyaleElimination', { player: victim, vp: scored[0].vp }, victim);
-}
-
-/** Dynamic Pricing: -1 to every shop cost at each end of turn, min 0. */
-export function anomalyEndOfTurn(state: GameState): GameState {
-  if (state.anomaly !== 'dynamic_pricing') return state;
-  const next = cloneState(state);
-  for (const pileId of Object.keys(next.shop.piles)) {
-    const pile = next.shop.piles[pileId];
-    const cur = pile.costOverride ?? 0;
-    pile.costOverride = Math.max(0, cur - 1);
-  }
-  return pushLog(next, 'dynamicPricingDecay', {});
-}
-
-/** Dynamic Pricing: a bought card's pile costs (3) more afterwards. */
-export function dynamicPricingOnBuy(state: GameState, pileId: string): GameState {
-  if (state.anomaly !== 'dynamic_pricing') return state;
-  const pile = state.shop.piles[pileId];
-  if (!pile) return state;
-  const next = cloneState(state);
-  const target = next.shop.piles[pileId];
-  target.costOverride = (target.costOverride ?? 0) + 3;
-  return pushLog(next, 'dynamicPricingBump', { pileId, cost: target.costOverride });
-}
-
-/** The view layer's one-line anomaly banner. */
-export function anomalyBanner(
-  state: GameState,
-): { id: AnomalyId; name: string; text: string } | null {
-  if (state.anomaly === null) return null;
-  const def = getAnomaly(state.anomaly);
-  if (!def) return null;
-  return { id: def.id, name: def.name, text: def.text };
 }

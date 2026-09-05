@@ -7,16 +7,13 @@
  */
 import type {
   CardDefinition,
-  CardInstance,
   CardVariant,
   GameState,
   InstanceId,
   LogEntry,
   PlayerId,
-  PlayerState,
   QueuedEffect,
   Who,
-  Zone,
   EffectNode,
 } from '@engine/types';
 import { makeRng, type Rng } from '@engine/rng';
@@ -126,11 +123,6 @@ export function tryGetCard(defId: string): CardDefinition | null {
   }
 }
 
-export function inst(s: GameState, iid: InstanceId): CardInstance | null {
-  const i = s.instances[iid];
-  return i ?? null;
-}
-
 export function defOfInstance(s: GameState, iid: InstanceId): CardDefinition | null {
   const i = s.instances[iid];
   if (!i) return null;
@@ -159,13 +151,6 @@ export function instanceCost(s: GameState, iid: InstanceId): number {
   return defCost(s, i.defId);
 }
 
-export function counterOf(s: GameState, iid: InstanceId, key: string): number {
-  const i = s.instances[iid];
-  if (!i) return 0;
-  const v = i.counters[key];
-  return typeof v === 'number' ? v : 0;
-}
-
 export function bumpCounter(s: GameState, iid: InstanceId, key: string, by: number): void {
   const i = s.instances[iid];
   if (!i) return;
@@ -176,11 +161,6 @@ export function bumpCounter(s: GameState, iid: InstanceId, key: string, by: numb
 // ---------------------------------------------------------------------------
 // Players
 // ---------------------------------------------------------------------------
-
-export function playerOf(s: GameState, id: PlayerId): PlayerState | null {
-  const p = s.players[id];
-  return p ?? null;
-}
 
 export function livePlayers(s: GameState): PlayerId[] {
   return s.playerOrder.filter((id) => {
@@ -239,10 +219,6 @@ export function asArray<T>(v: T | T[] | undefined | null): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-export function clampToZero(n: number): number {
-  return n < 0 ? 0 : n;
-}
-
 export function uniq<T>(arr: readonly T[]): T[] {
   const seen = new Set<T>();
   const out: T[] = [];
@@ -253,5 +229,3 @@ export function uniq<T>(arr: readonly T[]): T[] {
   }
   return out;
 }
-
-export const OWNED_ZONES: Zone[] = ['library', 'hand', 'gy', 'play'];

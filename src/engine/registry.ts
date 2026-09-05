@@ -119,15 +119,6 @@ export function cardsMatching(filter: CardFilter): CardDefinition[] {
   return allCards().filter((def) => matchesCardFilter(def, filter));
 }
 
-/** Reset hook for tests that want a hand-built registry. */
-export function clearRegistry(): void {
-  cardMap.clear();
-  auraMap.clear();
-  cardOrder = [];
-  auraOrder = [];
-  bootstrapped = false;
-}
-
 // ---------------------------------------------------------------------------
 // Definition-level filter matching (state-free; plagued / inMatch are ignored
 // here because they need live state — the effects slice handles those).

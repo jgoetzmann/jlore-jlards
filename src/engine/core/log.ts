@@ -33,12 +33,3 @@ export function logReject(
 ): GameState {
   return appendLog(state, 'reject', player, { reason, ...detail });
 }
-
-export function lastLog(state: GameState): LogEntry | null {
-  return state.log.length ? (state.log[state.log.length - 1] as LogEntry) : null;
-}
-
-/** Deterministic id generator for prompts and cost mods. Never uses a clock. */
-export function nextIdFor(state: GameState, prefix: string): string {
-  return `${prefix}_${state.turn}_${state.logSeq + 1}_${state.rngCursor}`;
-}

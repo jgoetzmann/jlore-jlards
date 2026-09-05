@@ -82,7 +82,6 @@ export {
 
 export {
   BASIC_POINTS_IDS,
-  BASIC_RESOURCE_IDS,
   JLORE_ID,
   RARITY_PILE_SIZE,
   RARITY_PULL_WEIGHT,
@@ -93,77 +92,35 @@ export {
 export {
   addToPileTop,
   createShopInstance,
-  emptyPileIds,
-  getPile,
-  isPileEmpty,
-  mergePiles,
-  pileForDef,
-  pileHeight,
-  pileIdsIn,
   pileOfInstance,
-  printedCostOf,
-  pushBottom,
   pushTop,
   removeFromPile,
   replenish,
-  swapCosts,
-  takeTop,
-  topOf,
-  trashPile,
 } from './piles';
 
 export {
-  accrueDiscardCost,
   accruedDiscardCost,
-  activeLocks,
-  clearAllLocks,
-  expireLocks,
   expiryTurnFor,
-  lockOwner,
-  lockPile,
-  lockShop,
-  lockedPileCount,
-  lockedUntil,
-  unlockPile,
 } from './locks';
 
 export {
   DEFAULT_COST_FLOOR,
-  addCostMod,
-  addShopCostMod,
   applyCostMod,
   canAffordMoney,
-  clearCostMods,
   costModIsActive,
   costModStack,
-  expireCostMods,
-  listCostOf,
-  makeCostMod,
-  moneyAfterPurchase,
-  removeCostMod,
 } from './cost';
 
 export {
   DEBT_LEGAL_DEF_ID,
   PROPHET_SHOP_CARD_IDS,
   VP_THRESHOLD_EXCLUDED_IDS,
-  addProphet,
-  affordableProphetPiles,
   canAffordProphet,
   isProphetPile,
   isVpThresholdMatch,
-  payProphet,
   prophetCostOfDef,
   prophetCostOfPile,
-  purchaseConsumesBuy,
-  purchaseCostsMoney,
 } from './prophet';
 
 export { makePileId, pileDefId } from './util';
 
-export {
-  SELF_LOCK_ON_BUY_DEF_IDS,
-  applyPurchaseSelfLock,
-  shopEndOfTurn,
-  shopStartOfTurn,
-} from './turn';

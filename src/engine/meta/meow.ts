@@ -77,11 +77,6 @@ export function isMeowActive(state: GameState): boolean {
   return state.anomaly === MEOW_ANOMALY_ID;
 }
 
-/** Convenience for the view layer: filter only when the anomaly is live. */
-export function displayText(state: GameState, text: string): string {
-  return isMeowActive(state) ? meowify(text) : text;
-}
-
 /**
  * B89 — bake the filtered text onto every instance in the match.
  *

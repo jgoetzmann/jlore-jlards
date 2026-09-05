@@ -14,7 +14,7 @@ import type {
   PromptOption,
   QueuedEffect,
 } from '@engine/types';
-import { log, tryGetCard } from '../runtime';
+import { log } from '../runtime';
 import { evalAmount } from '../evaluate';
 import {
   commitRng,
@@ -268,9 +268,4 @@ export function runThenPerInstance(
     }
   });
   if (built.length > 0) q.unshift(...built);
-}
-
-export function labelOfDef(defId: CardDefId): string {
-  const def = tryGetCard(defId);
-  return def ? def.name : defId;
 }

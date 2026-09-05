@@ -11,8 +11,6 @@ import {
   defCost,
   instanceCost,
   opponentsOf,
-  tryGetCard,
-  variantOf,
 } from './runtime';
 import { NAMED_FILTERS, matchesFilter, zoneIds } from './select';
 
@@ -184,14 +182,6 @@ export function buildVars(
   }
 
   return vars;
-}
-
-/** Cost of a definition as a player sees it right now. Used by pool ranking. */
-export function costForRanking(state: GameState, defId: string): number {
-  const def = tryGetCard(defId);
-  if (!def) return 0;
-  const v = variantOf(state, defId);
-  return (typeof def.cost.money === 'number' ? def.cost.money : 0) + (v ? v.costDelta : 0);
 }
 
 export { defCost };

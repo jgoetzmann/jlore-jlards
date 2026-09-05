@@ -12,7 +12,7 @@
  * B92 A bought defId enters the buyer's codex.
  */
 
-import type { GameState, InstanceId, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
+import type { GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
 import { canBuy as shopCanBuy, costOf, isLocked } from '@engine/shop';
 import { appendLog } from './log.js';
 import { fireInstanceTriggers, fireOwnedTriggers } from './triggers.js';
@@ -221,12 +221,5 @@ export function buyablePiles(state: GameState, player: PlayerId): PileId[] {
     seen.add(id);
     if (canBuyPile(state, player, id)) out.push(id);
   }
-  return out;
-}
-
-/** Every instance id that currently sits on top of a pile, for the view layer. */
-export function pileTops(state: GameState): Record<PileId, InstanceId | null> {
-  const out: Record<PileId, InstanceId | null> = {};
-  for (const id of Object.keys(state.shop.piles)) out[id] = topOfPile(state, id);
   return out;
 }

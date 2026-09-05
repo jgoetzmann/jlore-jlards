@@ -3,7 +3,7 @@
  *
  * Nodes resolve FIFO off a queue, never off the JavaScript call stack
  * (gameplay doc §12.2). A node that needs a choice writes `state.pending` and
- * parks the rest of the queue on `state.queue`; `resumeFromPrompt` picks it up
+ * parks the rest of the queue on `state.queue`; the resume path picks it up
  * when the matching `resolve` action arrives (B30).
  *
  * Two hard limits: `config.effectNodeBudget` nodes per turn (B37) and
@@ -24,7 +24,7 @@ import { log, type EffectContext } from './runtime';
 import { cloneState } from '@engine/core/clone.js';
 import { evalAmount as evalAmountImpl, evalCondition as evalConditionImpl } from './evaluate';
 import { selectInstances as selectInstancesImpl } from './select';
-import type { OpResult, Pre, ResumePayload } from './opkit';
+import type { OpResult, Pre } from './opkit';
 
 import { opDiscard, opDiscardDownTo, opDraw, opGain, opMill, opTrash } from './ops/cards';
 import {
@@ -38,7 +38,7 @@ import {
   opSortLibraryByCost,
   opTransform,
 } from './ops/movement';
-import { opChoose, opDiscover, opSelectCards, pushChosen } from './ops/choices';
+import { opChoose, opDiscover, opSelectCards } from './ops/choices';
 import {
   opAddToPileTop,
   opLockPile,
@@ -68,7 +68,7 @@ import {
 } from './ops/misc';
 
 export type { EffectContext };
-export { selectPiles, matchesFilter, matchesDefFilter, NAMED_FILTERS } from './select';
+export { matchesFilter, matchesDefFilter, NAMED_FILTERS } from './select';
 export { buildVars } from './context';
 export { samplePool, poolCandidates } from './pools';
 export { evaluateExpr } from '@engine/expr';
@@ -357,84 +357,6 @@ export function resolveEffects(state: GameState, nodes: EffectNode[], ctx: Effec
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
-
-function payloadCtx(payload: ResumePayload): EffectContext {
-  return {
-    player: payload.player,
-    sourceIid: payload.sourceIid ?? null,
-    depth: typeof payload.depth === 'number' ? payload.depth : 0,
-    multiplier: typeof payload.multiplier === 'number' && payload.multiplier !== 0 ? payload.multiplier : 1,
-    vars: payload.vars ?? {},
-  };
-}
-
-function defIdFromKey(key: string): string {
-  const at = key.lastIndexOf('#');
-  return at > 0 ? key.slice(0, at) : key;
-}
-
-/**
- * Resume a suspended resolution with the player's answer (B30).
- * Unknown or empty keys fall back to the prompt's `defaultKeys`.
- */
-export function resumeFromPrompt(state: GameState, keys: string[]): GameState {
-  const s = cloneState(state);
-  const prompt = s.pending;
-  if (!prompt) return s;
-
-  const valid = new Set(prompt.options.map((o) => o.key));
-  let chosen = (keys ?? []).filter((k) => valid.has(k));
-  if (chosen.length === 0) chosen = prompt.defaultKeys.filter((k) => valid.has(k));
-  if (chosen.length > prompt.max) chosen = chosen.slice(0, prompt.max);
-
-  s.pending = null;
-  log(s, 'resolvePrompt', { promptId: prompt.id, keys: chosen }, prompt.player);
-
-  const payload = prompt.ctx as unknown as ResumePayload;
-  const ctx = payloadCtx(payload ?? { mode: 'choose', player: prompt.player, sourceIid: null, depth: 0, multiplier: 1, vars: {} });
-
-  const parent: QueuedEffect = {
-    node: payload && payload.node ? payload.node : { op: 'noop' },
-    player: ctx.player,
-    sourceIid: ctx.sourceIid,
-    depth: ctx.depth,
-    multiplier: ctx.multiplier,
-    vars: { ...ctx.vars },
-  };
-
-  const q: QueuedEffect[] = [];
-
-  const mode = payload ? payload.mode : 'choose';
-  if (mode === 'discover') {
-    const defIds = chosen.map(defIdFromKey);
-    pushChosen(s, parent, q, defIds, (payload && payload.then) ?? []);
-  } else if (mode === 'targets' || mode === 'select') {
-    const pre: Pre = { iids: chosen };
-    const result = applyNode(s, parent, q, pre);
-    if (result === 'suspend') {
-      s.queue = q.concat(s.queue);
-      return s;
-    }
-  } else if (mode === 'piles') {
-    const pre: Pre = { pileIds: chosen };
-    const result = applyNode(s, parent, q, pre);
-    if (result === 'suspend') {
-      s.queue = q.concat(s.queue);
-      return s;
-    }
-  } else {
-    const pre: Pre = { keys: chosen };
-    const result = applyNode(s, parent, q, pre);
-    if (result === 'suspend') {
-      s.queue = q.concat(s.queue);
-      return s;
-    }
-  }
-
-  const parked = s.queue;
-  s.queue = [];
-  return runQueue(s, q.concat(parked), entryDepthOf(ctx) + maxDepth(s));
-}
 
 /** Convenience for callers holding only a player and a node list. */
 export function makeContext(

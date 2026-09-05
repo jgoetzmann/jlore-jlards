@@ -13,8 +13,6 @@
  */
 
 import type { CardDefId, GameState, InstanceId, StatKey } from '@engine/types';
-import { BUFFABLE_STATS } from '@engine/types';
-import type { Rng } from '@engine/rng';
 import { bumpStat, pushLog, withInstance } from './internal';
 
 /** The Resource ladder, cheapest first. */
@@ -34,13 +32,6 @@ export function downgradedDefId(defId: CardDefId): CardDefId | null {
   if (i < 0) return null;
   if (i === 0) return RESOURCE_LADDER[0];
   return RESOURCE_LADDER[i - 1];
-}
-
-/** True when this instance sits somewhere on the Copper/Silver/Gold/Diamond ladder. */
-export function isUpgradableResource(state: GameState, iid: InstanceId): boolean {
-  const inst = state.instances[iid];
-  if (!inst) return false;
-  return RESOURCE_LADDER.includes(inst.defId);
 }
 
 /**
@@ -84,34 +75,4 @@ export function upgradeRelic(state: GameState, iid: InstanceId, stat: StatKey): 
     counters: { ...i.counters, upgrades: (i.counters.upgrades ?? 0) + 1 },
   }));
   return pushLog(next, 'upgradeRelic', inst.owner, { iid, stat, upgrades: (inst.counters.upgrades ?? 0) + 1 });
-}
-
-/** Relic upgrade on a rolled stat. Never rolls prophet. */
-export function upgradeRelicRandom(state: GameState, iid: InstanceId, rng: Rng): GameState {
-  return upgradeRelic(state, iid, rng.pick(BUFFABLE_STATS));
-}
-
-/** Relic upgrade on all five buffable stats at once (Relic of Totality). */
-export function upgradeRelicAll(state: GameState, iid: InstanceId): GameState {
-  let next = state;
-  for (const stat of BUFFABLE_STATS) {
-    next = upgradeRelic(next, iid, stat);
-  }
-  return next;
-}
-
-/** How many times this instance has been Relic-upgraded. Monumental Works reads this. */
-export function upgradeCount(state: GameState, iid: InstanceId): number {
-  return state.instances[iid]?.counters.upgrades ?? 0;
-}
-
-/** Total Relic upgrades across everything a player owns. */
-export function totalUpgrades(state: GameState, player: string): number {
-  let total = 0;
-  for (const iid of Object.keys(state.instances)) {
-    const inst = state.instances[iid];
-    if (inst.owner !== player) continue;
-    total += inst.counters.upgrades ?? 0;
-  }
-  return total;
 }

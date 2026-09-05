@@ -16,9 +16,8 @@
  */
 
 import type { GameState, InstanceId, PlayerId, Zone } from '@engine/types';
-import type { Rng } from '@engine/rng';
-import { allIids, blankInstance, copyInstance, mintInstance, pushLog, tryGetCard } from './internal';
-import { deckOf, moveInstance } from '@engine/core/zones';
+import { blankInstance, mintInstance, pushLog, tryGetCard } from './internal';
+import { moveInstance } from '@engine/core/zones';
 import { isUnfathomable } from './keywords';
 
 /**
@@ -73,105 +72,7 @@ export function copyToOwn(
   return next;
 }
 
-/**
- * A copy that carries the original's runtime state too — counters, granted
- * keywords, instance buffs and absorbed effects. Used by the handful of cards
- * that copy "as it is now" rather than "as printed".
- */
-export function copyToOwnWithState(
-  state: GameState,
-  iid: InstanceId,
-  thief: PlayerId,
-  to: Zone = 'hand',
-): GameState {
-  const inst = state.instances[iid];
-  if (!inst) return state;
-  if (!state.players[thief]) return state;
-  if (isUnfathomable(state, iid)) return state;
-
-  const template = copyInstance(inst);
-  const minted = mintInstance(state, {
-    defId: template.defId,
-    owner: thief,
-    zone: to,
-    addedKeywords: template.addedKeywords,
-    removedKeywords: template.removedKeywords,
-    counters: template.counters,
-    statDelta: template.statDelta,
-    extraEffects: template.extraEffects,
-    playedOnTurn: null,
-  });
-
-  moveInstance(minted.state, minted.iid, thief, to, 'top');
-  let next = pushLog(minted.state, 'copyCard', thief, { source: iid, copy: minted.iid, defId: inst.defId, to, withState: true });
-  return next;
-}
-
 /** Every opponent of `player` who is still in the match, in seat order. */
 export function opponentsOf(state: GameState, player: PlayerId): PlayerId[] {
   return state.playerOrder.filter((id) => id !== player && !state.players[id]?.eliminated);
-}
-
-/** One opponent picked from the seeded rng. Null when the player has none. */
-export function randomOpponent(state: GameState, player: PlayerId, rng: Rng): PlayerId | null {
-  const opps = opponentsOf(state, player);
-  if (opps.length === 0) return null;
-  return rng.pick(opps);
-}
-
-/**
- * Steal candidates in an opponent's zone. Unfathomable cards are filtered out
- * here so no caller has to remember the rule.
- */
-export function stealableIn(state: GameState, victim: PlayerId, zone: Zone): InstanceId[] {
-  const p = state.players[victim];
-  if (!p) return [];
-  const pool =
-    zone === 'library' ? p.library
-      : zone === 'hand' ? p.hand
-        : zone === 'gy' ? p.gy
-          : zone === 'play' ? p.play
-            : allIids(state).filter((iid) => {
-              const i = state.instances[iid];
-              return i.owner === victim && i.zone === zone;
-            });
-  return pool.filter((iid) => !isUnfathomable(state, iid));
-}
-
-/** Steal one random card out of an opponent's zone (Midnight Raid, Loot Attack). */
-export function stealRandomFrom(
-  state: GameState,
-  victim: PlayerId,
-  thief: PlayerId,
-  zone: Zone,
-  to: Zone,
-  rng: Rng,
-): GameState {
-  const candidates = stealableIn(state, victim, zone);
-  if (candidates.length === 0) return state;
-  return stealInstance(state, rng.pick(candidates), thief, to);
-}
-
-/** The most expensive stealable card in an opponent's zone (The Curator). */
-export function mostExpensiveStealable(
-  state: GameState,
-  victim: PlayerId,
-  zone: Zone,
-): InstanceId | null {
-  let best: InstanceId | null = null;
-  let bestCost = -Infinity;
-  for (const iid of stealableIn(state, victim, zone)) {
-    const def = tryGetCard(state.instances[iid].defId);
-    const cost = def?.cost.money ?? 0;
-    if (cost > bestCost) {
-      bestCost = cost;
-      best = iid;
-    }
-  }
-  return best;
-}
-
-/** Total cards an opponent holds across their whole deck — for scaling reads. */
-export function opponentDeckSize(state: GameState, victim: PlayerId): number {
-  return deckOf(state, victim).length;
 }

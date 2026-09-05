@@ -18,7 +18,7 @@ import { effectiveStats } from '@engine/systems/buff.js';
 import { elementMultiplierFor, elementOfInstance } from '@engine/systems/multiplier.js';
 import { hasKeyword } from '@engine/systems/keywords.js';
 import { resolveTargets, type OpResult, type Pre } from '../opkit';
-import { drawCards, moveInstance, trashInstance } from '@engine/core/zones';
+import { drawCards, moveInstance } from '@engine/core/zones';
 import { fireEvent, trashWithTrigger } from '../triggers';
 import { matchesFilter } from '../select';
 

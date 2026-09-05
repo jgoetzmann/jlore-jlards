@@ -20,7 +20,6 @@ import type {
   Zone,
 } from '@engine/types';
 import type { Rng } from '@engine/rng';
-import { allCards } from '@engine/registry';
 import { effectiveKeywords } from '@engine/systems/keywords.js';
 import {
   asArray,
@@ -193,16 +192,6 @@ export function matchesFilter(state: GameState, iid: InstanceId, filter?: CardFi
   if (filter.not && matchesFilter(state, iid, filter.not)) return false;
 
   return true;
-}
-
-export function cardsMatchingLocal(state: GameState, filter?: CardFilter): CardDefinition[] {
-  let pool: CardDefinition[];
-  try {
-    pool = allCards();
-  } catch {
-    pool = [];
-  }
-  return pool.filter((d) => matchesDefFilter(d, filter, state));
 }
 
 // ---------------------------------------------------------------------------
@@ -412,20 +401,6 @@ export function selectPilesWith(
   }
 
   return ids.slice(0, want);
-}
-
-export function selectPiles(
-  state: GameState,
-  sel: PileSelector | undefined,
-  ctx: EffectContext,
-): PileId[] {
-  return selectPilesWith(state, sel, ctx, null);
-}
-
-export function isSelector(v: unknown): v is Selector {
-  if (!v || typeof v !== 'object') return false;
-  const o = v as Record<string, unknown>;
-  return 'zone' in o || 'who' in o || 'self' in o || 'chooser' in o || (!('shop' in o) && 'filter' in o);
 }
 
 export function isPileSelector(v: unknown): v is PileSelector {

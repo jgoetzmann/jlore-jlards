@@ -150,15 +150,3 @@ export function checkEndCondition(state: GameState): EndCheck {
       return NOT_ENDED;
   }
 }
-
-/**
- * Live countdown for the UI: turns left under Death's Door / Countdown, or null
- * when this match does not run on a clock.
- */
-export function turnsRemaining(state: GameState): number | null {
-  if (state.hardEndTurn !== null) return Math.max(0, state.hardEndTurn - state.turn);
-  if (state.config.winCondition.kind === 'countdown') {
-    return Math.max(0, countdownTarget(state) - state.turn);
-  }
-  return null;
-}

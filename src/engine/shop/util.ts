@@ -55,15 +55,6 @@ export function nextIid(seq: number): InstanceId {
 
 export { cloneState } from '@engine/core/clone.js';
 
-export function clonePile(pile: Pile): Pile {
-  return {
-    ...pile,
-    cards: [...pile.cards],
-    locks: pile.locks.map((l) => ({ ...l })),
-    costMods: pile.costMods.map((m) => ({ ...m })),
-  };
-}
-
 /** Rewrite a single pile on a detached copy of the state. */
 export function withPile(state: GameState, pileId: PileId, mutate: (pile: Pile) => void): GameState {
   if (!state.shop.piles[pileId]) return state;

@@ -105,24 +105,6 @@ export function applyBuff(
   return applyBuffAt(state, scope, target, delta, stat, rng, 0);
 }
 
-/** Buff N times, rolling a fresh stat each time when `stat` is null. */
-export function applyBuffTimes(
-  state: GameState,
-  scope: 'instance' | 'allCopies' | 'pile',
-  target: string,
-  delta: 1 | -1,
-  stat: StatKey | null,
-  rng: Rng,
-  times: number,
-): GameState {
-  let next = state;
-  const n = Math.max(0, Math.floor(times));
-  for (let i = 0; i < n; i++) {
-    next = applyBuffAt(next, scope, target, delta, stat, rng, 0);
-  }
-  return next;
-}
-
 function applyBuffAt(
   state: GameState,
   scope: 'instance' | 'allCopies' | 'pile',
@@ -221,18 +203,4 @@ function fireOnBuff(
   }
 
   return next;
-}
-
-/**
- * Nerf is Buff with delta -1. It exists as its own name because the effect DSL
- * has a separate `nerf` op and card text reads better against it.
- */
-export function applyNerf(
-  state: GameState,
-  scope: 'instance' | 'allCopies' | 'pile',
-  target: string,
-  stat: StatKey | null,
-  rng: Rng,
-): GameState {
-  return applyBuff(state, scope, target, -1, stat, rng);
 }

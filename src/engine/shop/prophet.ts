@@ -8,7 +8,7 @@
  */
 
 import type { CardDefId, GameState, PileId, PlayerId, ProphetCost } from '@engine/types';
-import { appendLog, pileDefId, safeGetCard } from './util';
+import { pileDefId, safeGetCard } from './util';
 
 /**
  * SB-14 / B98. All 24 Prophet cards are present in every match — threshold-gated,
@@ -91,77 +91,4 @@ export function canAffordProphet(state: GameState, defId: CardDefId, player: Pla
   const p = state.players[player];
   if (!p) return false;
   return p.prophet >= cost.threshold;
-}
-
-/**
- * B58, B60, B61. Pay a Prophet price: subtract the drain, clamp the result at 0,
- * and let The Unconcerned Lion alone go negative. No Money moves and no Buy is
- * consumed — those are the caller's job not to charge.
- */
-export function payProphet(state: GameState, defId: CardDefId, player: PlayerId): GameState {
-  const cost = prophetCostOfDef(defId);
-  const p = state.players[player];
-  if (!cost || !p) return state;
-
-  const raw = p.prophet - cost.drain;
-  const banked = defId === DEBT_LEGAL_DEF_ID ? raw : Math.max(0, raw);
-
-  const next: GameState = {
-    ...state,
-    players: {
-      ...state.players,
-      [player]: { ...p, prophet: banked },
-    },
-  };
-  return appendLog(
-    next,
-    'prophetPaid',
-    { defId, drain: cost.drain, threshold: cost.threshold, before: p.prophet, after: banked },
-    player,
-  );
-}
-
-/**
- * B60. Every write to banked Prophet goes through here. Clamped at 0 for every
- * card except the one debt-legal exception.
- */
-export function addProphet(
-  state: GameState,
-  player: PlayerId,
-  amount: number,
-  allowDebt = false,
-): GameState {
-  const p = state.players[player];
-  if (!p || amount === 0) return state;
-  const raw = p.prophet + amount;
-  const banked = allowDebt ? raw : Math.max(0, raw);
-  if (banked === p.prophet) return state;
-  const next: GameState = {
-    ...state,
-    players: { ...state.players, [player]: { ...p, prophet: banked } },
-  };
-  return appendLog(next, 'prophetChanged', { amount, before: p.prophet, after: banked }, player);
-}
-
-/** B59. Prophet purchases never consume a Buy; Money purchases always do. */
-export function purchaseConsumesBuy(state: GameState, pileId: PileId): boolean {
-  return !isProphetPile(state, pileId);
-}
-
-/** B58. Prophet purchases cost no Money at all, whatever the pile's price says. */
-export function purchaseCostsMoney(state: GameState, pileId: PileId): boolean {
-  return !isProphetPile(state, pileId);
-}
-
-/** The Prophet cards this buyer could take right now, for the bot and the UI. */
-export function affordableProphetPiles(state: GameState, player: PlayerId): PileId[] {
-  const out: PileId[] = [];
-  for (const pileId of state.shop.order.prophet) {
-    const pile = state.shop.piles[pileId];
-    if (!pile || pile.cards.length === 0) continue;
-    const defId = pileDefId(state, pileId);
-    if (!defId) continue;
-    if (canAffordProphet(state, defId, player)) out.push(pileId);
-  }
-  return out;
 }

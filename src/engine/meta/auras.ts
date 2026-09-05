@@ -25,12 +25,10 @@ import type {
   GameState,
   PlayerId,
 } from '@engine/types';
-import { getAura, allAuras } from '@engine/registry';
+import { getAura } from '@engine/registry';
 import { resolveEffects } from '@engine/effects';
 import { cloneState } from '@engine/core/clone.js';
 import { pushLog, withPlayer } from './util.js';
-
-export const HEROIC_ACTIVATION_COST = 2;
 
 /** Timed aura: Outstanding Debt runs for four turns (§9.2). */
 export const OUTSTANDING_DEBT_ID: AuraId = 'outstanding_debt';
@@ -69,17 +67,6 @@ export function heroicOf(state: GameState, player: PlayerId): AuraInstance | nul
 
 export function hypercelestialOf(state: GameState, player: PlayerId): AuraInstance | null {
   return aurasOfTier(state, player, 'hypercelestial')[0] ?? null;
-}
-
-export function celestialsOf(state: GameState, player: PlayerId): AuraInstance[] {
-  return aurasOfTier(state, player, 'celestial');
-}
-
-export function auraIdsForTier(tier: AuraTier): AuraId[] {
-  return allAuras()
-    .filter((a) => a.tier === tier)
-    .map((a) => a.id)
-    .sort();
 }
 
 /** Drop an aura off a player's field. */
@@ -137,66 +124,6 @@ export function manifestAura(
 
   p.field.push(newInstance(player, auraId, boundDefId));
   return pushLog(state, 'auraManifested', { auraId, tier: realTier }, player);
-}
-
-/** Bind Oathbound Memory to a definition id (Infini Scepter). */
-export function bindAura(
-  state: GameState,
-  player: PlayerId,
-  auraId: AuraId,
-  defId: CardDefId,
-): GameState {
-  if (!hasAura(state, player, auraId)) return state;
-  const next = withPlayer(state, player, (p) => ({
-    ...p,
-    field: p.field.map((a) => (a.auraId === auraId ? { ...a, boundDefId: defId } : a)),
-  }));
-  return pushLog(next, 'auraBound', { auraId, defId }, player);
-}
-
-/**
- * B77 — activate a Heroic aura. Costs 2 Money (or the definition's own
- * `activationCost`) and is usable once per turn. Rejections return the state
- * unchanged with a LogEntry, never a throw.
- */
-export function activateAura(state: GameState, player: PlayerId, auraId: AuraId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-
-  const held = p.field.find((a) => a.auraId === auraId);
-  if (!held) return pushLog(state, 'auraActivateRejected', { auraId, why: 'notHeld' }, player);
-
-  const def = auraDef(auraId);
-  const tier = def?.tier ?? 'heroic';
-  if (tier !== 'heroic') {
-    return pushLog(state, 'auraActivateRejected', { auraId, why: 'notHeroic' }, player);
-  }
-  if (held.usedThisTurn) {
-    return pushLog(state, 'auraActivateRejected', { auraId, why: 'alreadyUsedThisTurn' }, player);
-  }
-
-  const cost = def?.activationCost ?? HEROIC_ACTIVATION_COST;
-  if (p.money < cost) {
-    return pushLog(state, 'auraActivateRejected', { auraId, why: 'notEnoughMoney', cost }, player);
-  }
-
-  let next = withPlayer(state, player, (q) => ({
-    ...q,
-    money: q.money - cost,
-    field: q.field.map((a) => (a.auraId === auraId ? { ...a, usedThisTurn: true } : a)),
-  }));
-  next = pushLog(next, 'auraActivated', { auraId, cost }, player);
-
-  if (def && def.effects.length > 0) {
-    next = resolveEffects(next, def.effects, {
-      player,
-      sourceIid: null,
-      depth: 0,
-      multiplier: 1,
-      vars: {},
-    });
-  }
-  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,30 +237,4 @@ export function auraStartOfTurn(state: GameState, player: PlayerId): GameState {
   }
 
   return next;
-}
-
-/** Fire every held aura's `endOfTurn` triggers. Companion to B80's window. */
-export function auraEndOfTurn(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p || p.field.length === 0) return state;
-  let next = state;
-  for (const inst of [...p.field]) {
-    const def = auraDef(inst.auraId);
-    if (!def) continue;
-    for (const trigger of def.triggers) {
-      if (trigger.on !== 'endOfTurn') continue;
-      next = resolveEffects(next, trigger.effects, {
-        player,
-        sourceIid: null,
-        depth: 0,
-        multiplier: 1,
-        vars: {},
-      });
-    }
-  }
-  // Snapshot unspent money so Outstanding Debt has a number to read next turn.
-  return withPlayer(next, player, (q) => ({
-    ...q,
-    counters: { ...q.counters, unspentMoney: q.money },
-  }));
 }

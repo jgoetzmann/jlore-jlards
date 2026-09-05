@@ -11,14 +11,13 @@
  */
 
 import type {
-  CardDefId,
   Condition,
   EffectNode,
   GameState,
   InstanceId,
   PlayerId,
 } from '@engine/types';
-import { defOf, pushLog, tryGetCard, withInstance, withPlayer } from './internal';
+import { defOf, pushLog, withInstance, withPlayer } from './internal';
 
 /** Cards already played when the counter was last zeroed mid-turn. */
 export const COMBO_OFFSET_KEY = 'comboOffset';
@@ -46,41 +45,6 @@ export function comboCount(state: GameState, player: PlayerId): number {
   const p = state.players[player];
   if (!p) return 0;
   return Math.max(0, p.playedThisTurn.length - comboOffsetOf(state, player));
-}
-
-/**
- * The ordinal this instance held at the moment it was played. A Combo N clause
- * asks "was the source at least the Nth card played this turn", which is a
- * question about the index at play time, not about the live count — the count
- * keeps rising while the card is still resolving.
- *
- * A card that is mid-resolution and not yet recorded reads as the next ordinal.
- */
-export function comboAtPlay(state: GameState, player: PlayerId, iid: InstanceId): number {
-  const p = state.players[player];
-  if (!p) return 0;
-  const offset = comboOffsetOf(state, player);
-  const idx = p.playedThisTurn.lastIndexOf(iid);
-  if (idx < 0) return Math.max(1, p.playedThisTurn.length - offset + 1);
-  return Math.max(0, idx + 1 - offset);
-}
-
-/** B34: does this source satisfy `Combo n`? */
-export function meetsCombo(state: GameState, player: PlayerId, iid: InstanceId | null, n: number): boolean {
-  if (iid === null) return comboCount(state, player) >= n;
-  return comboAtPlay(state, player, iid) >= n;
-}
-
-/** Record a play. Appends to the ordered history and refreshes the stored combo. */
-export function recordPlay(state: GameState, player: PlayerId, iid: InstanceId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  const played = [...p.playedThisTurn, iid];
-  const offset = comboOffsetOf(state, player);
-  const combo = Math.max(0, played.length - offset);
-  let next = withPlayer(state, player, (pl) => ({ ...pl, playedThisTurn: played, combo }));
-  next = withInstance(next, iid, (inst) => ({ ...inst, playedOnTurn: next.turn }));
-  return next;
 }
 
 /** Crime Wave / `{op:'resetCombo'}`: zero the count without clearing the history. */
@@ -111,21 +75,6 @@ export function resetComboInPlace(state: GameState, player: PlayerId): boolean {
   p.counters[OFFSET_KEY] = p.playedThisTurn.length;
   p.counters[COMBO_OFFSET_TURN_KEY] = state.turn;
   return true;
-}
-
-/** Start of turn: history and offset both clear (B71). */
-export function clearComboForTurn(state: GameState, player: PlayerId): GameState {
-  const p = state.players[player];
-  if (!p) return state;
-  const counters = { ...p.counters };
-  delete counters[OFFSET_KEY];
-  delete counters[COMBO_OFFSET_TURN_KEY];
-  return withPlayer(state, player, (pl) => ({
-    ...pl,
-    playedThisTurn: [],
-    combo: 0,
-    counters,
-  }));
 }
 
 /** Every `{op:'conditional', if:{combo:N}}` node reachable from a card. */
@@ -211,25 +160,4 @@ export function stealComboClause(
     victim,
     clauses: clauses.length,
   });
-}
-
-/** True when this instance's printed Combo clauses have been stolen away. */
-export function comboClauseSuppressed(state: GameState, iid: InstanceId): boolean {
-  return (state.instances[iid]?.counters.comboClauseStolen ?? 0) > 0;
-}
-
-/** Distinct definitions played this turn — several Combo payoffs count variety. */
-export function distinctPlayedThisTurn(state: GameState, player: PlayerId): CardDefId[] {
-  const p = state.players[player];
-  if (!p) return [];
-  const seen = new Set<CardDefId>();
-  const out: CardDefId[] = [];
-  for (const iid of p.playedThisTurn) {
-    const inst = state.instances[iid];
-    if (!inst || seen.has(inst.defId)) continue;
-    if (!tryGetCard(inst.defId)) continue;
-    seen.add(inst.defId);
-    out.push(inst.defId);
-  }
-  return out;
 }

@@ -88,31 +88,17 @@ export function auraStartOfTurn(state: GameState, player: PlayerId): GameState {
 
 export {
   anomalies,
-  anomaliesInGroup,
-  anomalyBanner,
-  anomalyEndOfTurn,
-  anomalyIds,
   anomalyStartOfTurn,
-  applyTurnModifiers,
   battleRoyaleTick,
-  canCombine,
   cashInjection,
-  dynamicPricingOnBuy,
-  fadingBlossomKeyword,
   getAnomaly,
   randomUniverseCards,
   rollableAnomalyIds,
-  MUTEX_GROUPS,
 } from './anomalies.js';
 export type { AnomalyDef, AnomalyGroup } from './anomalies.js';
 
 export {
-  activateAura,
-  auraEndOfTurn,
-  auraIdsForTier,
   aurasOfTier,
-  bindAura,
-  celestialsOf,
   fieldOf,
   hasAura,
   heroicOf,
@@ -121,7 +107,6 @@ export {
   outstandingDebtAmount,
   removeAura,
   tierOf,
-  HEROIC_ACTIVATION_COST,
   OATHBOUND_MEMORY_ID,
   OUTSTANDING_DEBT_ID,
   OUTSTANDING_DEBT_TURNS,
@@ -129,30 +114,22 @@ export {
 
 export {
   codexSeedIds,
-  entireUniverseIn,
   isVpThresholdMatch,
-  noteSeen,
   noteSeenAll,
   poolExclusions,
-  seedCodexes,
   stripExcludedFromShop,
   VP_THRESHOLD_EXCLUSIONS,
 } from './codex.js';
 
-export { applyMeowText, displayText, isMeowActive, meowify, MEOW_ANOMALY_ID } from './meow.js';
+export { applyMeowText, isMeowActive, meowify, MEOW_ANOMALY_ID } from './meow.js';
 
 export {
   deckDiamondCount,
   deckUniqueCount,
   getFloor,
-  questEndOfTurn,
   questFloors,
-  questOnWin,
   questProgress,
   questStartOfTurn,
-  questSummary,
-  startQuest,
-  IN_TOO_DEEP_AURA_ID,
 } from './quest.js';
 export type { QuestFloor, QuestPredicate } from './quest.js';
 
@@ -161,7 +138,6 @@ export {
   isEndOfGame,
   liveVp,
   scoreFor,
-  winnersOf,
   CONSTELLATION_ID,
   STAR_ALIGNER_ID,
 } from './scoring.js';
@@ -170,7 +146,6 @@ export {
   auctionBid,
   moneyGapToNextPile,
   perfectCardFor,
-  rankedKnownUniverse,
   scoreCandidate,
   vpGapToLeader,
   winningDeckFor,
@@ -183,7 +158,6 @@ export {
   emptyDraftPiles,
   jloreEmpty,
   standardPileTrigger,
-  turnsRemaining,
   vpLead,
   DOOMSDAY_LIMIT,
   JLORE_PILE_ID,

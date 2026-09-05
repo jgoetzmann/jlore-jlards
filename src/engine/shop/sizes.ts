@@ -27,7 +27,6 @@ export const RARITY_PULL_WEIGHT: Record<Rarity, number> = {
   mythic: 0.1,
 };
 
-export const BASIC_RESOURCE_IDS: CardDefId[] = ['copper', 'silver', 'gold', 'diamond'];
 export const BASIC_POINTS_IDS: CardDefId[] = ['tix', 'robux', 'jlore'];
 export const JLORE_ID: CardDefId = 'jlore';
 

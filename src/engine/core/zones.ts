@@ -51,10 +51,6 @@ export function safeDef(defId: string): CardDefinition {
   };
 }
 
-export function instOf(state: GameState, iid: InstanceId): CardInstance | null {
-  return state.instances[iid] ?? null;
-}
-
 export function defOfInstance(state: GameState, iid: InstanceId): CardDefinition {
   const inst = state.instances[iid];
   return safeDef(inst ? inst.defId : iid);
