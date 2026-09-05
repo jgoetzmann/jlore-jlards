@@ -39,6 +39,8 @@ npm run typecheck      # tsc --noEmit
 npm run cards:validate # catalog integrity — run this after adding cards
 npm run sim            # headless bot matches
 npm run balance        # balance telemetry report -> telemetry/
+npm run replay -- --seed=42 --players=3          # reproduce a match exactly
+npm run replay -- --seed=42 --players=3 --turn=14  # stop and print the board
 npm run cards:export   # cards + auras as JSON, for art tooling
 npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
 ```
@@ -70,12 +72,12 @@ src/engine/   pure rules engine — no I/O, no React, no fetch
   view.ts       viewFor(state, player) — the only security in the system
   effects/      the effect-node interpreter (~60 ops)
   shop/ systems/ meta/
-src/cards/    ~400 card definitions as typed data
+src/cards/    533 card definitions + 25 auras, as typed data
 src/net/      relay poll loop, host, client, storage tiers
 src/ui/       React components
 src/sim/      bots, headless match runner, balance telemetry
 api/          the entire backend, ~40 lines
-tools/        CLIs for sim, balance, validation, export, art manifest
+tools/        CLIs for sim, balance, replay, validation, export, art manifest
 test/         the suite
 ```
 
@@ -105,6 +107,21 @@ plain stat lines (`+1 Action, +2 Money`); only non-stat behaviour goes in
 | [`docs/ART-MANIFEST.md`](docs/ART-MANIFEST.md) | Generated art worklist |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Original topology handoff |
 | [`jlore_jlards_gameplay.md`](jlore_jlards_gameplay.md) | Original rules and card catalog handoff |
+
+## Reproducing a bug from a playtest
+
+A bug report is two numbers. `reduce` is a pure function of `(state, action)` and
+every random pull comes from `state.seed` + `state.rngCursor`, so the same seed
+and the same action list always reproduce the same match.
+
+```bash
+npm run replay -- --seed=42 --players=3 --out=telemetry/bug.json   # record it
+npm run replay -- --in=telemetry/bug.json                          # replay it
+npm run replay -- --in=telemetry/bug.json --turn=14                # stop at turn 14
+```
+
+That is also what makes animation timing testable: re-run the same match and the
+same cards resolve in the same order every time.
 
 ## Known weaknesses, accepted
 

@@ -189,7 +189,31 @@ architecture doc suggested deferring them, but each has a cheap correct
 implementation once the instance model and the effect queue exist, and cutting
 them would have left ~10 catalog holes for no real saving.
 
-## 12. How this was built: fullsend
+## 12. What the build actually produced
+
+| | |
+|---|---|
+| Cards | **533 definitions + 25 auras**, catalog validator clean |
+| Tests | **579 passing, 31 files**, every one citing a numbered behavior |
+| Typecheck | `tsc --noEmit` clean under `strict` |
+| Coverage | all **120** spec behaviors cited by at least one test |
+| Bundle | 610 kB, 148 kB gzipped — mostly the catalog |
+
+Two bugs are worth knowing about because both were *silent* — the suite was
+green and the game looked fine while each was live:
+
+- **`{op:'choose'}` resolved to nothing** (SB-43). Two rival resume
+  implementations existed; the reachable one read a field the choose op never
+  wrote. Seventeen "choose one" clauses across a dozen cards paid out their stat
+  lines and skipped their choice. Nothing looked broken.
+- **A prompt chain had no cycle guard** (SB-42). The node budget is counted
+  within one resolution and every resume starts a fresh one, so the one
+  recursion path the depth cap does not cover was the one nothing covered.
+
+Both are the same lesson: the dangerous defect in a system this size is not the
+one that crashes, it is the one that quietly does half the work.
+
+## 13. How this was built: fullsend
 
 Eleven builders and four spec-testers ran in parallel with the compiler off,
 against a frozen spec and a frozen type surface (`src/engine/types.ts`, written
@@ -202,5 +226,27 @@ The type freeze is the load-bearing part. Signature drift is the failure
 parallelism causes most and reconciliation fixes most slowly, so the interface
 was made real — as a file every slice imports — before anyone started writing.
 
+The numbers, for anyone judging whether the method paid:
+
+| Phase | Result |
+|---|---|
+| 2 — full send | 11 builders + 4 testers, 47,385 lines, every slice `BUILDS-RUN: 0` |
+| 3 — contact | **10 type errors and 34 failing tests** out of 574 |
+| 4 — reconcile | 6 collision clusters, one winner each, **−857 lines** |
+| 5 — green | 5 fix agents, directory-disjoint, 574/574 |
+| 6 — cull | **−2,768 lines**, suite never went red |
+
+Ten type errors from 47,000 lines written blind is far below what this method
+normally produces, and the reason is the type freeze. Broken imports and
+signature drift are the two largest Phase 3 error classes and both were removed
+by construction — every slice imported the same real file. The same freeze is
+why 540 of 574 tests passed at first contact despite the testers never seeing the
+implementation: both sides were written against one contract rather than two
+readings of a prose spec.
+
+What that leaves is behavioral damage, which is the damage worth having. The
+failures that remained were real disagreements about how the game works, not
+about what things are called.
+
 Run artifacts live in `.fullsend/` and are gitignored: `SPEC.md`, `damage.md`,
-`notes/*.assumptions`, and `notes/reconcile-decisions.md`.
+`notes/*.assumptions`, `notes/reconcile-decisions.md`, and `notes/cull-report.md`.

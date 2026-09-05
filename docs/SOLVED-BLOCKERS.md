@@ -559,3 +559,62 @@ the lap**, because those are player-triggered: one player crossing a threshold
 should not deny the others their turn in the round.
 
 Code: `noteEndCondition()` in `src/engine/core/endgame.ts`.
+
+### SB-42. A prompt that leads to another prompt could loop forever
+
+**Resolved:** a per-turn ceiling of **60 prompt resolutions per player**. Past it
+the chain is fizzled: `pending` is cleared, the queue is dropped, and a
+`promptFizzle` entry is logged.
+
+Reasoning: `config.effectNodeBudget` counts nodes *within one resolution*, and
+every resume starts a fresh one — so the depth cap and the node budget, which
+between them cover every other recursion path in the game, cover this one not at
+all. A card whose prompt branch raises another prompt can therefore loop
+indefinitely. This was found the hard way: wiring `{op:'choose'}` to actually
+resolve its branch sent the sim harness from 155 seconds to over 600 with no
+termination.
+
+60 is deliberately generous — a Discover-heavy turn spends fewer than a dozen —
+so the ceiling only bites on a genuine cycle.
+
+Code: `PROMPT_BUDGET_PER_TURN` in `src/engine/core/resume.ts`.
+
+### SB-43. `{op:'choose'}` resolved to nothing
+
+**Resolved:** `opChoose` now writes the per-option effect lists onto the prompt's
+`ctx.optionEffects`, keyed by option index, which is where the resume path looks
+for them.
+
+This was a silent gap, not a reported one: the prompt appeared, the player picked
+an option, and the branch never ran. About **17 "choose one" clauses across a
+dozen cards** — Archivist, Jalshi, Night on the Town, Plandemic, Throttle
+Markets, The Curator, Recession Indicator, Nine Lives Loan, Lord of the Cave,
+Plague Charger, Spider E.B., Cup Runneth Over — printed a choice they did not
+make, while still paying out their stat lines, so nothing looked broken.
+
+It survived the whole build because no numbered behavior covered it and the two
+rival resume implementations hid it: `core/resume.ts` probed for an export name
+`@engine/effects` never had, so its own local path always won, and the local path
+read a field the choose op never wrote.
+
+Covered now by `test/effects-choose.test.ts`, which fails without the fix.
+
+Code: `opChoose` in `src/engine/effects/ops/choices.ts`.
+
+---
+
+## Balance findings from the first harness runs
+
+Not blockers — measurements, recorded here because they are the first real
+output of the thing the harness was built for. All **REVISIT**.
+
+| Finding | Numbers | Note |
+|---|---|---|
+| **The Unconcerned Lion is a free draw-3** | bought 3.1×/match, first buy turn 1, in 100% of winning decks | Threshold 0 and drain 1 means it is always affordable from turn 1, and B61 lets it go into Prophet debt. Working as designed (SB-5, SB-38) — but "always buy on turn 1" is a solved card. Consider a threshold above 0. |
+| **Dead Discover cards** | Oh Mr. Lebon offered 344, taken 2 · Solar Eclipse 123/2 · Simple Refining 92/0 · Conjure Aura 74/0 · Rebellion 70/0 | A card offered constantly and never picked is a dead card. This list is the balance worklist, and it regenerates with `npm run balance`. |
+| **Discover pick rate** | ~33% across 4,610 offers | Sane for a 3-option Discover; a much lower number would mean the pools are offering junk. |
+| **Match length** | end reasons split `emptyPiles` / `jlorePileEmpty` roughly evenly, `turnCap` rare | The two standard end conditions are both live, which is what SB-3 and SB-4 were tuned for. |
+
+Caveat: these come from the greedy bot, which buys the most expensive affordable
+card and does not build archetypes. Read it as "which cards are reachable and
+obviously good", not as human play.

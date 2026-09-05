@@ -6,3 +6,4 @@ dist/
 .env
 telemetry/
 dist-cards/
+telemetry/
