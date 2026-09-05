@@ -1,0 +1,295 @@
+/**
+ * A.17 — Eggs.
+ *
+ * B101: every Egg is cost 0, `Flimsy`, Token-typed, and grants +1 Action.
+ * The standard drop table is 70 normal / 15 big / 9 golden / 5 rotten /
+ * 1 diamond, expressed as one `{op:'random'}` node with those exact weights.
+ *
+ * SB-30 is applied here: `chicken_coop` / "Chicken Coop", never "Coup", and
+ * the cartons are `Flimsy`, never "Flismy".
+ */
+import type { CardDefinition, EffectNode, StatKey } from '@engine/types';
+
+/** The standard 70 / 15 / 9 / 5 / 1 Egg drop, one Egg into hand. */
+const eggDrop = (): EffectNode => ({
+  op: 'random',
+  branches: [
+    { weight: 70, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }], displayAs: 'an Egg' },
+    { weight: 15, effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }], displayAs: 'a Big Egg' },
+    { weight: 9, effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }], displayAs: 'a Golden Egg' },
+    { weight: 5, effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }], displayAs: 'a Rotten Egg' },
+    {
+      weight: 1,
+      effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }],
+      displayAs: 'a Diamond Egg',
+    },
+  ],
+});
+
+/** N Eggs off the standard table. */
+const eggDrops = (n: number): EffectNode => ({ op: 'repeat', times: n, effects: [eggDrop()] });
+
+const RANDOM_STATS: StatKey[] = ['money', 'buys', 'cards', 'actions'];
+
+/** Randomly one of +N Money / Buy / Card / Action. */
+const randomStat = (n: number): EffectNode => ({
+  op: 'random',
+  branches: RANDOM_STATS.map((stat) => ({
+    weight: 1,
+    effects: [{ op: 'gain', stat, amount: n } as EffectNode],
+    displayAs: `+${n} ${stat}`,
+  })),
+});
+
+export const cards: CardDefinition[] = [
+  // -------------------------------------------------------------------------
+  // The 5 Eggs
+  // -------------------------------------------------------------------------
+  {
+    id: 'egg',
+    name: 'Egg',
+    cost: { money: 0 },
+    types: ['Action', 'Token', 'Food'],
+    subtypes: ['Egg', 'Food'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [randomStat(1)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Then randomly one of +1 Money, +1 Buy, +1 Card or +1 Action.',
+    flavor: 'Grade A, probably.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    notPurchasable: true,
+    art: { key: 'egg', status: 'placeholder' },
+  },
+  {
+    id: 'big_egg',
+    name: 'Big Egg',
+    cost: { money: 0 },
+    types: ['Action', 'Token', 'Food'],
+    subtypes: ['Egg', 'Food'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [randomStat(2)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Then randomly one of +2 Money, +2 Buys, +2 Cards or +2 Actions.',
+    flavor: 'Double yolk.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    notPurchasable: true,
+    art: { key: 'big_egg', status: 'placeholder' },
+  },
+  {
+    id: 'golden_egg',
+    name: 'Golden Egg',
+    cost: { money: 0 },
+    types: ['Action', 'Token', 'Food'],
+    subtypes: ['Egg', 'Food', 'Gold'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [{ op: 'repeat', times: 3, effects: [randomStat(1)] }],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Then three times, randomly one of +1 Money, +1 Buy, +1 Card or +1 Action.',
+    flavor: 'The goose is fine, thank you for asking.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    notPurchasable: true,
+    art: { key: 'golden_egg', status: 'placeholder', anim: 'coin' },
+  },
+  {
+    id: 'diamond_egg',
+    name: 'Diamond Egg',
+    cost: { money: 0 },
+    types: ['Action', 'Token', 'Food'],
+    subtypes: ['Egg', 'Food'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [{ op: 'repeat', times: 3, effects: [randomStat(2)] }],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Then three times, randomly one of +2 Money, +2 Buys, +2 Cards or +2 Actions.',
+    flavor: 'One in a hundred.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    notPurchasable: true,
+    art: { key: 'diamond_egg', status: 'placeholder', anim: 'coin' },
+  },
+  {
+    id: 'rotten_egg',
+    name: 'Rotten Egg',
+    cost: { money: 0 },
+    types: ['Action', 'Token', 'Food'],
+    subtypes: ['Egg', 'Food'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { actions: 1, vp: -5 },
+    effects: [],
+    triggers: [],
+    text: 'Flimsy. +1 Action, −5 VP.',
+    flavor: 'You can smell it through the carton.',
+    complexity: 'T1',
+    subsystems: ['S-TOKEN'],
+    notPurchasable: true,
+    art: { key: 'rotten_egg', status: 'placeholder' },
+  },
+
+  // -------------------------------------------------------------------------
+  // Egg generators
+  // -------------------------------------------------------------------------
+  {
+    id: 'tiny_carton_of_eggs',
+    name: 'Tiny Carton of Eggs',
+    cost: { money: 4 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'common',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [eggDrops(3)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Add 3 random Eggs to your hand.',
+    flavor: 'Three is a carton if you say it firmly.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'tiny_carton_of_eggs', status: 'placeholder' },
+  },
+  {
+    id: 'chicken_coop',
+    name: 'Chicken Coop',
+    cost: { money: 5 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'common',
+    keywords: [],
+    stats: { actions: 1 },
+    effects: [eggDrops(3)],
+    triggers: [],
+    text: '+1 Action. Add 3 random Eggs to your hand.',
+    flavor: 'It keeps producing. That is the whole idea.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'chicken_coop', status: 'placeholder' },
+  },
+  {
+    id: 'small_carton_of_eggs',
+    name: 'Small Carton of Eggs',
+    cost: { money: 6 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'rare',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [eggDrops(6)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Add 6 random Eggs to your hand.',
+    flavor: 'Half a dozen.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'small_carton_of_eggs', status: 'placeholder' },
+  },
+  {
+    id: 'dozen_eggs',
+    name: 'Dozen Eggs',
+    cost: { money: 8 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'rare',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [eggDrops(12)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Add 12 random Eggs to your hand.',
+    flavor: 'A whole dozen.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'dozen_eggs', status: 'placeholder' },
+  },
+  {
+    id: 'bulk_eggs',
+    name: 'Bulk Eggs',
+    cost: { money: 11 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'epic',
+    keywords: ['Flimsy'],
+    stats: { actions: 1 },
+    effects: [eggDrops(24)],
+    triggers: [],
+    text: 'Flimsy. +1 Action. Add 24 random Eggs to your hand.',
+    flavor: 'You will need a bigger hand.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'bulk_eggs', status: 'placeholder' },
+  },
+  {
+    id: 'hen',
+    name: 'Hen',
+    cost: { money: 3 },
+    types: ['Action'],
+    subtypes: ['Egg'],
+    tags: [],
+    rarity: 'rare',
+    keywords: [],
+    stats: { actions: 1 },
+    effects: [
+      {
+        op: 'random',
+        branches: [
+          {
+            weight: 35,
+            effects: [{ op: 'createCard', defId: 'feather', to: 'hand', count: 1 }],
+            displayAs: 'a Feather',
+          },
+          { weight: 35, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }], displayAs: 'an Egg' },
+          {
+            weight: 15,
+            effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }],
+            displayAs: 'a Big Egg',
+          },
+          {
+            weight: 9,
+            effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }],
+            displayAs: 'a Golden Egg',
+          },
+          {
+            weight: 5,
+            effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }],
+            displayAs: 'a Rotten Egg',
+          },
+          {
+            weight: 1,
+            effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }],
+            displayAs: 'a Diamond Egg',
+          },
+        ],
+      },
+    ],
+    triggers: [],
+    text: '+1 Action. Add a random Egg or Feather to your hand — 35% Feather, 35% Egg, 15% Big, 9% Golden, 5% Rotten, 1% Diamond.',
+    flavor: 'She decides what you get.',
+    complexity: 'T2',
+    subsystems: ['S-TOKEN'],
+    shop: 'draft',
+    art: { key: 'hen', status: 'placeholder', anim: 'summon' },
+  },
+];
+
+export default cards;
