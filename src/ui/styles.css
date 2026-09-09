@@ -653,6 +653,11 @@ h3 {
   display: none;
 }
 
+.playarea-row > .card,
+.playarea-row .card {
+  flex: 0 0 auto;
+}
+
 /* ------------------------------------------------------------------- hand */
 
 .hand {
@@ -732,6 +737,10 @@ h3 {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  /* Flex items shrink by default, so a 13-card graveyard in a 320px panel
+     squeezed every card to a sliver and wrapped its name one character per
+     line — "T i x", "C o p p e r". Cards keep their width; the row scrolls. */
+  scrollbar-width: thin;
 }
 
 .playarea-count {
