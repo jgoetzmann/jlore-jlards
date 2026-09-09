@@ -1,0 +1,617 @@
+/* Jlore Jlards — the motion layer.
+ *
+ * Loaded after styles.css so it can override the two static rules that were
+ * already doing motion's job by hand (the card hover lift, the spinner).
+ *
+ * Three rules this file keeps:
+ *   1. Every duration comes from a token. There are no magic milliseconds
+ *      below, so the whole table can be slowed or sped as one thing.
+ *   2. Nothing animates a property that triggers layout. Transform and opacity
+ *      only — a hand of ten cards re-laying-out at 60fps is how you get a
+ *      deck-builder that feels worse than the paper version.
+ *   3. `prefers-reduced-motion` is honoured at the bottom of this file, once,
+ *      for everything. Not per-rule, so a new animation cannot forget it.
+ */
+
+:root {
+  /* Durations. Keep the ratios: a card move should read as one beat, a stat
+     tick as half of one, a turn change as two. */
+  --t-instant: 90ms;
+  --t-tick: 160ms;
+  --t-quick: 220ms;
+  --t-move: 320ms;
+  --t-beat: 480ms;
+  --t-turn: 900ms;
+
+  /* Easings. `--e-out` for things arriving, `--e-spring` for things the player
+     did on purpose, `--e-in` for things leaving. */
+  --e-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --e-in: cubic-bezier(0.55, 0.06, 0.68, 0.19);
+  --e-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --e-linear: linear;
+}
+
+/* ------------------------------------------------------------------ cards */
+
+/* The lift was instant before. Same destination, with a ramp — and on a
+   transform-only property so the row never reflows. */
+.card {
+  transition:
+    transform var(--t-quick) var(--e-out),
+    border-color var(--t-quick) var(--e-out),
+    box-shadow var(--t-quick) var(--e-out),
+    opacity var(--t-quick) var(--e-out);
+  will-change: transform;
+}
+
+.card-clickable:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 45%);
+  z-index: 3;
+}
+
+.card-clickable:active {
+  transform: translateY(-1px) scale(0.99);
+  transition-duration: var(--t-instant);
+}
+
+.card-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  transform: translateY(-4px);
+}
+
+/* The card the keyboard is on. Distinct from hover so both can be true. */
+.card-cursor {
+  outline: 2px dashed var(--accent-2);
+  outline-offset: 2px;
+}
+
+/* The digit that plays this card. Faint until the hand is hovered or focused,
+   because it is a reminder, not a label. */
+.card-hint {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 45%);
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  opacity: 0.35;
+  transition: opacity var(--t-quick) var(--e-out);
+}
+
+.hand:hover .card-hint,
+.hand:focus-within .card-hint,
+.card-cursor .card-hint {
+  opacity: 1;
+  color: var(--accent-2);
+}
+
+/* --------------------------------------------------- entrance keyframes --
+ * These are the five presets `ArtSlot.anim` already names on 174 cards, plus
+ * a generic `enter` for the other 359. Applied for one beat by useMotion and
+ * then dropped, so nothing is left mid-animation.
+ */
+
+.card-cue {
+  animation-duration: var(--t-beat);
+  animation-timing-function: var(--e-out);
+  animation-fill-mode: both;
+}
+
+.card-cue-enter {
+  animation-name: cue-enter;
+}
+.card-cue-summon {
+  animation-name: cue-summon;
+}
+.card-cue-coin {
+  animation-name: cue-coin;
+}
+.card-cue-trash {
+  animation-name: cue-trash;
+}
+.card-cue-explode {
+  animation-name: cue-explode;
+}
+.card-cue-shuffle {
+  animation-name: cue-shuffle;
+}
+
+@keyframes cue-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Summoned: rises into place and settles. */
+@keyframes cue-summon {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.86);
+    filter: brightness(1.6);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.03);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Money: a coin-flip half-turn and a gold flash. */
+@keyframes cue-coin {
+  0% {
+    opacity: 0;
+    transform: rotateY(90deg) scale(0.9);
+    filter: brightness(1.8) saturate(1.4);
+  }
+  70% {
+    opacity: 1;
+    transform: rotateY(-8deg) scale(1.02);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Trashed: the card that arrives where something was destroyed. */
+@keyframes cue-trash {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) rotate(-6deg) scale(1.04);
+    filter: grayscale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes cue-explode {
+  0% {
+    opacity: 0;
+    transform: scale(1.35);
+    filter: brightness(2.2);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(0.97);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes cue-shuffle {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px) rotate(-5deg);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(6px) rotate(2deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------- the hand */
+
+.hand-slot {
+  transition: transform var(--t-quick) var(--e-out);
+}
+
+/* The gap that opens where a dragged card would land. */
+.hand-slot-over {
+  transform: translateX(10px);
+}
+
+/* The slot the keyboard is on sits slightly proud of the row. */
+.hand-slot-cursor {
+  transform: translateY(-6px);
+  z-index: 2;
+}
+
+.hand-hint kbd {
+  display: inline-block;
+  min-width: 15px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.hand-slot-dragging .card {
+  opacity: 0.35;
+  transform: scale(0.96);
+}
+
+/* The reorder nudges were always on screen, on every card, in every hand.
+   They are controls for a rare action, so they wait to be asked for. */
+.hand-nudge {
+  opacity: 0;
+  transition: opacity var(--t-quick) var(--e-out);
+}
+
+.hand-slot:hover .hand-nudge,
+.hand-slot:focus-within .hand-nudge {
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------- the board */
+
+.pile {
+  transition:
+    opacity var(--t-quick) var(--e-out),
+    filter var(--t-quick) var(--e-out);
+}
+
+.pile-buyable .card {
+  animation: pile-breathe 2.8s var(--e-linear) infinite;
+}
+
+@keyframes pile-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(127 212 160 / 0%);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(127 212 160 / 22%);
+  }
+}
+
+.pile-empty {
+  opacity: 0.45;
+  filter: saturate(0.3);
+}
+
+/* The pile that just lost its last card. One beat, then it is simply empty. */
+.pile-just-emptied {
+  animation: pile-emptied var(--t-turn) var(--e-out) both;
+}
+
+@keyframes pile-emptied {
+  0% {
+    box-shadow: 0 0 0 3px var(--danger);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(224 112 112 / 0%);
+  }
+}
+
+.pile-drained .pile-count {
+  animation: count-knock var(--t-beat) var(--e-spring) both;
+}
+
+@keyframes count-knock {
+  0% {
+    transform: scale(1.5);
+    color: var(--accent-2);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------- turn bar */
+
+.stat-value {
+  display: inline-block;
+  transition: color var(--t-tick) var(--e-out);
+}
+
+.stat-pulse-up .stat-value {
+  animation: stat-up var(--t-beat) var(--e-spring) both;
+}
+
+.stat-pulse-down .stat-value {
+  animation: stat-down var(--t-beat) var(--e-out) both;
+}
+
+@keyframes stat-up {
+  0% {
+    transform: translateY(6px) scale(1.35);
+    color: var(--accent);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes stat-down {
+  0% {
+    transform: translateY(-5px) scale(1.2);
+    color: var(--danger);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* The floating +3 / −1 that rides off a stat when it changes. */
+.stat-delta {
+  position: absolute;
+  top: -2px;
+  right: 2px;
+  font-size: 11px;
+  font-weight: 800;
+  pointer-events: none;
+  animation: delta-float var(--t-turn) var(--e-out) both;
+}
+
+.stat-delta-up {
+  color: var(--accent);
+}
+.stat-delta-down {
+  color: var(--danger);
+}
+
+@keyframes delta-float {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+.turn-timer {
+  transition: color var(--t-quick) var(--e-out);
+}
+
+.turn-timer-low {
+  animation: timer-pulse 1s var(--e-linear) infinite;
+}
+
+@keyframes timer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ------------------------------------------------------- the turn banner */
+
+.turn-banner {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.turn-banner-inner {
+  padding: 14px 34px;
+  border-radius: 999px;
+  background: rgb(25 29 38 / 92%);
+  border: 1px solid var(--line);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  animation: banner-sweep var(--t-turn) var(--e-out) both;
+}
+
+.turn-banner-yours .turn-banner-inner {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@keyframes banner-sweep {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+  22%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+}
+
+/* ------------------------------------------------------------- the prompt */
+
+.prompt-overlay {
+  animation: overlay-in var(--t-quick) var(--e-out) both;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.prompt-card {
+  animation: prompt-rise var(--t-move) var(--e-spring) both;
+}
+
+@keyframes prompt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Discover options land one after another rather than all at once, which is
+   what makes three cards read as three choices instead of one wall. */
+.prompt-option {
+  animation: option-in var(--t-move) var(--e-out) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+  transition:
+    transform var(--t-quick) var(--e-out),
+    border-color var(--t-quick) var(--e-out);
+}
+
+.prompt-option:hover {
+  transform: translateY(-3px);
+}
+
+.prompt-option-selected {
+  transform: translateY(-4px) scale(1.02);
+}
+
+@keyframes option-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------- the log */
+
+.log-entry {
+  animation: log-in var(--t-quick) var(--e-out) both;
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------- buttons */
+
+button {
+  transition:
+    background var(--t-tick) var(--e-out),
+    border-color var(--t-tick) var(--e-out),
+    transform var(--t-instant) var(--e-out),
+    opacity var(--t-tick) var(--e-out);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.end-turn:not(:disabled) {
+  animation: end-turn-ready 2.4s var(--e-linear) infinite;
+}
+
+@keyframes end-turn-ready {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(240 198 116 / 0%);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(240 198 116 / 20%);
+  }
+}
+
+/* ------------------------------------------------------- pending an intent
+ * The gap between clicking and the host's next view is up to a poll interval.
+ * This is the acknowledgement that the click landed, so the table never looks
+ * like it ignored you.
+ */
+
+.table-pending .table-main {
+  cursor: progress;
+}
+
+.card-committed {
+  opacity: 0.5;
+  transform: scale(0.97);
+  pointer-events: none;
+}
+
+.intent-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  transform-origin: left;
+  animation: intent-sweep 1.1s var(--e-linear) infinite;
+  z-index: 60;
+}
+
+@keyframes intent-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* -------------------------------------------------------- the help sheet */
+
+.key-help {
+  animation: prompt-rise var(--t-quick) var(--e-out) both;
+}
+
+/* ------------------------------------------------------- reduced motion --
+ * One block, at the end, covering everything above. A new keyframe added to
+ * this file is opted out by default rather than by remembering to.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .card-clickable:hover {
+    transform: none;
+  }
+
+  .turn-banner-inner {
+    animation: none;
+    opacity: 1;
+  }
+}

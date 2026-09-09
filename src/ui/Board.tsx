@@ -7,13 +7,25 @@
  */
 
 import React from 'react';
-import type { GameView, PileView, PileId } from '@engine/types';
+import type { GameView, InstanceId, PileView, PileId } from '@engine/types';
 import { Card, CardArt } from './Card';
+import type { AnimPreset } from './motion';
 
 export interface BoardProps {
   view: GameView;
   onBuy: (pileId: PileId) => void;
   yourTurn: boolean;
+  /** Piles that lost a card in the last view. */
+  drained?: ReadonlySet<PileId>;
+  /** Piles that went to zero in the last view — four of these end the game. */
+  emptied?: ReadonlySet<PileId>;
+  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
+  /**
+   * FLIP registration. The bought instance keeps its iid when it moves from the
+   * pile to the graveyard, so registering the pile's top card here is the whole
+   * reason a purchase animates: the same node is measured in both places.
+   */
+  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
 }
 
 const SHOP_TITLES: { key: keyof GameView['shop']; label: string }[] = [
@@ -43,6 +55,10 @@ export function PileColumn({
   buys,
   yourTurn,
   onBuy,
+  drained,
+  emptied,
+  cueFor,
+  flipRegister,
 }: {
   pile: PileView;
   money: number;
@@ -50,6 +66,10 @@ export function PileColumn({
   buys: number;
   yourTurn: boolean;
   onBuy: (pileId: PileId) => void;
+  drained?: boolean;
+  emptied?: boolean;
+  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
+  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
 }): JSX.Element {
   const empty = pile.count <= 0 || pile.top === null;
   const affordable = canAfford(pile, money, prophet);
@@ -60,9 +80,17 @@ export function PileColumn({
   if (pile.locked) classes.push('pile-locked');
   if (empty) classes.push('pile-empty');
   if (buyable) classes.push('pile-buyable');
+  if (drained) classes.push('pile-drained');
+  if (emptied) classes.push('pile-just-emptied');
 
   return (
-    <div className={classes.join(' ')}>
+    <div
+      className={classes.join(' ')}
+      data-testid="pile"
+      data-pile-id={pile.id}
+      data-pile-count={pile.count}
+      data-buyable={buyable ? 'true' : 'false'}
+    >
       <div className="pile-stack" data-count={pile.count}>
         {empty ? (
           <div className="pile-slot-empty">
@@ -74,6 +102,8 @@ export function PileColumn({
             card={pile.top as NonNullable<PileView['top']>}
             compact
             disabled={!buyable}
+            cue={cueFor?.((pile.top as NonNullable<PileView['top']>).iid) ?? null}
+            elementRef={flipRegister?.((pile.top as NonNullable<PileView['top']>).iid)}
             onClick={buyable ? () => onBuy(pile.id) : undefined}
           />
         )}
@@ -96,6 +126,7 @@ export function PileColumn({
       <button
         type="button"
         className="pile-buy"
+        data-testid="buy"
         disabled={!buyable}
         onClick={() => onBuy(pile.id)}
       >
@@ -105,14 +136,22 @@ export function PileColumn({
   );
 }
 
-export function Board({ view, onBuy, yourTurn }: BoardProps): JSX.Element {
+export function Board({
+  view,
+  onBuy,
+  yourTurn,
+  drained,
+  emptied,
+  cueFor,
+  flipRegister,
+}: BoardProps): JSX.Element {
   const { money, prophet, buys } = view.you;
   return (
-    <div className="board">
+    <div className="board" data-testid="board">
       {SHOP_TITLES.map(({ key, label }) => {
         const piles = view.shop[key] ?? [];
         return (
-          <section className={`shop shop-${key}`} key={key}>
+          <section className={`shop shop-${key}`} data-testid={`shop-${key}`} key={key}>
             <h3 className="shop-title">
               {label}
               <span className="shop-count">{piles.length}</span>
@@ -128,6 +167,10 @@ export function Board({ view, onBuy, yourTurn }: BoardProps): JSX.Element {
                   buys={buys}
                   yourTurn={yourTurn}
                   onBuy={onBuy}
+                  drained={drained?.has(pile.id) ?? false}
+                  emptied={emptied?.has(pile.id) ?? false}
+                  cueFor={cueFor}
+                  flipRegister={flipRegister}
                 />
               ))}
             </div>

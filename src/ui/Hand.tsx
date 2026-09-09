@@ -8,6 +8,7 @@
 import React from 'react';
 import type { CardView, GameAction, InstanceId, PlayerId } from '@engine/types';
 import { Card } from './Card';
+import type { AnimPreset } from './motion';
 
 export interface HandProps {
   hand: CardView[];
@@ -15,6 +16,14 @@ export interface HandProps {
   yourTurn: boolean;
   actions: number;
   onAction: (action: GameAction) => void;
+  /** Index the keyboard is on, or -1. Owned by the table so one key map drives everything. */
+  cursorIndex?: number;
+  onCursorChange?: (index: number) => void;
+  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
+  /** FLIP registration, shared with the rest of the table. */
+  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
+  /** Cards whose intent is in flight and not yet reflected in a view. */
+  committed?: ReadonlySet<InstanceId>;
 }
 
 /** Move the item at `from` to index `to`, keeping everything else in order. */
@@ -27,24 +36,39 @@ export function moveInOrder<T>(items: readonly T[], from: number, to: number): T
   return out;
 }
 
-export function Hand({ hand, playerId, yourTurn, actions, onAction }: HandProps): JSX.Element {
+export function Hand({
+  hand,
+  playerId,
+  yourTurn,
+  actions,
+  onAction,
+  cursorIndex = -1,
+  onCursorChange,
+  cueFor,
+  flipRegister,
+  committed,
+}: HandProps): JSX.Element {
   const [order, setOrder] = React.useState<CardView[]>(hand);
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
   const [overIndex, setOverIndex] = React.useState<number | null>(null);
 
-  // The host is authoritative about hand contents; local order state only
-  // survives while the same set of instance ids is in hand.
+  // The host is authoritative about hand *order*, not just hand contents. The
+  // local copy exists only so a drag can render mid-gesture; the moment the
+  // gesture ends, whatever the engine says wins. Keeping local order after a
+  // reorder landed would desynchronise the row from the adjacency the engine
+  // reads — and adjacency is load-bearing here (Loaf of Bread, Brownie, Feel so
+  // Clean), so a hand that merely *looks* reordered is a wrong-card bug.
   const signature = hand.map((c) => c.iid).join('|');
-  const localSignature = order.map((c) => c.iid).join('|');
+  const dragging = dragIndex !== null;
   React.useEffect(() => {
-    const sameSet =
-      hand.length === order.length &&
-      hand.every((c) => order.some((o) => o.iid === c.iid));
-    if (!sameSet) setOrder(hand);
+    if (dragging) return;
+    setOrder(hand);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [signature, dragging]);
 
-  const shown = order.length === hand.length && localSignature.length > 0 ? order : hand;
+  const sameSet =
+    order.length === hand.length && hand.every((c) => order.some((o) => o.iid === c.iid));
+  const shown = sameSet ? order : hand;
 
   function commit(next: CardView[]): void {
     setOrder(next);
@@ -66,10 +90,13 @@ export function Hand({ hand, playerId, yourTurn, actions, onAction }: HandProps)
       <div className="hand-head">
         <h3>Hand</h3>
         <span className="hand-count">{shown.length} cards</span>
-        <span className="hand-hint">drag to reorder — adjacency matters</span>
+        <span className="hand-hint">
+          press <kbd>1</kbd>–<kbd>9</kbd> to play · <kbd>[</kbd> <kbd>]</kbd> to reorder —
+          adjacency matters
+        </span>
       </div>
 
-      <div className="hand-row">
+      <div className="hand-row" data-testid="hand">
         {shown.length === 0 && <div className="hand-empty">no cards in hand</div>}
         {shown.map((card, i) => {
           const playable = yourTurn && card.playable !== false && actions >= 0;
@@ -77,12 +104,20 @@ export function Hand({ hand, playerId, yourTurn, actions, onAction }: HandProps)
             <div
               className={`hand-slot${overIndex === i ? ' hand-slot-over' : ''}${
                 dragIndex === i ? ' hand-slot-dragging' : ''
-              }`}
+              }${cursorIndex === i ? ' hand-slot-cursor' : ''}`}
+              data-hand-index={i}
               key={card.iid}
+              onMouseEnter={() => onCursorChange?.(i)}
             >
               <Card
                 card={card}
                 draggable
+                index={i}
+                hint={i < 9 ? String(i + 1) : i === 9 ? '0' : null}
+                cursor={cursorIndex === i}
+                cue={cueFor?.(card.iid) ?? null}
+                committed={committed?.has(card.iid) ?? false}
+                elementRef={flipRegister?.(card.iid)}
                 disabled={!playable}
                 onClick={playable ? play : undefined}
                 onDragStart={(e) => {

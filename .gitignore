@@ -8,3 +8,5 @@ telemetry/
 dist-cards/
 telemetry/
 .claude/
+test-results/
+playwright-report/

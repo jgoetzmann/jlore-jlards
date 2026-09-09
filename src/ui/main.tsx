@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { ensureRegistry } from '@net/bootstrap';
 import { App } from './App';
 import './styles.css';
+import './motion.css';
 
 ensureRegistry();
 

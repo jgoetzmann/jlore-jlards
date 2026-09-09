@@ -19,7 +19,9 @@
     "cards:export": "tsx tools/export-cards.ts",
     "art:manifest": "tsx tools/art-manifest.ts",
     "replay": "tsx tools/replay.ts",
-    "relay:check": "tsx tools/relay-check.ts"
+    "relay:check": "tsx tools/relay-check.ts",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@upstash/redis": "1.34.3",
@@ -27,6 +29,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.2",
     "@types/node": "22.9.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",

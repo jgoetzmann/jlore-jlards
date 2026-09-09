@@ -41,8 +41,8 @@ export function formatClock(seconds: number): string {
 
 function Stat({ label, value, hot }: { label: string; value: number; hot?: boolean }): JSX.Element {
   return (
-    <div className={`stat${hot ? ' stat-hot' : ''}`}>
-      <span className="stat-value">{value}</span>
+    <div className={`stat${hot ? ' stat-hot' : ''}`} data-testid={`stat-${label.toLowerCase()}`}>
+      <span className="stat-value" data-testid={`stat-${label.toLowerCase()}-value`}>{value}</span>
       <span className="stat-label">{label}</span>
     </div>
   );
@@ -75,7 +75,7 @@ export function TurnBar({
       <div className="turnbar-left">
         <div className="turn-number">
           <span className="turn-label">Turn</span>
-          <span className="turn-value">{view.turn}</span>
+          <span className="turn-value" data-testid="turn-number">{view.turn}</span>
           <span className="round-value">round {view.round}</span>
         </div>
         <div className={`turn-timer${low ? ' turn-timer-low' : ''}`} title={`${limit}s per turn`}>
@@ -105,6 +105,7 @@ export function TurnBar({
         <button
           type="button"
           className="end-turn"
+          data-testid="end-turn"
           disabled={!yourTurn || view.ended || view.pending !== null}
           onClick={() => onAction({ type: 'endTurn', player: playerId })}
         >
@@ -113,7 +114,7 @@ export function TurnBar({
       </div>
 
       {view.anomaly && (
-        <div className="anomaly-banner">
+        <div className="anomaly-banner" data-testid="anomaly-banner">
           <span className="anomaly-name">{view.anomaly.name}</span>
           <span className="anomaly-text">{view.anomaly.text}</span>
         </div>

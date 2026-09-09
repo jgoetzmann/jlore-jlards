@@ -13,7 +13,7 @@ import {
   makeMemoryStore,
   MAX_BODY_BYTES,
   type RoomStore,
-} from './[code].test-helpers';
+} from '../../src/relay/roomHandler';
 
 /** Minimal structural shape of a Vercel Node request/response. */
 interface VercelLikeRequest {

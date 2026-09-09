@@ -21,7 +21,7 @@ import {
   roomKey,
   ROOM_TTL_SECONDS,
   type RoomStore,
-} from '../api/room/[code].test-helpers';
+} from '../src/relay/roomHandler';
 
 /** Minimal .env loader: strips surrounding quotes, never overwrites a real env var. */
 function loadDotEnv(): void {

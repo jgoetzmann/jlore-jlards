@@ -8,6 +8,7 @@
 
 import React from 'react';
 import type { CardView, Rarity, StatKey } from '@engine/types';
+import type { AnimPreset } from './motion';
 
 export interface CardProps {
   card: CardView;
@@ -22,10 +23,27 @@ export interface CardProps {
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onDragEnd?: (e: React.DragEvent) => void;
+  /** One-shot entrance keyframe from `useMotion`. Expires on its own. */
+  cue?: AnimPreset | 'enter' | null;
+  /** The card the keyboard is currently on. Independent of hover. */
+  cursor?: boolean;
+  /** An intent for this card is in flight and the view has not caught up yet. */
+  committed?: boolean;
+  /** FLIP registration — `flip.register(card.iid)`. */
+  elementRef?: (el: HTMLElement | null) => void;
+  /** Position in its row, for staggered entrances. */
+  index?: number;
+  /** Keyboard hint shown in the corner, e.g. "3". */
+  hint?: string | null;
 }
 
+/**
+ * JPEG, not PNG: the card frame is drawn by the client so the art never needs
+ * alpha, and at 533 cards the format choice is the difference between roughly
+ * 14 MB and 250 MB of committed assets.
+ */
 export function artUrl(key: string): string {
-  return `/art/${encodeURIComponent(key)}.png`;
+  return `/art/${encodeURIComponent(key)}.jpg`;
 }
 
 /** Deterministic hue from a name, so the placeholder is stable per card. */
@@ -117,10 +135,28 @@ export function Card(props: CardProps): JSX.Element {
   if (clickable) classes.push('card-clickable');
   if (card.playable) classes.push('card-playable');
   if (card.affordable) classes.push('card-affordable');
+  if (props.cursor) classes.push('card-cursor');
+  if (props.committed) classes.push('card-committed');
+  if (props.cue) classes.push('card-cue', `card-cue-${props.cue}`);
 
+  // The cue is keyed so React replaces the node when the preset changes:
+  // re-adding a class to a live element does not restart its animation.
   return (
     <div
+      key={props.cue ?? 'still'}
+      ref={props.elementRef}
       className={classes.join(' ')}
+      style={
+        props.index === undefined
+          ? undefined
+          : ({ ['--i']: String(props.index) } as React.CSSProperties)
+      }
+      data-testid="card"
+      data-card-id={card.defId}
+      data-card-name={card.name}
+      data-iid={card.iid}
+      data-clickable={clickable ? 'true' : 'false'}
+      data-cue={props.cue ?? undefined}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       draggable={props.draggable}
@@ -182,6 +218,12 @@ export function Card(props: CardProps): JSX.Element {
       {card.prophetCost && (
         <div className="card-prophet">
           Prophet {card.prophetCost.threshold} · drain {card.prophetCost.drain}
+        </div>
+      )}
+
+      {props.hint && (
+        <div className="card-hint" aria-hidden="true">
+          {props.hint}
         </div>
       )}
 

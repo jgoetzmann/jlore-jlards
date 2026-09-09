@@ -94,6 +94,7 @@ function StartScreen({
         <button
           type="button"
           className="primary"
+          data-testid="create-room"
           onClick={() => onHost(makeRoomCode(), players)}
         >
           Create a room
@@ -102,6 +103,7 @@ function StartScreen({
         <button
           type="button"
           className="secondary"
+          data-testid="hotseat"
           onClick={() => {
             window.location.hash = `#hotseat:${players}`;
           }}
@@ -113,12 +115,14 @@ function StartScreen({
       <div className="start-join">
         <input
           placeholder="ROOM CODE"
+          data-testid="join-code"
           value={joinCode}
           maxLength={12}
           onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
         />
         <button
           type="button"
+          data-testid="join"
           disabled={joinCode.trim().length < 3}
           onClick={() => {
             window.location.hash = `#${joinCode.trim().toUpperCase()}`;
@@ -156,9 +160,16 @@ function StartScreen({
 
 function Opponents({ view }: { view: GameView }): JSX.Element {
   return (
-    <div className="opponents">
+    <div className="opponents" data-testid="opponents">
       {view.others.map((o) => (
-        <div className={`opponent${o.eliminated ? ' opponent-out' : ''}`} key={o.id}>
+        <div
+          className={`opponent${o.eliminated ? ' opponent-out' : ''}`}
+          data-testid="opponent"
+          data-opponent-id={o.id}
+          data-hand-count={o.handCount}
+          data-library-count={o.libraryCount}
+          key={o.id}
+        >
           <div className="opponent-head">
             <span className="opponent-name">{o.name}</span>
             {view.activePlayer === o.id && <span className="opponent-turn">to move</span>}
@@ -239,7 +250,7 @@ function Table({
 
   if (session.status === 'error') {
     return (
-      <div className="fatal">
+      <div className="fatal" data-testid="fatal">
         <h2>Could not start</h2>
         <p>{session.error}</p>
         <button
@@ -256,7 +267,7 @@ function Table({
 
   if (!view) {
     return (
-      <div className="connecting">
+      <div className="connecting" data-testid="connecting">
         <div className="prompt-spinner" aria-hidden="true" />
         <h2>{mode === 'join' ? 'Joining' : 'Dealing'}…</h2>
         {code && <p className="room-code">Room {code}</p>}
@@ -267,7 +278,7 @@ function Table({
   const yourTurn = view.activePlayer === view.you.id && !view.ended;
 
   return (
-    <div className="table">
+    <div className="table" data-testid="table">
       <header className="table-head">
         <span className="brand">Jlore Jlards</span>
         {code && (
@@ -297,6 +308,10 @@ function Table({
                   className={`seat-btn${session.activeSeat === s ? ' seat-btn-on' : ''}${
                     v && v.you.id === v.activePlayer ? ' seat-btn-active' : ''
                   }`}
+                  data-testid="seat-btn"
+                  data-seat={s}
+                  data-seat-on={session.activeSeat === s ? 'true' : 'false'}
+                  data-seat-to-move={v && v.you.id === v.activePlayer ? 'true' : 'false'}
                   onClick={() => session.setActiveSeat(s)}
                 >
                   {v ? v.you.name : s}
@@ -305,7 +320,7 @@ function Table({
             })}
           </div>
         )}
-        <span className="who">
+        <span className="who" data-testid="you-are" data-you-id={view.you.id}>
           You are <strong>{view.you.name}</strong>
         </span>
       </header>
@@ -319,7 +334,7 @@ function Table({
       />
 
       {view.ended && (
-        <div className="game-over">
+        <div className="game-over" data-testid="game-over">
           <h2>Game over</h2>
           <p>{view.endReason ?? 'the game ended'}</p>
           <p className="winners">

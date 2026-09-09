@@ -43,6 +43,8 @@ function OptionButton({
     <button
       type="button"
       className={`prompt-option${selected ? ' prompt-option-selected' : ''}`}
+      data-testid="prompt-option"
+      data-option-key={option.key}
       onClick={onToggle}
     >
       {selected && <span className="prompt-order-index">{index + 1}</span>}
@@ -71,7 +73,7 @@ export function PromptOverlay({
   if (isWaiting(pending)) {
     const who = names[pending.waitingOn] ?? pending.waitingOn;
     return (
-      <div className="prompt-overlay prompt-waiting">
+      <div className="prompt-overlay prompt-waiting" data-testid="prompt-waiting">
         <div className="prompt-card">
           <div className="prompt-spinner" aria-hidden="true" />
           <h3>Waiting on {who}</h3>
@@ -85,7 +87,7 @@ export function PromptOverlay({
   if (pending.player !== playerId) {
     const who = names[pending.player] ?? pending.player;
     return (
-      <div className="prompt-overlay prompt-waiting">
+      <div className="prompt-overlay prompt-waiting" data-testid="prompt-waiting">
         <div className="prompt-card">
           <div className="prompt-spinner" aria-hidden="true" />
           <h3>Waiting on {who}</h3>
@@ -120,7 +122,7 @@ export function PromptOverlay({
   }
 
   return (
-    <div className={`prompt-overlay prompt-type-${prompt.type}`}>
+    <div className={`prompt-overlay prompt-type-${prompt.type}`} data-testid="prompt" data-prompt-type={prompt.type}>
       <div className="prompt-card">
         <h3 className="prompt-title">{prompt.prompt || promptTitle(prompt.type)}</h3>
         <div className="prompt-meta">
@@ -150,13 +152,14 @@ export function PromptOverlay({
           <button
             type="button"
             className="prompt-confirm"
+            data-testid="prompt-confirm"
             disabled={prompt.options.length > 0 && !ready}
             onClick={() => submit(picked)}
           >
             Confirm
           </button>
           {min === 0 && (
-            <button type="button" className="prompt-skip" onClick={() => submit([])}>
+            <button type="button" className="prompt-skip" data-testid="prompt-skip" onClick={() => submit([])}>
               Skip
             </button>
           )}
@@ -164,6 +167,7 @@ export function PromptOverlay({
             <button
               type="button"
               className="prompt-default"
+              data-testid="prompt-default"
               onClick={() => submit(prompt.defaultKeys)}
             >
               Take default
