@@ -218,6 +218,8 @@ export const EXPR_VARS = [
   'emptyOrLockedPiles',
   'emptyPiles',
   'lockedPiles',
+  /** Constellation's X: the longest unbroken run of costs 1, 2, ... in your deck. */
+  'longestCostRun',
   'selfPlayCount',
   'selfCounter',
   'selfCost',
@@ -250,6 +252,14 @@ export interface CardFilter {
   not?: CardFilter;
   /** True if the card has any plague tokens. */
   plagued?: boolean;
+  /**
+   * Match on a per-instance counter. `aside` is one shared staging pile per
+   * player, so a card that parks instances there across turns (a Hand Box) and
+   * a card that stages them for the length of one effect need a way to tell
+   * their own cards apart. Definition-level matching ignores this, exactly as
+   * it ignores `plagued`: a definition has no counters.
+   */
+  counter?: { key: string; eq?: number; lt?: number; lte?: number; gt?: number; gte?: number };
   /** Match cards already present in this match (CNcias inverts it). */
   inMatch?: boolean;
 }
@@ -318,7 +328,13 @@ export type EffectNode =
   | { op: 'discardDownTo'; amount: Amount; who?: Who }
   | { op: 'trash'; target: Selector }
   // --- movement and creation ---
-  | { op: 'moveTo'; target: Selector; zone: Zone; position?: 'top' | 'bottom' | 'random' | { index: number } }
+  /**
+   * `who` is the DESTINATION owner — the player the card ends up belonging to.
+   * Omitted, a card keeps its current owner, which is what you want for moving
+   * a card between your own zones. A steal has to name `who: 'self'`, or the
+   * card lands back in the zone of the player you took it from.
+   */
+  | { op: 'moveTo'; target: Selector; zone: Zone; who?: Who; position?: 'top' | 'bottom' | 'random' | { index: number } }
   | { op: 'createCard'; defId: CardDefId | { pool: PoolSpec }; to: Zone; who?: Who; count?: Amount; position?: 'top' | 'bottom' | 'random'; keywords?: Keyword[]; counters?: Record<string, number>; statDelta?: Stats }
   | { op: 'gainCard'; from: PileSelector | { pool: PoolSpec }; to: Zone; who?: Who; count?: Amount; free?: boolean }
   | { op: 'copyCard'; target: Selector; to: Zone; who?: Who; keywords?: Keyword[] }

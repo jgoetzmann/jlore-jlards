@@ -74,6 +74,15 @@ export const NAMED_FILTERS: Record<string, CardFilter> = {
   cheap: { cost: { lte: 3 } },
   expensive: { cost: { gte: 6 } },
   zeroCost: { cost: { eq: 0 } },
+
+  // `count(<name>)` resolves through this table and an unregistered name reads
+  // as 0 rather than raising, so a filter a card names but nobody registered is
+  // a silent zero. These five are named by shipped card expressions.
+  oneCost: { cost: { eq: 1 } }, // snowball
+  cost7: { cost: { eq: 7 } }, // star_aligner
+  diamond: { subtype: 'Diamond' }, // treasure_vault
+  soul_shard: { defId: 'soul_shard' }, // soulcologist_mike_kwzka
+  kwzki_cultist: { defId: 'kwzki_cultist' }, // kwzki_cultist
 };
 
 // ---------------------------------------------------------------------------
@@ -187,6 +196,11 @@ export function matchesFilter(state: GameState, iid: InstanceId, filter?: CardFi
   if (typeof filter.inMatch === 'boolean') {
     const present = state.defsInMatch.indexOf(i.defId) >= 0;
     if (present !== filter.inMatch) return false;
+  }
+
+  if (filter.counter) {
+    const held = typeof i.counters[filter.counter.key] === 'number' ? i.counters[filter.counter.key] : 0;
+    if (!matchesNumeric(held, filter.counter)) return false;
   }
 
   if (filter.not && matchesFilter(state, iid, filter.not)) return false;

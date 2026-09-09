@@ -2,7 +2,12 @@
  * A.29 — the two tokens S9 owns: Permanent: Hand Box and Temporary: Hand Box.
  *
  * Every other token in A.29 belongs to another slice and is referenced by id.
+ *
  * Stored cards live in the owner's `aside` zone and carry the `boxed` counter.
+ * `aside` is ONE shared staging pile per player — a dozen other cards park
+ * instances there for the length of a single effect — so a Hand Box has to
+ * select on the counter, not on "everything in aside that is not a Token", or
+ * opening one scoops up whatever another card happens to be staging.
  */
 import type { CardDefinition } from '@engine/types';
 
@@ -18,7 +23,11 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'moveTo', target: { who: 'self', zone: 'aside', filter: { not: { type: 'Token' } } }, zone: 'hand' },
+      {
+        op: 'moveTo',
+        target: { who: 'self', zone: 'aside', filter: { counter: { key: 'boxed', gte: 1 } } },
+        zone: 'hand',
+      },
     ],
     triggers: [],
     text: '+1 Action. Add the cards stored in this box to your hand. ({boxed} stored.)',
@@ -41,7 +50,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'copyCard',
-        target: { who: 'self', zone: 'aside', filter: { not: { type: 'Token' } } },
+        target: { who: 'self', zone: 'aside', filter: { counter: { key: 'boxed', gte: 1 } } },
         to: 'hand',
         keywords: ['Temporary'],
       },

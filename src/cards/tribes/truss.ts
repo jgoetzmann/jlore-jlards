@@ -121,11 +121,14 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
-      { op: 'trash', target: { zone: 'hand', filter: { subtype: 'Truss' }, count: 1, pick: 'choose' } },
+      // Gate on the Truss existing, not on `{ifPrevious:true}` — nothing in the
+      // engine ever writes `__previousDidSomething`, so that branch was dead and
+      // the card ate a Truss for nothing. The trash moves inside the branch.
       {
         op: 'conditional',
-        if: { ifPrevious: true },
+        if: { has: { target: { zone: 'hand', filter: { subtype: 'Truss' } }, atLeast: 1 } },
         then: [
+          { op: 'trash', target: { zone: 'hand', filter: { subtype: 'Truss' }, count: 1, pick: 'choose' } },
           { op: 'gain', stat: 'cards', amount: 3 },
           { op: 'gain', stat: 'actions', amount: 6 },
         ],

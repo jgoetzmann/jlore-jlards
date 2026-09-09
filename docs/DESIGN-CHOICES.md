@@ -244,8 +244,8 @@ them would have left ~10 catalog holes for no real saving.
 
 | | |
 |---|---|
-| Cards | **533 definitions + 25 auras**, catalog validator clean |
-| Tests | **579 passing, 31 files**, every one citing a numbered behavior |
+| Cards | **534 definitions + 25 auras**, catalog validator clean |
+| Tests | **589 passing, 32 files**, every one citing a numbered behavior |
 | Typecheck | `tsc --noEmit` clean under `strict` |
 | Coverage | all **120** spec behaviors cited by at least one test |
 | Bundle | 610 kB, 148 kB gzipped — mostly the catalog |
@@ -263,6 +263,36 @@ green and the game looked fine while each was live:
 
 Both are the same lesson: the dangerous defect in a system this size is not the
 one that crashes, it is the one that quietly does half the work.
+
+### The catalog audit found nine more of exactly that shape
+
+A later pass read all 533 cards against Appendix A/B and had every finding
+adversarially verified: **263 confirmed defects, 175 fixed in card data**, the
+rest recorded in SB-44 through SB-53. Not one of them crashed. The suite was
+green and `tsc` was clean for every one.
+
+The pattern is worth stating plainly, because it is what this codebase does when
+it goes wrong: **two implementations of the same thing, and the reachable one is
+the incomplete one.**
+
+- `core/resume.ts` probes for a `resumePrompt` that `@engine/effects` never
+  exported, so every prompt resolved through a local fallback that never
+  substituted the player's pick. 37 of 42 Discovers threw the choice away.
+- `fireOwnedTriggers` documented that it covered the Field and did not, so the
+  entire Celestial aura tier was inert — along with the five Anomalies whose
+  only effect is to grant one.
+- `meta/scoring.ts` has an End of Game scorer that nothing calls; `endgame.ts`
+  scores through `core/scoring.ts`.
+- The uniqueness checks ran against the registry, which deduplicates — so they
+  could not fail, and twelve cards shipped defined twice with the wrong one
+  winning by module import order.
+
+The lesson for anything added from here: **a check that runs downstream of the
+thing that hides the problem is not a check.** `cards:validate` now reads the
+authored catalog rather than the registry, refuses an unregistered `count()`
+filter name (a silent zero), and verifies the Prophet Shop id list resolves.
+`test/audit-regressions.test.ts` pins the engine fixes; every test in it fails
+without its fix and passed the whole build without it.
 
 ## 13. How this was built: fullsend
 

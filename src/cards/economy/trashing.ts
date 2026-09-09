@@ -15,32 +15,35 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // The Flimsy rider is about the card you actually trash, so the pick has
+      // to be bound before it is tested — a `has` over the whole hand paid out
+      // whenever you merely held a Flimsy non-Copper. `$selected` is the picked
+      // card's defId, substituted into this body by the resume path.
       {
-        op: 'conditional',
-        if: {
-          has: {
-            target: {
-              who: 'self',
-              zone: 'hand',
-              filter: { not: { defId: 'copper' }, keyword: 'Flimsy' },
+        op: 'selectCards',
+        from: { who: 'self', zone: 'hand', filter: { not: { defId: 'copper' } } },
+        min: 1,
+        max: 1,
+        then: [
+          {
+            op: 'conditional',
+            if: {
+              has: {
+                target: {
+                  who: 'self',
+                  zone: 'hand',
+                  filter: { defId: '$selected', keyword: 'Flimsy' },
+                },
+                atLeast: 1,
+              },
             },
-            atLeast: 1,
+            then: [{ op: 'gain', stat: 'actions', amount: 1 }],
           },
-        },
-        then: [{ op: 'gain', stat: 'actions', amount: 1 }],
+          { op: 'trash', target: { self: true } },
+          { op: 'gain', stat: 'money', amount: 2 },
+          { op: 'draw', amount: 1 },
+        ],
       },
-      {
-        op: 'trash',
-        target: {
-          who: 'self',
-          zone: 'hand',
-          filter: { not: { defId: 'copper' } },
-          count: 1,
-          pick: 'choose',
-        },
-      },
-      { op: 'gain', stat: 'money', amount: 2 },
-      { op: 'draw', amount: 1 },
     ],
     triggers: [],
     text: 'Trash a non-Copper card from your hand: +2 Money, +1 Card. If it was Flimsy, also +1 Action.',
@@ -105,21 +108,36 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'choose' } },
+      // The upgrade has to key off the card you gave up, so the pick is bound
+      // first: no filter can say "costs the picked card's cost + 2", because a
+      // NumericFilter takes plain numbers. So the gain is a COPY of the pick,
+      // made into your GY and re-priced there by costDelta, and the pick itself
+      // is really trashed. Transforming the card in hand and moving it, as this
+      // did, meant the printed trash never happened — nothing that watches for
+      // one (Safety Net, The Fall Guy, Garlic) ever saw it.
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'gy', count: 1, pick: 'lastPlayed' },
-        into: { costDelta: 2 },
-      },
-      {
-        op: 'gainCard',
-        from: { shop: 'all', pick: 'choose', excludeJlore: false },
-        to: 'gy',
-        free: true,
+        op: 'selectCards',
+        // An Indestructible card cannot be trashed (B12), so it cannot pay for
+        // this either; leaving it selectable handed out the upgrade for free.
+        from: { who: 'self', zone: 'hand', filter: { not: { keyword: 'Indestructible' } } },
+        min: 1,
+        max: 1,
+        then: [
+          { op: 'copyCard', target: { self: true }, to: 'gy', who: 'self' },
+          {
+            // The copy is the newest card in your GY — createInstance appends
+            // and 'bottom' reads the end of the zone — and it still carries the
+            // picked card's defId, so the two together name it exactly.
+            op: 'transform',
+            target: { who: 'self', zone: 'gy', filter: { defId: '$selected' }, count: 1, pick: 'bottom' },
+            into: { costDelta: 2 },
+          },
+          { op: 'trash', target: { self: true } },
+        ],
       },
     ],
     triggers: [],
-    text: 'Trash a card in your hand to gain a card costing up to (2) more than it.',
+    text: 'Trash a card in your hand to gain a card costing exactly (2) more in your GY. If nothing costs that, you gain a copy of it instead.',
     flavor: 'Same material, better job.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
@@ -137,21 +155,26 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'choose' } },
+      // Same shape as Upcycle — real trash, copy re-priced in the GY — one
+      // step steeper.
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'gy', count: 1, pick: 'lastPlayed' },
-        into: { costDelta: 3 },
-      },
-      {
-        op: 'gainCard',
-        from: { shop: 'all', pick: 'choose' },
-        to: 'gy',
-        free: true,
+        op: 'selectCards',
+        from: { who: 'self', zone: 'hand', filter: { not: { keyword: 'Indestructible' } } },
+        min: 1,
+        max: 1,
+        then: [
+          { op: 'copyCard', target: { self: true }, to: 'gy', who: 'self' },
+          {
+            op: 'transform',
+            target: { who: 'self', zone: 'gy', filter: { defId: '$selected' }, count: 1, pick: 'bottom' },
+            into: { costDelta: 3 },
+          },
+          { op: 'trash', target: { self: true } },
+        ],
       },
     ],
     triggers: [],
-    text: 'Trash a card in your hand to gain a card costing up to (3) more than it.',
+    text: 'Trash a card in your hand to gain a card costing exactly (3) more in your GY. If nothing costs that, you gain a copy of it instead.',
     flavor: 'It upcycles itself, obviously.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
@@ -176,7 +199,10 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Pick your treasure',
-        then: [{ op: 'moveTo', target: { self: true }, zone: 'hand' }],
+        // Empty `then` is the default Discover semantic: the card you picked
+        // enters your hand. Writing a body with {self:true} in it moved *this*
+        // card instead, since a discovered card has no instance to bind to.
+        then: [],
       },
     ],
     triggers: [],
@@ -238,15 +264,18 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // The trash lives inside the loop: `over` is resolved once, up front, so
+      // each counted Common is the one that dies and a Common drawn off this
+      // card's own +1 Card is never swept up by a second, live re-selection.
       {
         op: 'forEach',
         over: { who: 'self', zone: 'hand', filter: { rarity: 'common' } },
         effects: [
+          { op: 'trash', target: { self: true } },
           { op: 'draw', amount: 1 },
           { op: 'gain', stat: 'money', amount: 1 },
         ],
       },
-      { op: 'trash', target: { who: 'self', zone: 'hand', filter: { rarity: 'common' } } },
     ],
     triggers: [],
     text: 'Trash all Common cards in your hand. +1 Card and +1 Money for each.',
@@ -266,7 +295,14 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 3, buys: 2, cards: 4, money: 5 },
-    effects: [{ op: 'trash', target: { who: 'self', zone: 'hand' } }],
+    effects: [
+      // The stat line resolves before this body, so the printed +4 Cards is
+      // already in hand by now and an unbounded trash burned all four of them.
+      // Drawn cards land at the bottom of the hand and a selector with no
+      // `pick` keeps zone order, so the first handSize-4 are the hand this card
+      // was played out of — the "other cards" the row means.
+      { op: 'trash', target: { who: 'self', zone: 'hand', count: { expr: 'handSize - 4' } } },
+    ],
     triggers: [],
     text: 'Trash all other cards in your hand. +3 Actions, +2 Buys, +4 Cards, +5 Money.',
     flavor: 'Leave nothing for the next turn.',
@@ -314,24 +350,41 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // "Identical" is the whole card, so it names one defId and works from
+      // that: pick a card, check you are holding the pair, then walk every copy
+      // in the deck. `over` is resolved once before the loop body runs, so the
+      // Jlore minted per copy can never be swept up by the trash beside it —
+      // the old form counted the entire deck and then trashed all of it.
       {
         op: 'selectCards',
         from: { who: 'self', zone: 'hand', filter: { not: { type: 'Resource' } } },
-        min: 2,
-        max: 2,
+        min: 1,
+        max: 1,
         then: [
-          { op: 'trash', target: { self: true } },
           {
-            op: 'forEach',
-            over: { who: 'self', zone: ['library', 'hand', 'gy'] },
-            effects: [{ op: 'createCard', defId: 'jlore', to: 'gy' }],
+            op: 'conditional',
+            if: {
+              has: {
+                target: { who: 'self', zone: 'hand', filter: { defId: '$selected' } },
+                atLeast: 2,
+              },
+            },
+            then: [
+              {
+                op: 'forEach',
+                over: { who: 'self', zone: ['library', 'hand', 'gy'], filter: { defId: '$selected' } },
+                effects: [
+                  { op: 'trash', target: { self: true } },
+                  { op: 'createCard', defId: 'jlore', to: 'gy' },
+                ],
+              },
+            ],
           },
-          { op: 'trash', target: { who: 'self', zone: ['library', 'hand', 'gy'] } },
         ],
       },
     ],
     triggers: [],
-    text: 'Trash two identical non-Resource cards in your hand, then trash every remaining copy in your deck. Add that many Jlore to your GY.',
+    text: 'Name a non-Resource card you hold two copies of: trash every copy of it in your hand, Library and GY, and add that many Jlore to your GY.',
     flavor: 'They went together.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
@@ -354,7 +407,9 @@ export const cards: CardDefinition[] = [
         target: {
           who: 'eachPlayer',
           zone: ['library', 'hand', 'gy'],
-          filter: { cost: { lte: 3 }, not: { defId: 'copper' } },
+          // (0)–(3) is a closed range: without the floor this also ate every
+          // negative-cost card (the Series funding line, Chopped Chuzz).
+          filter: { cost: { gte: 0, lte: 3 }, not: { defId: 'copper' } },
         },
       },
     ],
@@ -463,15 +518,19 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { actions: 1, cards: 1 },
     effects: [
+      // Your deck, not the play area: the Sleeve is sitting in 'play' while
+      // this resolves, and stripping Flimsy there stripped its own printed
+      // keyword before the cleanup step could read it. It protects everything
+      // but itself.
       {
         op: 'setKeyword',
-        target: { who: 'self', zone: ['library', 'hand', 'gy', 'play'] },
+        target: { who: 'self', zone: ['library', 'hand', 'gy'] },
         keyword: 'Flimsy',
         on: false,
       },
       {
         op: 'setKeyword',
-        target: { who: 'self', zone: ['library', 'hand', 'gy', 'play'] },
+        target: { who: 'self', zone: ['library', 'hand', 'gy'] },
         keyword: 'Temporary',
         on: false,
       },
@@ -495,25 +554,72 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // `recruit` is the only per-player fan-out in the DSL: a selector's
+      // `count` is a TOTAL across everyone it matched, so a single 'eachPlayer'
+      // moveTo ate one card at the whole table, and a self + 'eachOpponent'
+      // pair only reaches the first opponent. `recruit`'s count is per player.
+      // Its price is that it reshuffles each Library it drew from, the same
+      // trade Corpo Espionage makes for the same reason.
+      { op: 'recruit', zone: 'library', count: 1, who: 'eachPlayer', to: 'aside' },
+      // `aside` is one shared staging pile per player (SB-51), so the tops are
+      // marked and every node below reads the mark rather than "whatever is in
+      // aside": a Hand Box's stored hand sits in the same pile under `boxed`
+      // and is not food. The staging lasts the length of this body only.
+      {
+        op: 'addCounter',
+        target: {
+          who: 'eachPlayer',
+          zone: 'aside',
+          filter: { not: { counter: { key: 'boxed', gte: 1 } } },
+        },
+        key: 'gruzzled',
+        amount: 1,
+      },
+      // The row says trash, and the trash is where they wait: the tag survives
+      // the move (B63), so the trigger can find exactly these instances in a
+      // pile that holds everything anyone ever trashed.
       {
         op: 'trash',
-        target: { who: 'eachPlayer', zone: 'library', count: 1, pick: 'top' },
+        target: { who: 'eachPlayer', zone: 'aside', filter: { counter: { key: 'gruzzled', gte: 1 } } },
       },
-      { op: 'addCounter', target: { self: true }, key: 'gruzzled', amount: { expr: 'playerCount' } },
+      // Indestructible beats every trash (B12) and the survivor would otherwise
+      // sit in `aside` for the rest of the game, where a Hand Box or Corpo
+      // Espionage would find it. It goes back on top of the Library it came
+      // from; it can never reach the trash, so the tag it keeps is inert.
+      {
+        op: 'moveTo',
+        target: { who: 'eachPlayer', zone: 'aside', filter: { counter: { key: 'gruzzled', gte: 1 } } },
+        zone: 'library',
+        position: 'top',
+      },
+      // Keyed 'counter' because that is the only name `selfCounter` reads; any
+      // other key falls back to the sum of every counter, playCount included.
+      // It caps the payout at this Gruzzler's own meal, so a second one at the
+      // table cannot hand over what it ate, and a Gruzzler trashed out of hand
+      // without ever being played pays nothing.
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: 'playerCount' } },
     ],
     triggers: [
       {
         on: 'onTrash',
         effects: [
+          // Found by the tag, not by a count off the trash pile, and `who`
+          // names the destination owner: without it a moved card keeps its
+          // owner and an opponent's card goes home to the opponent's GY.
           {
             op: 'moveTo',
-            target: { who: 'self', zone: 'trash', count: { expr: 'selfCounter' }, pick: 'lastPlayed' },
+            target: {
+              zone: 'trash',
+              filter: { counter: { key: 'gruzzled', gte: 1 } },
+              count: { expr: 'selfCounter' },
+            },
             zone: 'gy',
+            who: 'self',
           },
         ],
       },
     ],
-    text: 'Trash the top card of each player’s Library. When this card is trashed, add all of them to your GY. ({gruzzled} stored)',
+    text: 'Trash the top card of each player’s Library. When this card is trashed, add them all to your GY.',
     flavor: 'It keeps them somewhere.',
     complexity: 'T3',
     subsystems: ['S-PERSIST', 'S-STEAL'],
@@ -582,18 +688,23 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { money: -1 },
-    effects: [{ op: 'addCounter', target: { self: true }, key: 'playCount', amount: 1 }],
+    // No hand-rolled play counter: `playCard` already stamps one on the
+    // instance, and a second increment made the printed tally read double.
+    effects: [],
     triggers: [
       {
         on: 'onPlay',
-        condition: { expr: 'selfPlayCount - 2' },
+        // A bare `selfPlayCount - 2` is truthy on every play except the second,
+        // so Coal cashed out immediately on play one. Conditions run through
+        // the comparison-aware evaluator, so say what the row says.
+        condition: { expr: 'selfPlayCount == 3' },
         effects: [
           { op: 'trash', target: { self: true } },
           { op: 'createCard', defId: 'diamond', to: 'hand' },
         ],
       },
     ],
-    text: '-1 Money. On the 3rd play, trash this and add a Diamond to your hand. ({playsLeft} left!)',
+    text: '-1 Money. On the 3rd play, trash this and add a Diamond to your hand. ({selfPlayCount} of 3 played!)',
     flavor: 'Pressure, time, and two bad turns.',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-TEXTGEN'],

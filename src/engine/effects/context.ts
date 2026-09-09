@@ -37,6 +37,17 @@ function stdev(xs: number[]): number {
   return Math.sqrt(acc / xs.length);
 }
 
+/**
+ * The longest unbroken run of costs starting at 1 — Constellation's X. A deck
+ * holding (1),(2),(3),(5) scores 3: the run stops at the missing (4).
+ */
+function longestCostRunIn(costs: number[]): number {
+  const present = new Set(costs);
+  let n = 0;
+  while (present.has(n + 1)) n += 1;
+  return n;
+}
+
 function meanAbsoluteDeviation(xs: number[]): number {
   if (xs.length === 0) return 0;
   const m = mean(xs);
@@ -132,6 +143,10 @@ export function buildVars(
   vars.emptyPiles = piles.empty;
   vars.lockedPiles = piles.locked;
   vars.emptyOrLockedPiles = piles.both;
+  // Constellation scores "the longest unbroken run of cards costing (1), (2),
+  // ... (X)". That is a property of the deck's cost set, not a card count, so
+  // no CardFilter can express it and `count(longestCostRun)` silently read 0.
+  vars.longestCostRun = longestCostRunIn(costs);
 
   if (sourceIid) {
     const src = state.instances[sourceIid];

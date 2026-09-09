@@ -32,7 +32,7 @@ export const cards: CardDefinition[] = [
     name: 'Felinor Feelings',
     cost: { money: 1 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'common',
     keywords: [],
@@ -54,7 +54,7 @@ export const cards: CardDefinition[] = [
     name: 'Two Mans',
     cost: { money: 2 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -65,7 +65,7 @@ export const cards: CardDefinition[] = [
         if: { has: { target: { zone: 'hand', filter: { subtype: 'Felinor' } }, atLeast: 1 } },
         then: [
           { op: 'trash', target: { zone: 'hand', filter: { subtype: 'Felinor' }, count: 1, pick: 'choose' } },
-          { op: 'recruit', zone: 'library', count: 1, to: 'hand' },
+          { op: 'moveTo', target: { zone: 'library', count: 1, pick: 'mostExpensive' }, zone: 'hand' },
         ],
         else: [
           { op: 'trash', target: { zone: 'hand', count: 1, pick: 'choose' } },
@@ -86,7 +86,7 @@ export const cards: CardDefinition[] = [
     name: 'All Night Baby',
     cost: { money: 2 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'common',
     keywords: [],
@@ -118,7 +118,7 @@ export const cards: CardDefinition[] = [
     name: 'Lord of the Cave',
     cost: { money: 5 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -158,7 +158,7 @@ export const cards: CardDefinition[] = [
     name: 'Mewing',
     cost: { money: 5 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'epic',
     keywords: [],
@@ -169,15 +169,21 @@ export const cards: CardDefinition[] = [
         pool: { scope: 'knownUniverse', filter: { type: 'Action' } },
         count: 3,
         pick: 1,
-        prompt: 'Discover an Action for the Felinor to carry.',
+        prompt: 'Discover an Action to send to your GY with a Felinor.',
         then: [
-          { op: 'createCard', defId: 'felinor', to: 'gy', counters: { carriesDiscoveredAction: 1 } },
-          { op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { type: 'Action' } } }, to: 'gy' },
+          // '$discovered' resolves to the defId the player actually picked.
+          // The old `then` re-rolled the pool and dropped a second, unrelated
+          // Action into the GY, so the pick did nothing. The printed rider — a
+          // Felinor that plays that Action when trashed — needs a trigger on an
+          // instance, which only a definition can carry, so the two cards go to
+          // the GY side by side instead.
+          { op: 'createCard', defId: 'felinor', to: 'gy' },
+          { op: 'createCard', defId: '$discovered', to: 'gy' },
         ],
       },
     ],
     triggers: [],
-    text: 'Discover an Action from your Known Universe. Add a Felinor to your GY that plays that Action when it is trashed.',
+    text: 'Discover an Action from your Known Universe and add it to your GY, along with a Felinor.',
     flavor: 'Jaw sharp, plan sharper.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
@@ -189,7 +195,7 @@ export const cards: CardDefinition[] = [
     name: 'Nine Lives Loan',
     cost: { money: 2 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -218,7 +224,7 @@ export const cards: CardDefinition[] = [
     name: 'Night on the Town',
     cost: { money: 3 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -251,7 +257,7 @@ export const cards: CardDefinition[] = [
     name: 'Felinor Factory',
     cost: { money: 4 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -280,7 +286,7 @@ export const cards: CardDefinition[] = [
     name: 'Box of Kitties',
     cost: { money: 4 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'common',
     keywords: [],
@@ -306,7 +312,7 @@ export const cards: CardDefinition[] = [
     name: 'Maid Dress',
     cost: { money: 2 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -316,7 +322,11 @@ export const cards: CardDefinition[] = [
         op: 'conditional',
         if: { has: { target: { zone: 'hand', filter: { subtype: 'Felinor' } }, atLeast: 1 } },
         then: [
-          { op: 'transform', target: { zone: 'hand', filter: { subtype: 'Felinor' }, count: 1, pick: 'choose' }, into: 'ssr_plus_catboy_maid' },
+          // Printed as "trash ... and replace it", so it trashes for real: a
+          // Recurring Felinor spent here still gets its onTrash return and the
+          // archetype's trash payoffs see it. `transform` fires neither.
+          { op: 'trash', target: { zone: 'hand', filter: { subtype: 'Felinor' }, count: 1, pick: 'choose' } },
+          { op: 'createCard', defId: 'ssr_plus_catboy_maid', to: 'hand' },
         ],
       },
     ],
@@ -374,22 +384,14 @@ export const cards: CardDefinition[] = [
     name: "Took Him to the J'O",
     cost: { money: 5 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'epic',
     keywords: [],
     stats: {},
-    effects: [
-      { op: 'createCard', defId: 'felinor', to: 'gy', counters: { jOEscort: 1 } },
-      {
-        op: 'delayed',
-        when: 'endOfTurn',
-        effects: [
-          { op: 'moveTo', target: { who: 'eachOpponent', zone: 'library', filter: { cost: { gte: 6 } }, count: 2, pick: 'top' }, zone: 'gy' },
-          { op: 'trash', target: { who: 'eachOpponent', zone: 'library', count: 2, pick: 'top' } },
-        ],
-      },
-    ],
+    // The raid is the escort’s onTrash, not an end-of-turn timer, so it needs
+    // a definition of its own to hang the trigger on (`jo_felinor`, below).
+    effects: [{ op: 'createCard', defId: 'jo_felinor', to: 'gy' }],
     triggers: [],
     text: 'Add a Felinor to your GY. When that Felinor is trashed, trash the top 2 cards of each opponent’s Library and steal any of them costing (6) or more.',
     flavor: 'He went in a passenger. He came out a partner.',
@@ -403,17 +405,40 @@ export const cards: CardDefinition[] = [
     name: 'Grinder Veteran',
     cost: { money: 3 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
     stats: {},
     effects: [
-      { op: 'recruit', zone: 'library', filter: { keyword: 'Flimsy' }, count: 1, to: 'hand' },
+      // Park the recruit in `aside` so the payoff reads the card that was just
+      // recruited and not a Felinor that was already sitting in hand. `recruit`
+      // moves with an explicit owner, so the parked card stays selectable, and
+      // the last node hands it over either way. `aside` is ONE shared staging
+      // pile per player, so both reads below skip anything a Hand Box has
+      // stored there (the `boxed` counter) — otherwise a boxed Felinor pays out
+      // the tokens and the hand-off empties the box.
+      { op: 'recruit', zone: 'library', filter: { keyword: 'Flimsy' }, count: 1, to: 'aside' },
       {
         op: 'conditional',
-        if: { has: { target: { zone: 'hand', filter: { subtype: 'Felinor', keyword: 'Flimsy' } }, atLeast: 1 } },
+        if: {
+          has: {
+            target: {
+              zone: 'aside',
+              filter: { subtype: 'Felinor', not: { counter: { key: 'boxed', gte: 1 } } },
+            },
+            atLeast: 1,
+          },
+        },
         then: [{ op: 'createCard', defId: 'warhero_token', to: 'hand', count: 2 }],
+      },
+      {
+        op: 'moveTo',
+        target: {
+          zone: 'aside',
+          filter: { keyword: 'Flimsy', not: { counter: { key: 'boxed', gte: 1 } } },
+        },
+        zone: 'hand',
       },
     ],
     triggers: [],
@@ -429,7 +454,7 @@ export const cards: CardDefinition[] = [
     name: 'The Menagerie',
     cost: { money: 1 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -451,7 +476,7 @@ export const cards: CardDefinition[] = [
     name: 'Spider E.B.',
     cost: { money: 2 },
     types: ['Action'],
-    subtypes: ['Felinor'],
+    subtypes: [],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -472,7 +497,7 @@ export const cards: CardDefinition[] = [
     name: 'CN Auspicious Kitty',
     cost: { money: 4 },
     types: ['Action'],
-    subtypes: ['Felinor', 'CN'],
+    subtypes: ['CN'],
     tags: [],
     rarity: 'rare',
     keywords: [],
@@ -493,6 +518,66 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-TOKEN'],
     shop: 'draft',
     art: { key: 'cn_auspicious_kitty', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
+  },
+  {
+    // The Felinor Took Him to the J'O adds to your GY. A trigger can only be
+    // read off a definition, never off an instance, so the escort is its own
+    // token: a Flimsy Felinor whose onTrash is the raid. The top 2 of each
+    // Library are staged in `aside` first so the (6)+ filter reads those two
+    // cards rather than the whole Library. Notes on the three nodes:
+    //   - `recruit` and not a moveTo selector: a Selector's `count` is a total
+    //     across every matched player, so {who:'eachOpponent', count:2} would
+    //     mill 2 cards off ONE opponent and never touch the rest. `recruit`
+    //     applies `count` per resolved player, which is what “each opponent”
+    //     means. Its trailing library shuffle is the price of that.
+    //   - `moveTo ... who:'self'` is the steal: `who` names the owner the card
+    //     ends up with, so the (6)+ cards land in the raider's GY instead of
+    //     going home. They leave `aside` before the trash node, so they survive.
+    //   - `aside` is ONE shared staging pile per player, so both reads exclude
+    //     anything a Hand Box has stored there (the `boxed` counter); without
+    //     that the trash node would destroy an opponent's stored cards.
+    id: 'jo_felinor',
+    name: "J'O Felinor",
+    cost: { money: 0 },
+    types: ['Action', 'Token'],
+    subtypes: ['Felinor'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { cards: 2 },
+    effects: [],
+    triggers: [
+      {
+        on: 'onTrash',
+        effects: [
+          { op: 'recruit', who: 'eachOpponent', zone: 'library', count: 2, to: 'aside' },
+          {
+            op: 'moveTo',
+            target: {
+              who: 'eachOpponent',
+              zone: 'aside',
+              filter: { cost: { gte: 6 }, not: { counter: { key: 'boxed', gte: 1 } } },
+            },
+            zone: 'gy',
+            who: 'self',
+          },
+          {
+            op: 'trash',
+            target: {
+              who: 'eachOpponent',
+              zone: 'aside',
+              filter: { not: { counter: { key: 'boxed', gte: 1 } } },
+            },
+          },
+        ],
+      },
+    ],
+    text: 'Flimsy. +2 Cards. When this is trashed, trash the top 2 cards of each opponent’s Library and steal any of them costing (6) or more.',
+    flavor: 'He went along for the ride. He came back with luggage.',
+    complexity: 'T3',
+    subsystems: ['S-TOKEN', 'S-PVP'],
+    notPurchasable: true,
+    art: { key: 'jo_felinor', status: 'placeholder', anim: 'trash' },
   },
 ];
 

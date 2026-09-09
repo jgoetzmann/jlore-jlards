@@ -6,35 +6,9 @@
  */
 import type { CardDefinition } from '@engine/types';
 
+// Miracle Fruit itself is the (10) Legendary Food of A.16 and lives in
+// `tribes/food.ts`. This file holds only the pool it discovers from.
 export const cards: CardDefinition[] = [
-  {
-    id: 'miracle_fruit',
-    name: 'Miracle Fruit',
-    cost: { money: 3 },
-    types: ['Action', 'Food', 'Token'],
-    subtypes: ['Fruit'],
-    tags: [],
-    rarity: 'token',
-    keywords: ['Flimsy'],
-    stats: { actions: 1 },
-    effects: [
-      {
-        op: 'discover',
-        pool: { catalog: 'miracle' },
-        count: 3,
-        pick: 1,
-        prompt: 'Choose a Miracle',
-        then: [{ op: 'createCard', defId: { pool: { catalog: 'miracle' } }, to: 'play' }],
-      },
-    ],
-    triggers: [],
-    text: 'Flimsy. +1 Action. Discover 1 of 3 Miracles and perform it.',
-    flavor: 'Tastes like the outcome you wanted.',
-    complexity: 'T3',
-    subsystems: ['S-TOKEN'],
-    notPurchasable: true,
-    art: { key: 'miracle_fruit', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
-  },
   {
     id: 'miracle_transmutation',
     name: 'Miracle: Transmutation',
@@ -57,7 +31,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_transmutation', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_transmutation', status: 'placeholder' },
   },
   {
     id: 'miracle_sanctification',
@@ -83,7 +57,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     notPurchasable: true,
-    art: { key: 'miracle_sanctification', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_sanctification', status: 'placeholder' },
   },
   {
     id: 'miracle_tithe_of_jlore',
@@ -101,7 +75,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-SHOP'],
     notPurchasable: true,
-    art: { key: 'miracle_tithe_of_jlore', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_tithe_of_jlore', status: 'placeholder' },
   },
   {
     id: 'miracle_animation',
@@ -134,7 +108,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     notPurchasable: true,
-    art: { key: 'miracle_animation', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_animation', status: 'placeholder' },
   },
   {
     id: 'miracle_the_covetous_hand',
@@ -147,10 +121,15 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // `who` on a moveTo names the DESTINATION owner. Without it the cards are
+      // re-filed under the opponent who already owned them and the steal is a
+      // no-op; with it they change hands, Indestructible Points included, which
+      // the copy-plus-trash shape could not do.
       {
         op: 'moveTo',
         target: { who: 'eachOpponent', zone: ['gy', 'hand'], filter: { type: 'Points' }, count: 2, pick: 'mostExpensive' },
         zone: 'gy',
+        who: 'self',
       },
     ],
     triggers: [],
@@ -158,7 +137,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_the_covetous_hand', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_the_covetous_hand', status: 'placeholder' },
   },
   {
     id: 'miracle_manna',
@@ -178,7 +157,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_manna', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
+    art: { key: 'miracle_manna', status: 'placeholder', anim: 'coin' },
   },
   {
     id: 'miracle_the_library',
@@ -196,7 +175,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_the_library', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_the_library', status: 'placeholder' },
   },
   {
     id: 'miracle_multiplication',
@@ -214,7 +193,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_multiplication', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_multiplication', status: 'placeholder' },
   },
   {
     id: 'miracle_duplication',
@@ -238,7 +217,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_duplication', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_duplication', status: 'placeholder' },
   },
   {
     id: 'miracle_diamond_rain',
@@ -256,7 +235,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_diamond_rain', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_diamond_rain', status: 'placeholder' },
   },
   {
     id: 'miracle_revelation',
@@ -275,7 +254,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card costing (10) or more',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse', filter: { cost: { gte: 10 } } } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],
@@ -283,7 +262,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     notPurchasable: true,
-    art: { key: 'miracle_revelation', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_revelation', status: 'placeholder' },
   },
   {
     id: 'miracle_prophecy',
@@ -301,7 +280,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET'],
     notPurchasable: true,
-    art: { key: 'miracle_prophecy', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_prophecy', status: 'placeholder' },
   },
   {
     id: 'miracle_moonfall',
@@ -327,7 +306,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-SHOP', 'S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_moonfall', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'miracle_moonfall', status: 'placeholder' },
   },
 ];
 

@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'chron_job', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'chron_job', status: 'placeholder' },
   },
   {
     id: 'chron_break',
@@ -45,7 +45,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'chron_break', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
+    art: { key: 'chron_break', status: 'placeholder', anim: 'explode' },
   },
   {
     id: 'twenty_fifth_hour',
@@ -57,22 +57,40 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // `currentTurn` counts every seat's turn, so it is the wrong clock for
+    // "your 25th turn" — and extra turns bump it without giving anyone a new
+    // round. `roundNumber` is state.round, which starts at 1 and only advances
+    // when the seat order wraps (core/turn.ts advanceTurn), so it IS the
+    // number of the turn you are taking. floor(roundNumber / 25) is truthy
+    // from your 25th turn on, at any player count.
+    // The one-per-copy cap rides on 'uses', the only counter key `selfCounter`
+    // reads on its own; seeding it at 0 makes the key exist so `selfCounter`
+    // never falls back to summing `playCount` in.
     effects: [
+      { op: 'addCounter', target: { self: true }, key: 'uses', amount: 0 },
       {
         op: 'conditional',
-        if: { expr: 'floor(currentTurn / 25)' },
+        if: {
+          all: [
+            { expr: 'floor(roundNumber / 25)' },
+            { not: { expr: 'selfCounter' } },
+          ],
+        },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'hoursTaken', amount: 1 },
+          { op: 'addCounter', target: { self: true }, key: 'uses', amount: 1 },
           { op: 'extraTurn', who: 'self' },
         ],
       },
     ],
     triggers: [],
-    text: 'After your 25th turn, immediately take an extra turn. One extra turn per copy. (Turn {currentTurn}.)',
+    // No `{...}` token prints state.round, and `{turn}` is the global seat
+    // counter — at 4 players it would read 100 for a gate that wants round 25,
+    // so the card prints no number rather than a misleading one.
+    text: 'After your 25th turn, immediately take an extra turn. One extra turn per copy.',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'twenty_fifth_hour', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'twenty_fifth_hour', status: 'placeholder' },
   },
   {
     id: 'outsourcing_rd',
@@ -92,11 +110,11 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Flimsy. On the 3rd play of this card this game, manifest the Hypercelestial Aura Lotus Solutions. ({playCount}/3)',
+    text: 'Flimsy. On the 3rd play of this card this game, manifest the Hypercelestial Aura Lotus Solutions. ({selfPlayCount}/3)',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'outsourcing_rd', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'outsourcing_rd', status: 'placeholder' },
   },
   {
     id: 'conjure_aura',
@@ -108,13 +126,15 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['Flimsy'],
     stats: {},
-    effects: [{ op: 'manifestAura', tier: 'celestial', discover: true, who: 'self' }],
+    // The doc row prints Manifest, not Discover — the adjacent Hero's Power row
+    // is the one that offers a choice of three, so no `discover` flag here.
+    effects: [{ op: 'manifestAura', tier: 'celestial', who: 'self' }],
     triggers: [],
-    text: 'Flimsy. Manifest a Celestial Aura.',
+    text: 'Flimsy. Manifest a random Celestial Aura.',
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'conjure_aura', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
+    art: { key: 'conjure_aura', status: 'placeholder', anim: 'summon' },
   },
   {
     id: 'heros_power',
@@ -132,7 +152,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'heros_power', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
+    art: { key: 'heros_power', status: 'placeholder', anim: 'summon' },
   },
   {
     id: 'heros_recall',
@@ -168,7 +188,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'heros_recall', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'heros_recall', status: 'placeholder' },
   },
   {
     id: 'quest_accepted',
@@ -198,7 +218,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-QUEST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'quest_accepted', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'quest_accepted', status: 'placeholder' },
   },
   {
     id: 'a_duel_of_wits',
@@ -239,7 +259,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'a_duel_of_wits', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'a_duel_of_wits', status: 'placeholder' },
   },
   {
     id: 'paper_sculpture',
@@ -258,70 +278,18 @@ export const cards: CardDefinition[] = [
         effects: [{ op: 'trash', target: { who: 'self', zone: ['library', 'hand', 'gy'], count: 10, pick: 'random' } }],
       },
     ],
-    text: '+2 to all five stats. If this is trashed, stolen or removed from your deck in any way, trash 10 random cards from your deck.',
+    // No leave-deck or ownership-change event exists in the TriggerEvent union,
+    // so the printed text is narrowed to the half that actually fires.
+    text: '+2 to all five stats. If this is trashed, trash 10 random cards from your deck.',
     flavor: 'Handle with care. Really.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'paper_sculpture', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
+    art: { key: 'paper_sculpture', status: 'placeholder', anim: 'trash' },
   },
-  {
-    id: 'mercenary_280',
-    name: 'Mercenary 280',
-    cost: { money: 3 },
-    types: ['Action', 'Points'],
-    subtypes: [],
-    tags: ['EndOfGame'],
-    rarity: 'epic',
-    keywords: [],
-    stats: {},
-    effects: [],
-    triggers: [
-      {
-        on: 'gameEnd',
-        effects: [
-          {
-            op: 'conditional',
-            if: { expr: 'max(0, 1 - abs(sumOfDeckCosts - 280))' },
-            then: [{ op: 'scoreOnCard', target: { self: true }, amount: 280 }],
-          },
-        ],
-      },
-    ],
-    text: 'End of Game: +280 VP if the costs of every card in your deck sum to exactly 280. ({sumOfDeckCosts}/280)',
-    flavor: 'He counts.',
-    complexity: 'T2',
-    subsystems: ['S-ENDGAME'],
-    shop: 'draft',
-    art: { key: 'mercenary_280', status: 'final', artist: 'LCM Dreamshaper v7' },
-  },
-  {
-    id: 'doomsday_clock',
-    name: 'Doomsday Clock',
-    cost: { money: 9 },
-    types: ['Action'],
-    subtypes: [],
-    tags: ['PvP'],
-    rarity: 'mythic',
-    keywords: [],
-    stats: {},
-    effects: [
-      { op: 'incDoomsday', amount: 1 },
-      {
-        op: 'delayed',
-        when: { inTurns: 5 },
-        effects: [{ op: 'endGame', reason: 'doomsdayClock' }],
-        who: 'self',
-      },
-    ],
-    triggers: [],
-    text: 'Advance the Doomsday Counter by 1. Five turns from now the game ends, whatever the score. (Counter at {doomsdayCounter}.)',
-    flavor: 'It only turns one way.',
-    complexity: 'T3',
-    subsystems: ['S-ENDGAME'],
-    shop: 'draft',
-    art: { key: 'doomsday_clock', status: 'final', artist: 'LCM Dreamshaper v7' },
-  },
+  // A.28 lists Mercenary 280 and Doomsday Clock as cross-references — "(see
+  // A.10)" and "(see A.11)" — not as second cards. Their definitions live in
+  // `archetypes/victory.ts` and `archetypes/pvp.ts`.
 ];
 
 export default cards;

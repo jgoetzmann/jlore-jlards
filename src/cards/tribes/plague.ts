@@ -162,19 +162,19 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       { op: 'plague', target: { zone: 'hand', count: 1, pick: 'random' }, amount: 1 },
+      // "Up to 2" needs the op with an optional count: a `repeat` + forced
+      // `pick:'choose'` made the trash compulsory, and with one plagued card in
+      // hand it never even prompted. `selectCards` binds each pick as the source,
+      // so `{self:true}` is the card the player actually chose.
       {
-        op: 'repeat',
-        times: 2,
-        effects: [
-          {
-            op: 'conditional',
-            if: { has: { target: { zone: 'hand', filter: { plagued: true } }, atLeast: 1 } },
-            then: [
-              { op: 'trash', target: { zone: 'hand', filter: { plagued: true }, count: 1, pick: 'choose' } },
-              { op: 'gain', stat: 'cards', amount: 1 },
-              { op: 'gain', stat: 'money', amount: 1 },
-            ],
-          },
+        op: 'selectCards',
+        from: { zone: 'hand', filter: { plagued: true } },
+        min: 0,
+        max: 2,
+        then: [
+          { op: 'trash', target: { self: true } },
+          { op: 'gain', stat: 'cards', amount: 1 },
+          { op: 'gain', stat: 'money', amount: 1 },
         ],
       },
     ],
@@ -198,7 +198,10 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       { op: 'trash', target: { who: 'eachPlayer', zone: 'gy', filter: { plagued: true } } },
-      { op: 'trashPile', target: { shop: 'all', filter: { plagued: true }, excludeJlore: true } },
+      // A PileSelector matches a pile on its top card and `trashPile` then destroys
+      // the whole stack, so one plagued top wiped a 10-card Common pile. Trash the
+      // plagued instances instead; the nested `not` replaces `excludeJlore`.
+      { op: 'trash', target: { zone: 'shop', filter: { plagued: true, not: { defId: 'jlore' } } } },
       { op: 'plague', target: { who: 'eachOpponent', zone: 'gy', count: 1, pick: 'random' }, amount: 1 },
     ],
     triggers: [],

@@ -6,7 +6,12 @@
  * SB-39: Eastern Metaphysics ships with the Vainglorious gate removed.
  *
  * Per-game play counters read `player.playCounts` through the `selfPlayCount`
- * expression variable; `{playCount}` in `text` prints the live value.
+ * expression variable; `{selfPlayCount}` in `text` prints the live value.
+ * It has to be `{selfPlayCount}` and not `{playCount}`: play.ts writes a
+ * per-instance `playCount` counter too, and renderCardText checks
+ * `inst.counters` before the player-wide fallback, so `{playCount}` freezes at
+ * this copy's own play tally once it has been played. `selfPlayCount` is not a
+ * counter key, so it always reaches the per-game total.
  * `floor(n/k) - floor((n-1)/k)` is 1 exactly on every kth play;
  * `max(0, 1 - abs(n - k))` is 1 exactly on the kth play.
  */
@@ -38,7 +43,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'lunar_fragment', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
+    art: { key: 'lunar_fragment', status: 'placeholder', anim: 'summon' },
   },
   {
     id: 'journey_to_the_moon',
@@ -53,7 +58,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
-        if: onEveryNthPlay(25),
+        if: onExactPlay(25),
         then: [
           { op: 'createCard', defId: 'lunar_fragment', to: 'library', count: 10, position: 'random' },
           { op: 'shuffle', zone: 'library', who: 'self' },
@@ -61,11 +66,11 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: '+1 Action, +1 Card. On the 25th play of this card this game, shuffle 10 Lunar Fragments into your deck. ({playCount}/25)',
+    text: '+1 Action, +1 Card. On the 25th play of this card this game, shuffle 10 Lunar Fragments into your deck. ({selfPlayCount}/25)',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'journey_to_the_moon', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
+    art: { key: 'journey_to_the_moon', status: 'placeholder', anim: 'shuffle' },
   },
   {
     id: 'astrologist',
@@ -77,25 +82,28 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['Flimsy'],
     stats: { actions: 1 },
-    effects: [],
-    triggers: [
+    // Flimsy means playing this IS trashing it, and the play-cleanup trash
+    // raises no 'onTrash' — so the clause lives in the body, where it can count
+    // Astrologists. `selfPlayCount` is the per-game, per-player total and is
+    // bumped before the body runs, so an even value is an even-numbered trash.
+    // A per-instance counter cannot do it: each copy is trashed at most once,
+    // and `selfCounter` under any other key sums `playCount` in as well.
+    // That makes the clause narrower than the doc row's "trashed this game":
+    // it counts the copies YOU PLAY, so a copy another card trashes out of
+    // hand does not tick and neither does an opponent's. The text says so.
+    effects: [
       {
-        on: 'onTrash',
-        effects: [
-          { op: 'addCounter', target: { self: true }, key: 'astrologistsTrashed', amount: 1 },
-          {
-            op: 'conditional',
-            if: { not: { expr: 'selfCounter % 2' } },
-            then: [{ op: 'createCard', defId: 'lunar_fragment', to: 'hand' }],
-          },
-        ],
+        op: 'conditional',
+        if: { not: { expr: 'selfPlayCount % 2' } },
+        then: [{ op: 'createCard', defId: 'lunar_fragment', to: 'hand' }],
       },
     ],
-    text: 'Flimsy. +1 Action. On every even-numbered Astrologist trashed this game, add a Lunar Fragment to your hand. ({astrologistsTrashed} trashed.)',
+    triggers: [],
+    text: 'Flimsy. +1 Action. On every 2nd Astrologist you play this game — Flimsy trashes it — add a Lunar Fragment to your hand. ({selfPlayCount} played.)',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'astrologist', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'astrologist', status: 'placeholder' },
   },
   {
     id: 'moon_dance',
@@ -120,7 +128,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'moon_dance', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'moon_dance', status: 'placeholder' },
   },
   {
     id: 'space_race',
@@ -134,11 +142,13 @@ export const cards: CardDefinition[] = [
     stats: { money: 3, buys: 3, actions: 3, cards: 3, vp: 3, prophet: 3 },
     effects: [{ op: 'createCard', defId: 'lunar_fragment', to: 'gy', who: 'chosenOpponent' }],
     triggers: [],
-    text: '+3 to all six stats. An opponent of your choice also gets a Lunar Fragment.',
+    // `who:'chosenOpponent'` raises no prompt from createCard: it resolves to
+    // the opponent with the most VP, which the doc row's "an opponent" allows.
+    text: '+3 to all six stats. The opponent with the most VP also gets a Lunar Fragment.',
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'space_race', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'space_race', status: 'placeholder' },
   },
   {
     id: 'wish_upon_the_stars',
@@ -153,16 +163,16 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
-        if: onEveryNthPlay(100),
+        if: onExactPlay(100),
         then: [{ op: 'manifestAura', tier: 'hypercelestial', auraId: 'shooting_star', who: 'self' }],
       },
     ],
     triggers: [],
-    text: '+1 Action, +1 Card. On the 100th play of this card this game, summon the Hypercelestial Aura Shooting Star. ({playCount}/100)',
+    text: '+1 Action, +1 Card. On the 100th play of this card this game, summon the Hypercelestial Aura Shooting Star. ({selfPlayCount}/100)',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'wish_upon_the_stars', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'wish_upon_the_stars', status: 'placeholder' },
   },
   {
     id: 'runebinder_of_jlore',
@@ -197,11 +207,11 @@ export const cards: CardDefinition[] = [
     triggers: [],
     text:
       '+1 Action. Put this on top of your Library after playing it. Add a Jlore to your GY on the 7th, 9th, 13th, ' +
-      '14th, 18th, 21st, 26th, 27th and 28th play of this card this game. ({playCount} plays.)',
+      '14th, 18th, 21st, 26th, 27th and 28th play of this card this game. ({selfPlayCount} plays.)',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'runebinder_of_jlore', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'runebinder_of_jlore', status: 'placeholder' },
   },
   {
     id: 'arc_of_the_universe',
@@ -229,7 +239,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'arc_of_the_universe', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
+    art: { key: 'arc_of_the_universe', status: 'placeholder', anim: 'explode' },
   },
   {
     id: 'eastern_metaphysics',
@@ -241,19 +251,23 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // The tally has to sit under 'charges': `selfCounter` reads a named counter
+    // only for 'counter' / 'uses' / 'charges' and otherwise sums every counter
+    // on the instance, which meant the Auras were counted together with
+    // `playCount` and the payoff fired on the second play.
     effects: [
-      { op: 'addCounter', target: { self: true }, key: 'auraCharges', amount: 1 },
+      { op: 'addCounter', target: { self: true }, key: 'charges', amount: 1 },
       {
         op: 'conditional',
         if: { expr: 'floor(selfCounter / 3)' },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'auraCharges', amount: -3 },
+          { op: 'addCounter', target: { self: true }, key: 'charges', amount: -3 },
           {
             op: 'choose',
             options: [
               { label: 'Positive: +3 Actions, +3 Cards', effects: [{ op: 'gain', stat: 'actions', amount: 3 }, { op: 'draw', amount: 3 }] },
               { label: 'Positive: +6 Money', effects: [{ op: 'gain', stat: 'money', amount: 6 }] },
-              { label: 'Negative: each opponent discards 2', effects: [{ op: 'discardDownTo', amount: 3, who: 'eachOpponent' }] },
+              { label: 'Negative: each opponent discards down to 3 cards', effects: [{ op: 'discardDownTo', amount: 3, who: 'eachOpponent' }] },
               {
                 label: 'Negative: trash a card from an opponent\'s GY and take a Lunar Fragment',
                 effects: [
@@ -269,70 +283,15 @@ export const cards: CardDefinition[] = [
     triggers: [],
     text:
       'Track the last 3 Auras from Actions you play; each owned Action is assigned a Positive or Negative Aura. ' +
-      'Consume 3 Auras for one of four payoffs. ({auraCharges}/3 Auras.)',
+      'Consume 3 Auras for one of four payoffs. ({charges}/3 Auras.)',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'eastern_metaphysics', status: 'final', artist: 'LCM Dreamshaper v7' },
+    art: { key: 'eastern_metaphysics', status: 'placeholder' },
   },
-  {
-    id: 'constellation',
-    name: 'Constellation',
-    cost: { money: 10 },
-    types: ['Points'],
-    subtypes: [],
-    tags: ['EndOfGame'],
-    rarity: 'epic',
-    keywords: [],
-    stats: {},
-    effects: [],
-    triggers: [
-      {
-        on: 'gameEnd',
-        effects: [
-          {
-            op: 'scoreOnCard',
-            target: { self: true },
-            amount: { expr: 'floor(uniqueCardsInDeck / 2)' },
-          },
-        ],
-      },
-    ],
-    text: 'End of Game: +1 VP for every 2 unique cards in your deck. ({uniqueCardsInDeck} unique.)',
-    complexity: 'T4',
-    subsystems: ['S-ENDGAME'],
-    shop: 'draft',
-    art: { key: 'constellation', status: 'final', artist: 'LCM Dreamshaper v7' },
-  },
-  {
-    id: 'star_aligner',
-    name: 'Star Aligner',
-    cost: { money: 7 },
-    types: ['Points'],
-    subtypes: [],
-    tags: ['EndOfGame'],
-    rarity: 'epic',
-    keywords: [],
-    stats: {},
-    effects: [],
-    triggers: [
-      {
-        on: 'gameEnd',
-        effects: [
-          {
-            op: 'scoreOnCard',
-            target: { self: true },
-            amount: { expr: 'min(15, count(lunarFragment) * 3)' },
-          },
-        ],
-      },
-    ],
-    text: 'End of Game: +3 VP for each Lunar Fragment in your deck, up to 15.',
-    complexity: 'T3',
-    subsystems: ['S-ENDGAME'],
-    shop: 'draft',
-    art: { key: 'star_aligner', status: 'final', artist: 'LCM Dreamshaper v7' },
-  },
+  // A.27 lists Constellation and Star Aligner as cross-references — both rows
+  // read "(see A.10)" — not as second cards. Their definitions live in
+  // `archetypes/victory.ts`.
 ];
 
 export default cards;

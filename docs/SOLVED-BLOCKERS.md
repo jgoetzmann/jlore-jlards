@@ -603,6 +603,150 @@ Code: `opChoose` in `src/engine/effects/ops/choices.ts`.
 
 ---
 
+## From the catalog audit
+
+A pass comparing all 533 cards against Appendix A/B found 263 verified defects.
+The entries below are the decisions that came out of it. The pattern running
+through nearly all of them is the one SB-42 and SB-43 already named: **the
+dangerous defect here is not the one that crashes, it is the one that quietly
+does half the work.** Every item below was live in a green suite.
+
+### SB-44. Twelve cards were defined twice, and the uniqueness checks could not fail
+
+**Resolved:** one definition per card; the duplicate deleted. `archetypes/books.ts`
+went entirely, since all six of its cards were duplicates of the `tribes/books.ts`
+versions carrying a spurious `Scripture` subtype — which would have put Library
+Card into Lection's "add a random Scripture" pool.
+
+The registry is keyed by id and `cardOrder` only records an id the first time it
+is seen, so a second definition silently replaced the first and `allCards()`
+returned a deduplicated list. Both the validator and B95/B103 asked *that* list
+for duplicates, so the check could never fire. Whichever module imported last
+won: Constellation scored "+1 VP per 2 unique cards" instead of its printed
+trash-a-cost-run clause, and Miracle Fruit was a (3) token instead of the (10)
+Legendary.
+
+Four of the twelve came from A.27/A.28 rows that read "*(see A.10)*" — cross
+references, which a builder implemented as second cards, inventing new effects.
+
+Code: uniqueness now runs on `allCardDefinitions()` in both `validate-cards.ts`
+and `catalog-integrity.test.ts`.
+
+### SB-45. Milkshake: A.7 prices it, A.29 calls it a token
+
+**Resolved:** the A.7 row wins — a purchasable (4) Rare, `Token` dropped from its
+types. A.7 is the specific row and states a rarity and a price; A.29's grouped
+row covers "0–3" and names no rarity. Decisively, no Food generator in the
+catalog mints a Milkshake, so as a token it would be unobtainable. The doc shows
+the same looseness on Jmart Banana Bunch, also a priced Rare.
+
+### SB-46. One table, three copies: anomaly rate and node budget
+
+**Resolved:** `anomalyChance` is **0.30** everywhere and `effectNodeBudget` is
+**200** everywhere.
+
+`defaultMatchConfig`, `DEFAULT_SIM_CONFIG` and the UI's `defaultConfig` are three
+hand-maintained copies of the same table, and they had drifted: anomalies rolled
+at 25% in the engine, 25% in the sim and **15%** in the actual game, against
+§8.1's 30% (20% Anomalous + 10% Chaotic, Formations cut). The node budget was
+200 / 500 / **2000**. So the shipped game rolled anomalies at half the documented
+rate and ran a cap ten times looser than the sim measured balance against.
+
+Measured before changing the budget: over 15 matches, budget 200 and budget 2000
+produce identical results — the cap only ever catches the paradox loops it exists
+for. **REVISIT:** the three tables should be derived from one.
+
+### SB-47. No aura trigger was ever dispatched
+
+**Resolved:** `fireOwnedTriggers` now sweeps the player's Field, and the
+instance-only windows (`onBuy`, `onGain`, `onPlay`) call `fireFieldTriggers`
+alongside their instance dispatch. `startOfTurn` is excluded, because
+`auraStartOfTurn` already owns that window (B80).
+
+`fireOwnedTriggers` built its candidate list as `[...play, ...hand, ...gy,
+...library]` while its own doc comment claimed it covered "the aura triggers on
+that player's field". It did not, and nothing else did either — `p.field` was
+read only to reset `usedThisTurn` and tick countdowns. Every Celestial aura is a
+trigger, so the entire tier was inert, along with the five Anomalies whose whole
+effect is to grant one.
+
+Widening the card dispatch instead would have been wrong: sweeping every owned
+card on `onBuy` fires riders like Lead's pile lock from a player's graveyard.
+
+### SB-48. A prompt's `then` never saw the player's choice
+
+**Resolved:** `localResume` now substitutes the chosen card into the `then` and
+runs it once per choice, mirroring `pushChosen` / `runThenPerInstance`.
+
+`core/resume.ts` probes for a `resumePrompt` export that `@engine/effects` does
+not have — the same shape as SB-43 — so every prompt in the game resolved
+through the local fallback, which ran `prompt.then` raw. `substituteDefId` was
+never called, so `'$discovered'` never resolved, and `{self:true}` inside a
+`then` bound to the card that *asked* rather than the card that was *picked*.
+Of 42 Discovers in the catalog, 37 had a custom `then` and only 5 used the pick:
+the rest either re-rolled the pool for a fresh random card or operated on
+themselves. The player chose, and the choice was discarded.
+
+A per-choice `then` is also skipped entirely when nothing is picked — otherwise
+declining a `min:0` selection ran the body against the source card, and Antibody
+Extraction trashed itself.
+
+### SB-49. Suspended prompt nodes were dropped
+
+**Resolved:** `resumeNode` re-runs the node a prompt suspended on, with the
+answer as `pre`.
+
+`runQueue` shifts an item off the queue before resolving it and, on `suspend`,
+parks only what was left — the suspended node itself was gone. Discover, choose
+and selectCards survive that because they carry their continuation in
+`prompt.then`, but a `pick:'choose'` selector inside `discard` / `trash` /
+`moveTo`, and every pile prompt, expect to be re-entered. `resolveTargets` and
+`resolvePiles` were already written for it, both returning `pre.iids` /
+`pre.pileIds` when handed one. Nothing ever handed them one, so those cards
+prompted the player and then did nothing.
+
+### SB-50. `moveTo` had no destination owner, so no steal moved anything
+
+**Resolved:** `{op:'moveTo'}` takes an optional `who`, the owner the card ends up
+with. Omitted, the card keeps its current owner — right for moving between your
+own zones, and the reason every steal written as a bare `moveTo` handed the card
+straight back to the player it was taken from.
+
+### SB-51. `aside` conflates scratch space with storage
+
+**Resolved:** `CardFilter` gained a `counter` axis, and the Hand Boxes select
+`counter:{key:'boxed',gte:1}` rather than "everything in aside that is not a
+Token".
+
+`aside` is one staging pile per player. A dozen cards park instances there for
+the length of a single effect, which is safe on its own, but Save for Later and
+Repackage store a hand there across turns. Without a way to tell the two apart,
+opening a Hand Box scooped up whatever another card was mid-way through staging.
+
+### SB-52. An unregistered `count()` filter name reads as 0
+
+**Resolved:** the five real filters card text names — `oneCost`, `cost7`,
+`diamond`, `soul_shard`, `kwzki_cultist` — are registered in `NAMED_FILTERS`,
+and `cards:validate` now fails on any name that is not.
+
+`count(x)` resolves x through `NAMED_FILTERS` and an unknown name evaluates to 0
+rather than raising. Eleven names were in use and one was registered, so Star
+Aligner, Treasure Vault, Snowball, Kwzki Cultist and Soulcologist Mike Kwzka all
+scored or paid exactly nothing, in a green suite. Six names describe computed
+values that are not filters at all (`longestCostRun`, `topCost`, `myCost`,
+`totalVp`, `bestOpponentCost`, `tallest`) and were rewritten card-side.
+
+### SB-53. Tnack Trav was unbuyable in every match
+
+**Resolved:** `PROPHET_SHOP_CARD_IDS` named `tnack_trav`; the definition is
+`tnack_trav_prophesized_savior`. `buildShop` resolves that list through
+`safeGetCard`, which swallows the registry's throw and `continue`s, so the pile
+was simply never created and a Legendary sat out every game. The validator now
+checks the list against the registry. Counting `shop === 'prophet'` definitions
+could not catch it: the definition was fine, the id list was wrong.
+
+---
+
 ## Balance findings from the first harness runs
 
 Not blockers — measurements, recorded here because they are the first real

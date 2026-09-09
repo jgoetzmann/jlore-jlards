@@ -199,17 +199,28 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 3 },
     effects: [
+      // Nothing stamps the three cards the printed stat line just drew, so the
+      // loop can only approximate "drawn": take the 3 most recently added (0)-cost
+      // cards in hand, which is the doc's own ceiling — an unbounded `over` paid
+      // +3 Money for every Egg already being held. `{self:true}` trashes the card
+      // the iteration is bound to; the old random re-pick could trash another one.
+      //
+      // `text` states the approximation rather than the doc's "each drawn card":
+      // when the three drawn cards are not all (0)-cost the loop reaches past them
+      // to (0)-cost cards that were already in hand, so "for each drawn card" would
+      // be a lie. Naming the newest-first order keeps the printed line honest until
+      // an engine-side stamp on freshly drawn instances makes "drawn" expressible.
       {
         op: 'forEach',
-        over: { zone: 'hand', filter: { cost: { eq: 0 } } },
+        over: { zone: 'hand', filter: { cost: { eq: 0 } }, count: 3, pick: 'bottom' },
         effects: [
           { op: 'gain', stat: 'money', amount: 3 },
-          { op: 'trash', target: { zone: 'hand', filter: { cost: { eq: 0 } }, count: 1, pick: 'random' } },
+          { op: 'trash', target: { self: true } },
         ],
       },
     ],
     triggers: [],
-    text: '+3 Cards. For each drawn card costing (0), +3 Money and trash it.',
+    text: '+3 Cards. Then trash up to 3 cards costing (0) from your hand, newest first, for +3 Money each.',
     flavor: 'Still shouting.',
     complexity: 'T2',
     subsystems: ['S-EFFECTS'],

@@ -45,10 +45,23 @@ export function opMoveTo(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
   if (node.op !== 'moveTo') return 'ok';
   const targets = resolveTargets(s, item, q, node.target, pre, 'Move a card');
   if (targets === null) return 'suspend';
+
+  // A `who` names the owner the card ends up with. Without one a card keeps its
+  // current owner, so moving an opponent's card to "hand" returns it to THEIR
+  // hand — every steal written as a bare moveTo was a no-op.
+  let destOwner: string | null | undefined;
+  if (node.who) {
+    const rng = takeRng(s);
+    const picked = resolveWho(s, node.who, item.player, rng);
+    commitRng(s, rng);
+    destOwner = picked.length > 0 ? picked[0] : undefined;
+  }
+
   for (const iid of targets) {
     const i = s.instances[iid];
     if (!i) continue;
-    const owner = OWNED.indexOf(node.zone) >= 0 ? i.owner ?? item.player : i.owner;
+    const owner =
+      OWNED.indexOf(node.zone) >= 0 ? destOwner ?? i.owner ?? item.player : destOwner ?? i.owner;
     moveInstance(s, iid, owner, node.zone, node.position as Position | undefined);
     log(s, 'moveTo', { iid, defId: i.defId, zone: node.zone }, owner);
   }

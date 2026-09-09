@@ -284,12 +284,19 @@ export const cards: CardDefinition[] = [
       {
         op: 'delayed',
         when: 'endOfTurn',
+        // `counter` is the one key `selfCounter` reads on its own; under any
+        // other name it sums every counter on the instance, the engine's own
+        // playCount included. Zeroed again after the payout so a later play
+        // carries the new leftover only.
         effects: [
-          { op: 'addCounter', target: { self: true }, key: 'carryMoney', amount: { expr: 'moneyUnspent' } },
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: 'moneyUnspent' } },
           {
             op: 'delayed',
             when: 'startOfTurn',
-            effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCounter' } }],
+            effects: [
+              { op: 'gain', stat: 'money', amount: { expr: 'selfCounter' } },
+              { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: '0 - selfCounter' } },
+            ],
           },
         ],
       },
@@ -601,7 +608,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
-        if: { expr: 'buysRemaining - 2' },
+        if: { expr: 'buysRemaining >= 3' },
         then: [
           { op: 'gain', stat: 'buys', amount: 1 },
           { op: 'gain', stat: 'money', amount: 1 },
@@ -629,7 +636,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
-        if: { expr: 'cardsGainedThisTurn - 2' },
+        if: { expr: 'cardsGainedThisTurn >= 3' },
         then: [
           { op: 'gain', stat: 'actions', amount: 1 },
           { op: 'gain', stat: 'buys', amount: 1 },
@@ -914,7 +921,7 @@ export const cards: CardDefinition[] = [
       { op: 'gain', stat: 'money', amount: { expr: 'floor(uniqueCardsInDeck / 3)' } },
       {
         op: 'conditional',
-        if: { expr: 'floor(uniqueCardsInDeck / 3) - 2' },
+        if: { expr: 'floor(uniqueCardsInDeck / 3) >= 3' },
         then: [{ op: 'draw', amount: 1 }],
       },
     ],
@@ -963,11 +970,16 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // Bank the loss on the card before draining the wallet: the payout
+      // resolves five turns later with a fresh var set, so the Money lost has
+      // to be read back off the source instance. `counter` is the reserved key
+      // `selfCounter` reads on its own, and counters survive the Flimsy trash.
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: 'moneyUnspent' } },
       {
         op: 'delayed',
         when: { inTurns: 5 },
         effects: [
-          { op: 'gain', stat: 'money', amount: { expr: 'x * 4 + 5' } },
+          { op: 'gain', stat: 'money', amount: { expr: 'selfCounter * 4 + 5' } },
           { op: 'gain', stat: 'buys', amount: 3 },
         ],
       },

@@ -4,7 +4,8 @@
  * SB-40: Zephrys, Second Time Around and Infinite Realities resolve through the
  * cheap substitutes in `@engine/meta` rather than any solver. The card data
  * below carries the Discover shape; `simSubstitutes` is the hook the
- * interpreter calls to fill those pools with the heuristic picks.
+ * interpreter is meant to call to fill those pools with the heuristic picks
+ * — nothing in the engine reads it yet, so those three still sample at random.
  *
  * SB-13: the four Fusion cards route through `@engine/systems` fusion.
  */
@@ -72,7 +73,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover any card in the Entire Universe',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse' } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],
@@ -138,7 +139,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a Legendary',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse', filter: { rarity: 'legendary' } } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],
@@ -165,7 +166,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover the perfect card for your hand',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],
@@ -192,7 +193,9 @@ export const cards: CardDefinition[] = [
         times: 5,
         effects: [
           { op: 'createCard', defId: { pool: { scope: 'entireUniverse', filter: { type: 'Action' } } }, to: 'hand', keywords: ['Flimsy'] },
-          { op: 'playCard', target: { who: 'self', zone: 'hand', count: 1, pick: 'random' }, randomTargets: true },
+          // `createCard` appends to the end of hand, so `pick:'bottom'` casts the
+          // Action this iteration just generated rather than a card already held.
+          { op: 'playCard', target: { who: 'self', zone: 'hand', count: 1, pick: 'bottom' } },
         ],
       },
     ],
@@ -329,7 +332,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card from a reality where you win',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],
@@ -390,7 +393,22 @@ export const cards: CardDefinition[] = [
             count: 3,
             pick: 2,
             prompt: 'Discover 2 cards to Fuse',
-            then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand' }],
+            // SB-13's fusion arithmetic exists (`fusedDefinition`) but no op
+            // reaches it, so card data cannot merge the two picks. A bare
+            // `then: []` is worse than nothing here: the resume path's default
+            // Discover branch creates EVERY pick in hand, so `pick: 2` inside
+            // `repeat times: 2` handed out four cards where the printed yield
+            // is two. The `x == 0` guard — North Star's idiom in
+            // economy/draw.ts — runs the body once per prompt instead of once
+            // per pick, so each repeat still yields one card. When a fuse op
+            // lands, replace this whole conditional with it.
+            then: [
+              {
+                op: 'conditional',
+                if: { expr: 'x == 0' },
+                then: [{ op: 'createCard', defId: '$discovered', to: 'hand' }],
+              },
+            ],
           },
         ],
       },

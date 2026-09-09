@@ -18,6 +18,7 @@ import {
   type EffectContext,
 } from './runtime';
 import { evalCondition } from './evaluate';
+import { getAura, hasAura } from '@engine/registry';
 import { discardInstance, shuffleZone, trashInstance } from '@engine/core/zones';
 
 /** Events that only ever fire on the instance they happened to. */
@@ -117,6 +118,43 @@ export function fireEvent(
       );
 
       log(s, 'trigger', { event, iid, defId: i.defId }, owner);
+    }
+  }
+
+  // Auras live in the Field and are not instances, so the loop above cannot see
+  // them. Without this, an aura's onTrash / onDraw trigger never fires. A
+  // self-event belongs to the player it happened to; a table-wide event reaches
+  // every field.
+  const fieldOwners = SELF_EVENTS.has(event)
+    ? [subject ? s.instances[subject]?.owner ?? actor : actor]
+    : s.playerOrder;
+  for (const pid of fieldOwners) {
+    const p = pid ? s.players[pid] : undefined;
+    if (!p) continue;
+    if ((event === 'onOpponentBuy' || event === 'onOpponentPlay') && pid === actor) continue;
+    for (const aura of p.field) {
+      const def = hasAura(aura.auraId) ? getAura(aura.auraId) : null;
+      if (!def) continue;
+      for (const trig of def.triggers) {
+        if (trig.on !== event) continue;
+        if (typeof trig.maxPerTurn === 'number' && trig.maxPerTurn > 0) {
+          const key = budgetKey(event, s.turn);
+          const used = typeof aura.counters[key] === 'number' ? aura.counters[key] : 0;
+          if (used >= trig.maxPerTurn) continue;
+          aura.counters[key] = used + 1;
+        }
+        const ctx: EffectContext = {
+          player: pid,
+          sourceIid: null,
+          depth: parent.depth + 1,
+          multiplier: 1,
+          vars: {},
+        };
+        if (trig.condition && !evalCondition(s, trig.condition, ctx)) continue;
+        if (trig.effects.length === 0) continue;
+        pushBack(q, childItems(parent, trig.effects, ctx));
+        log(s, 'auraTrigger', { event, auraId: aura.auraId }, pid);
+      }
     }
   }
 }

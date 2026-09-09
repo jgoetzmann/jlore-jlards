@@ -46,20 +46,35 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { actions: 1, money: 3, cards: 1 },
     effects: [
-      {
-        op: 'trash',
-        target: {
-          who: 'chosenOpponent',
-          zone: ['hand', 'library', 'gy'],
-          filter: { subtype: 'CN' },
-          count: 1,
-          pick: 'random',
-        },
-      },
+      // "If successful" is the presence of a target, tested before the trash:
+      // `ifPrevious` is never written by the interpreter, so a rider hung off it
+      // would never pay. `chosenOpponent` is deterministic (the opponent with the
+      // most VP), so the condition and the trash agree on the same player.
       {
         op: 'conditional',
-        if: { ifPrevious: true },
-        then: [{ op: 'gain', stat: 'money', amount: 2 }],
+        if: {
+          has: {
+            target: {
+              who: 'chosenOpponent',
+              zone: ['hand', 'library', 'gy'],
+              filter: { subtype: 'CN' },
+            },
+            atLeast: 1,
+          },
+        },
+        then: [
+          {
+            op: 'trash',
+            target: {
+              who: 'chosenOpponent',
+              zone: ['hand', 'library', 'gy'],
+              filter: { subtype: 'CN' },
+              count: 1,
+              pick: 'random',
+            },
+          },
+          { op: 'gain', stat: 'money', amount: 2 },
+        ],
       },
     ],
     triggers: [],
@@ -86,7 +101,11 @@ export const cards: CardDefinition[] = [
         pool: { scope: 'knownUniverse', filter: { cost: { lte: 2 }, inMatch: false } },
         count: 3,
         pick: 1,
-        then: [{ op: 'plague', target: { zone: 'hand', count: 1, pick: 'lastPlayed' }, amount: 1 }],
+        // `$discovered` is the defId the player picked; `localResume` substitutes
+        // it into `then` once per chosen card. Minting the card here rather than
+        // leaning on the default Discover semantic is what lets it arrive with a
+        // Plague Token already on it (`createCard` honours `counters`).
+        then: [{ op: 'createCard', defId: '$discovered', to: 'hand', counters: { plague: 1 } }],
         prompt: 'Discover a card costing (2) or less that is not in this match',
       },
     ],

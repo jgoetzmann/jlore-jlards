@@ -32,7 +32,11 @@ export function defaultMatchConfig(playerCount: number): MatchConfig {
   return {
     playerCount,
     draftPileCount: 10, // SB-10
-    anomalyChance: 0.25,
+    // Gameplay doc 8.1: the source roll is 50% standard / 20% Anomalous /
+    // 20% Formational / 10% Chaotic. Formations are out of scope this pass, and
+    // the two anomaly-bearing rolls (Anomalous + Chaotic) sum to 30% — "the
+    // interim split is 70% standard / 30% Anomalous".
+    anomalyChance: 0.3,
     winCondition: {
       kind: 'standard',
       emptyPileFraction: 0.4, // SB-3

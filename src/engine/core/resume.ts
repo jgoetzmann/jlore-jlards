@@ -81,6 +81,20 @@ function localResume(state: GameState, prompt: Prompt, keys: string[]): GameStat
   raw['selectedIids'] = chosen.map((o) => o.iid).filter((i): i is string => !!i);
   raw['selectedPileIds'] = chosen.map((o) => o.pileId).filter((p): p is string => !!p);
 
+  // A 'targets' or 'piles' prompt came from a `pick:'choose'` selector inside an
+  // ordinary op — discard, trash, moveTo, lockPile, gainCard. Those carry no
+  // `then`: the op itself has to run again with the answer. The mode is on the
+  // ctx, not on `prompt.type`, because a target prompt is typed 'selectCards'
+  // like a real selectCards node.
+  const mode = raw['mode'];
+  if (mode === 'targets' || mode === 'piles') {
+    const pre =
+      mode === 'piles'
+        ? { pileIds: raw['selectedPileIds'] as string[] }
+        : { iids: raw['selectedIids'] as string[] };
+    return Effects.resumeNode(s, prompt, pre);
+  }
+
   ctx.vars['chosenCount'] = chosen.length;
   ctx.vars['x'] = ctx.vars['x'] ?? chosen.length;
 
@@ -96,7 +110,43 @@ function localResume(state: GameState, prompt: Prompt, keys: string[]): GameStat
   }
 
   if (prompt.then && prompt.then.length) {
-    s = runEffects(s, prompt.then, ctx);
+    // The `then` of a choice runs ONCE PER CHOSEN CARD, with the sentinel
+    // '$discovered' / '$selected' replaced by that card's defId. This mirrors
+    // `pushChosen` and `runThenPerInstance` in effects/ops/choices.ts, which is
+    // where the interpreter would have resumed if the effects slice exported a
+    // `resumePrompt`. It does not, so every prompt in the game lands here
+    // instead, and running `then` raw meant the sentinel was never substituted
+    // and the body never saw the player's choice.
+    //
+    // `selectCards` additionally rebinds `self` to the selected instance —
+    // {self:true} inside its `then` means "the card I just picked", not the
+    // card that asked. `discover` keeps the source binding, because a
+    // discovered card has no instance yet.
+    const perChoice = chosen.filter((o) => o.defId || o.iid);
+    const isPerChoice = raw['perChoice'] === true;
+    if (perChoice.length === 0) {
+      // A per-choice `then` describes what to do WITH a pick. Declining a
+      // `min:0` selection means there is nothing to do it to — running the body
+      // anyway resolves {self:true} to the card that asked, so Antibody
+      // Extraction trashed itself when the player chose nothing.
+      if (!isPerChoice) s = runEffects(s, prompt.then, ctx);
+    } else {
+      perChoice.forEach((opt, idx) => {
+        const inst = opt.iid ? s.instances[opt.iid] : undefined;
+        const defId = opt.defId ?? inst?.defId;
+        const body = defId ? Effects.substituteDefId(prompt.then, defId) : prompt.then.slice();
+        const boundIid = prompt.type === 'selectCards' && opt.iid ? opt.iid : ctx.sourceIid;
+        s = runEffects(
+          s,
+          body,
+          makeContext(prompt.player, boundIid, ctx.depth, ctx.multiplier, {
+            ...ctx.vars,
+            x: idx,
+          }),
+        );
+        if (s.pending) return;
+      });
+    }
   } else if (prompt.type === 'discover') {
     // Default Discover semantic: the picked card joins your hand.
     for (const opt of chosen) {

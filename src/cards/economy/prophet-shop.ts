@@ -8,7 +8,36 @@
  *
  * SB-19: Scripture of Siva is written, not blank.
  */
-import type { CardDefinition } from '@engine/types';
+import type { CardDefId, CardDefinition, EffectNode } from '@engine/types';
+
+/**
+ * The (−1) drain tier of A.3, named by id. `CardFilter` carries no Prophet-drain
+ * field, so a pool that wants "a (−1) Prophet card" has to list its members;
+ * filtering on `subtype: 'Prophet'` alone offers the whole 24-card menu.
+ */
+const DRAIN_1_PROPHET: CardDefId[] = [
+  'chains_of_the_sovereign',
+  'destiny_draw',
+  'mulligan',
+  'platinum',
+  'pray_for_rain',
+  'truss_pluss',
+  'the_unconcerned_lion',
+];
+
+/**
+ * Kwzki High Council Consultant fires the same Discover from its body and from
+ * its onDiscard trigger. '$discovered' is substituted for the picked defId on
+ * resume; `{self:true}` in a Discover `then` would mean the Consultant itself.
+ */
+const consultTheCouncil = (): EffectNode => ({
+  op: 'discover',
+  pool: { scope: 'knownUniverse', filter: { subtype: 'Prophet', defId: DRAIN_1_PROPHET } },
+  count: 3,
+  pick: 1,
+  prompt: 'Consult the Council',
+  then: [{ op: 'createCard', defId: '$discovered', to: 'hand', keywords: ['Temporary'] }],
+});
 
 export const cards: CardDefinition[] = [
   {
@@ -28,7 +57,12 @@ export const cards: CardDefinition[] = [
         then: [
           {
             op: 'lockPile',
-            target: { shop: 'draft', pick: 'choose', excludeJlore: true },
+            // `pick:'choose'` with no `count` returns EVERY draft pile and never
+            // prompts (resolvePiles short-circuits on `want >= all.length`), so
+            // this locked the whole Draft Shop. A pile prompt cannot be answered
+            // yet — a suspended 'selectPile' node is dropped on resume — so the
+            // one pile is picked deterministically instead of by hand.
+            target: { shop: 'draft', pick: 'mostExpensive', count: 1, excludeJlore: true },
             duration: 'untilEndOfYourNextTurn',
           },
         ],
@@ -36,11 +70,20 @@ export const cards: CardDefinition[] = [
     ],
     triggers: [
       {
+        // Dormant on purpose, and left at the default trigger zones. 'onUnlock'
+        // carries no pile identity (opUnlockPile fires it with `subject: null`)
+        // and fireEvent sweeps every instance in the game for a non-self event,
+        // so widening `zones` to reach this card in its Flimsy trash would charge
+        // the owner's chosen opponent on ANY explicit unlock of ANY pile by
+        // anyone — Seal the Rift's own delayed unlock included, and once per
+        // locked pile for a `{ shop: 'all' }` unlock. Natural expiry in
+        // expireShopTimers fires nothing at all, so the printed case needs the
+        // event to name its pile before this clause can be scoped correctly.
         on: 'onUnlock',
         effects: [{ op: 'gain', stat: 'prophet', amount: -2, who: 'chosenOpponent' }],
       },
     ],
-    text: 'Play on Buy, Flimsy. Lock a Draft Shop pile. Unlocking it costs an opponent (-2) Prophet. Fails if half or more of the Draft piles are already Locked.',
+    text: 'Play on Buy, Flimsy. Lock the most expensive Draft Shop pile. Unlocking it costs an opponent (-2) Prophet. Fails if half or more of the Draft piles are already Locked.',
     flavor: 'The market kneels.',
     complexity: 'T3',
     subsystems: ['S-LOCK', 'S-PROPHET'],
@@ -81,8 +124,16 @@ export const cards: CardDefinition[] = [
     tags: [],
     rarity: 'common',
     keywords: ['PlayOnBuy', 'Flimsy'],
-    stats: { cards: 5 },
-    effects: [{ op: 'discard', target: { who: 'self', zone: 'hand' } }],
+    // The draw has to follow the discard, and `applyStats` always runs before
+    // the effect body — a `stats: { cards: 5 }` line drew first and the discard
+    // then swept the fresh hand. Ordered draws live in `effects` (the shape
+    // Infinite Realities uses); the standing cost is that Buff/Nerf can no
+    // longer see the +5 Cards.
+    stats: {},
+    effects: [
+      { op: 'discard', target: { who: 'self', zone: 'hand' } },
+      { op: 'draw', amount: 5 },
+    ],
     triggers: [],
     text: 'Play on Buy, Flimsy. Discard your hand, then +5 Cards.',
     flavor: 'Do-over.',
@@ -162,16 +213,17 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['PlayOnBuy', 'Flimsy'],
     stats: {},
+    // "The 3 Books PRINTED on this" — a fixed, previewable trio. Sampling the
+    // book catalog three times gave a different set every play and could deal
+    // the same Book twice, which neither the printed identity nor the S-HIDDEN
+    // hover preview can render.
     effects: [
-      {
-        op: 'createCard',
-        defId: { pool: { catalog: 'book', scope: 'entireUniverse' } },
-        to: 'hand',
-        count: 3,
-      },
+      { op: 'createCard', defId: 'book_of_knowledge', to: 'hand' },
+      { op: 'createCard', defId: 'book_of_flame', to: 'hand' },
+      { op: 'createCard', defId: 'book_of_books', to: 'hand' },
     ],
     triggers: [],
-    text: 'Cast on Buy, Flimsy. Add the 3 Books printed on this card to your hand.',
+    text: 'Cast on Buy, Flimsy. Add the 3 Books printed on this card to your hand: Book of Knowledge, Book of Flame and Book of Books.',
     flavor: 'Volumes I, II and the one nobody finishes.',
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-HIDDEN', 'S-TOKEN'],
@@ -236,35 +288,11 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['PlayOnBuy'],
     stats: {},
-    effects: [
-      {
-        op: 'discover',
-        pool: { scope: 'knownUniverse', filter: { subtype: 'Prophet' } },
-        count: 3,
-        pick: 1,
-        prompt: 'Consult the Council',
-        then: [
-          { op: 'moveTo', target: { self: true }, zone: 'hand' },
-          { op: 'setKeyword', target: { self: true }, keyword: 'Temporary', on: true },
-        ],
-      },
-    ],
+    effects: [consultTheCouncil()],
     triggers: [
       {
         on: 'onDiscard',
-        effects: [
-          {
-            op: 'discover',
-            pool: { scope: 'knownUniverse', filter: { subtype: 'Prophet' } },
-            count: 3,
-            pick: 1,
-            prompt: 'Consult the Council',
-            then: [
-              { op: 'moveTo', target: { self: true }, zone: 'hand' },
-              { op: 'setKeyword', target: { self: true }, keyword: 'Temporary', on: true },
-            ],
-          },
-        ],
+        effects: [consultTheCouncil()],
       },
     ],
     text: 'Play on Buy. On play or discard, add a Temporary (-1) Prophet card from your Known Universe to your hand.',
@@ -303,23 +331,37 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1 },
+    // Both halves have to name the SAME pile, and `pick:'choose'` named all ten:
+    // an uncounted pile selector never prompts, it just returns the whole shop.
+    // A pile prompt cannot be answered yet, and a chosen pile cannot be carried
+    // into a delayed body, so all three selectors use the same deterministic
+    // pick — a locked pile cannot be bought out, so it is still the most
+    // expensive one when the delayed half fires.
     effects: [
       {
         op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose', excludeJlore: true },
+        target: { shop: 'draft', pick: 'mostExpensive', count: 1, excludeJlore: true },
         duration: 'untilYourNextTurn',
       },
       {
         op: 'delayed',
         when: 'startOfNextTurn',
         effects: [
-          { op: 'unlockPile', target: { shop: 'draft', pick: 'choose' } },
-          { op: 'gainCard', from: { shop: 'draft', pick: 'choose' }, to: 'gy', free: true },
+          {
+            op: 'unlockPile',
+            target: { shop: 'draft', pick: 'mostExpensive', count: 1, excludeJlore: true },
+          },
+          {
+            op: 'gainCard',
+            from: { shop: 'draft', pick: 'mostExpensive', count: 1, excludeJlore: true },
+            to: 'gy',
+            free: true,
+          },
         ],
       },
     ],
     triggers: [],
-    text: 'Lock a Draft Shop pile. At the start of your next turn, unlock it and add its top card to your GY. +1 Action.',
+    text: 'Lock the most expensive Draft Shop pile. At the start of your next turn, unlock it and add its top card to your GY. +1 Action.',
     flavor: 'Close it, then take what leaked out.',
     complexity: 'T3',
     subsystems: ['S-LOCK', 'S-DELAYED', 'S-PROPHET'],
@@ -373,7 +415,10 @@ export const cards: CardDefinition[] = [
         to: 'hand',
         count: 5,
       },
-      { op: 'lockPile', target: { shop: 'prophet' }, duration: 'turn' },
+      // `duration:'turn'` writes a lock that expires on the turn it was made —
+      // `lockIsActive` is `turn < expiresOnTurn`, so it was inert on arrival.
+      // `{ turns: 1 }` expires on the next turn, i.e. it binds for this one.
+      { op: 'lockPile', target: { shop: 'prophet' }, duration: { turns: 1 } },
     ],
     triggers: [],
     text: 'Cast on Buy, Flimsy. Replace your hand with random Legendaries. Lock the Prophet Shop until end of turn.',
@@ -433,7 +478,10 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Sound the horn',
-        then: [{ op: 'moveTo', target: { self: true }, zone: 'hand' }],
+        // Empty: the default Discover semantic puts the picked card in hand.
+        // `{self:true}` here meant the Horn, which pulled it back out of its own
+        // Flimsy trash and never created the Action.
+        then: [],
       },
     ],
     triggers: [],
@@ -458,7 +506,10 @@ export const cards: CardDefinition[] = [
       {
         op: 'modifyCost',
         scope: 'pile',
-        target: { shop: 'draft', pick: 'choose' },
+        // An uncounted pile selector returns every draft pile without ever
+        // prompting, which discounted the whole shop. Pile prompts cannot be
+        // answered yet, so the one pile is picked deterministically.
+        target: { shop: 'draft', pick: 'mostExpensive', count: 1 },
         delta: -3,
         floor: 0,
         duration: 'turn',
@@ -469,7 +520,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Play on Buy, Flimsy. Choose a Draft Shop pile: this turn its cards cost (3) less and gain Play on Buy.',
+    text: 'Play on Buy, Flimsy. The most expensive Draft Shop pile costs (3) less this turn, and its cards gain Play on Buy.',
     flavor: 'The verse on discounts.',
     complexity: 'T3',
     subsystems: ['S-COSTMOD', 'S-PROPHET'],
@@ -497,7 +548,10 @@ export const cards: CardDefinition[] = [
             count: 3,
             pick: 1,
             prompt: 'Read an opponent’s Library',
-            then: [{ op: 'copyCard', target: { self: true }, to: 'hand', who: 'self' }],
+            // Empty: the default Discover semantic puts a fresh copy of the
+            // picked card in your hand. `{self:true}` here meant Siva itself,
+            // so a 4-player play handed you three copies of Siva.
+            then: [],
           },
         ],
       },
@@ -579,8 +633,18 @@ export const cards: CardDefinition[] = [
     stats: { vp: 100 },
     effects: [],
     triggers: [
+      // SB-8 keeps the rider as the failsafe for routes the Unfathomable pool
+      // exclusion misses, but `buyCard` fires onBuy and then onGain on the same
+      // copy — so an honest 30-drain purchase trashed itself before it could
+      // ever score. onBuy runs first and stamps the instance; onGain trashes
+      // only an unstamped copy, i.e. one that arrived by any other means.
+      {
+        on: 'onBuy',
+        effects: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 }],
+      },
       {
         on: 'onGain',
+        condition: { expr: 'selfCounter < 1' },
         effects: [{ op: 'trash', target: { self: true } }],
       },
     ],
@@ -616,7 +680,10 @@ export const cards: CardDefinition[] = [
   {
     id: 'doomsday_button',
     name: 'Doomsday Button',
-    cost: {},
+    // A.29 lists it at (0), and every other token states `{ money: 0 }`. An
+    // absent `money` reads as "unbuyable for money", which is a different
+    // thing from free and diverges from the rest of the token family.
+    cost: { money: 0 },
     types: ['Action', 'Token'],
     subtypes: [],
     tags: ['PvP'],
