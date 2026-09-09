@@ -8,7 +8,44 @@
  */
 
 import type { AuraDefinition, CardDefinition, Complexity } from '@engine/types';
+import { allAuraDefinitions, allCardDefinitions } from '@cards/index';
+import { NAMED_FILTERS } from '@engine/effects';
+import { PROPHET_SHOP_CARD_IDS } from '@engine/shop/prophet';
 import { bootstrap } from './bootstrap';
+
+/**
+ * `$discovered` and `$selected` stand in for the card the player picked, and
+ * are swapped for a real defId at resolve time (substituteDefId in
+ * effects/ops/choices.ts). They are legal wherever a defId is, and are not
+ * catalog entries.
+ */
+function isSentinel(ref: string): boolean {
+  return ref === '$discovered' || ref === '$selected';
+}
+
+/** Every filter name used by a `count(x)` / `countIn(zone, x)` in an expression. */
+export function filterNamesIn(value: unknown, out: Set<string> = new Set()): Set<string> {
+  const visit = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if (!v || typeof v !== 'object') return;
+    const obj = v as Record<string, unknown>;
+    const expr = obj.expr;
+    if (typeof expr === 'string') {
+      const re = /\bcount(?:In)?\s*\(\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\s*,\s*)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/g;
+      let m = re.exec(expr);
+      while (m !== null) {
+        out.add(m[1]);
+        m = re.exec(expr);
+      }
+    }
+    for (const key of Object.keys(obj)) visit(obj[key]);
+  };
+  visit(value);
+  return out;
+}
 
 /**
  * Every `op` in the EffectNode union in src/engine/types.ts. A type union has no
@@ -114,7 +151,13 @@ function isToken(card: CardDefinition): boolean {
 }
 
 function main(): void {
-  const { cards, auras } = bootstrap();
+  // Validate the *authored* catalog, not the registry's view of it. The
+  // registry is keyed by id, so it silently drops a second definition of the
+  // same card — asking it for duplicates can never find any. Reading the
+  // barrels directly is what makes the uniqueness checks below able to fail.
+  bootstrap();
+  const cards = allCardDefinitions();
+  const auras = allAuraDefinitions();
   const problems: string[] = [];
   const fail = (id: string, msg: string): void => {
     problems.push(id + ': ' + msg);
@@ -181,11 +224,13 @@ function main(): void {
       }
       if (node.op === 'createCard' || node.op === 'addToPileTop') {
         const ref = node.raw.defId;
-        if (typeof ref === 'string' && !known[ref]) fail(id, node.op + ' references unknown defId "' + ref + '"');
+        if (typeof ref === 'string' && !isSentinel(ref) && !known[ref]) {
+          fail(id, node.op + ' references unknown defId "' + ref + '"');
+        }
       }
       if (node.op === 'transform') {
         const into = node.raw.into;
-        if (typeof into === 'string' && into !== 'upgrade' && into !== 'downgrade' && !known[into]) {
+        if (typeof into === 'string' && !isSentinel(into) && into !== 'upgrade' && into !== 'downgrade' && !known[into]) {
           fail(id, 'transform references unknown defId "' + into + '"');
         }
       }
@@ -221,12 +266,42 @@ function main(): void {
       if (!OP_SET[node.op]) fail(id, 'aura uses unknown op "' + node.op + '"');
       if (node.op === 'createCard') {
         const ref = node.raw.defId;
-        if (typeof ref === 'string' && !known[ref]) fail(id, 'aura createCard references unknown defId "' + ref + '"');
+        if (typeof ref === 'string' && !isSentinel(ref) && !known[ref]) {
+          fail(id, 'aura createCard references unknown defId "' + ref + '"');
+        }
       }
     }
   }
   for (const id of Object.keys(auraIds)) {
     if (auraIds[id] > 1) fail(id, 'duplicate aura id, defined ' + auraIds[id] + ' times');
+  }
+
+  // --- shop wiring ---
+  // buildShop resolves PROPHET_SHOP_CARD_IDS through safeGetCard, which
+  // swallows the registry's throw and `continue`s. A typo there therefore does
+  // not crash — it silently drops a card out of every match. Tnack Trav was
+  // missing this way. Counting `shop === 'prophet'` definitions cannot catch
+  // it, because the definition is fine; it is the id list that is wrong.
+  for (const defId of PROPHET_SHOP_CARD_IDS) {
+    if (!known[defId]) {
+      fail('prophet-shop', 'PROPHET_SHOP_CARD_IDS names "' + defId + '", which is not a card');
+    }
+  }
+
+  // --- expression filter names ---
+  // `count(x)` / `countIn(zone, x)` resolve x through NAMED_FILTERS, and an
+  // unregistered name reads as 0 instead of raising. That makes a typo a card
+  // that silently scores nothing, which is the worst failure this catalog has:
+  // the suite stays green and the card looks fine. Check every name up front.
+  for (const { id, holder } of [
+    ...cards.map((c) => ({ id: c.id, holder: c as unknown })),
+    ...auras.map((a) => ({ id: 'aura:' + a.id, holder: a as unknown })),
+  ]) {
+    for (const name of filterNamesIn(holder)) {
+      if (!NAMED_FILTERS[name]) {
+        fail(id, 'expression references unregistered filter "' + name + '" (reads as 0)');
+      }
+    }
   }
 
   process.stdout.write('cards:validate — ' + cards.length + ' cards, ' + auras.length + ' auras\n');

@@ -36,7 +36,7 @@ export const PROPHET_SHOP_CARD_IDS: CardDefId[] = [
   'scripture_of_siva',
   'scripture_of_jayaad',
   'scripture_of_space',
-  'tnack_trav',
+  'tnack_trav_prophesized_savior',
   'prophesized_jlore',
   'the_unconcerned_lion',
   'doomsday_button',

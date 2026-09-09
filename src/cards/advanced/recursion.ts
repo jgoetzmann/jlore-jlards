@@ -121,15 +121,17 @@ export const cards: CardDefinition[] = [
         pool: { scope: 'knownUniverse', filter: { type: ['Action', 'Resource'], cost: { lte: 10 } } },
         count: 3,
         pick: 1,
-        prompt: 'Discover a card costing your hand size, then cast it',
+        prompt: 'Discover a Known Universe Action or Resource, then cast it',
+        // The pick is the card that gets cast: '$discovered' is substituted for
+        // the chosen defId, so the copy created here is the one played back.
         then: [
-          { op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { type: ['Action', 'Resource'] } } }, to: 'hand' },
-          { op: 'playCard', target: { who: 'self', zone: 'hand', count: 1, pick: 'lastPlayed' } },
+          { op: 'createCard', defId: '$discovered', to: 'hand' },
+          { op: 'playCard', target: { who: 'self', zone: 'hand', filter: { defId: '$discovered' }, count: 1 } },
         ],
       },
     ],
     triggers: [],
-    text: 'Discover a Known Universe Action or Resource costing ({handSize}) and cast it.',
+    text: 'Discover a Known Universe Action or Resource costing (10) or less and cast it.',
     complexity: 'T3',
     subsystems: ['S-CODEX', 'S-MULTIPLIER'],
     shop: 'draft',
@@ -233,9 +235,29 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['Flimsy'],
     stats: { actions: 1 },
-    effects: [{ op: 'nextCardModifier', mod: { bind: 'rightHandMan', uses: 1, appliesTo: 'play' } }],
+    effects: [
+      {
+        op: 'nextCardModifier',
+        // `bind` is collected and never read, so the clause has to ride on
+        // `appendEffects`, which is spliced into the next card's own body with
+        // {self:true} bound to it. That buys one recall, not a permanent
+        // trigger — the printed "every turn" form needs a granted trigger.
+        mod: {
+          uses: 1,
+          appliesTo: 'play',
+          appendEffects: [
+            {
+              op: 'delayed',
+              when: 'startOfNextTurn',
+              effects: [{ op: 'moveTo', target: { self: true }, zone: 'hand' }],
+              who: 'self',
+            },
+          ],
+        },
+      },
+    ],
     triggers: [],
-    text: 'Flimsy. +1 Action. The next card you play gains "at the start of your turn, add this to your hand from anywhere".',
+    text: 'Flimsy. +1 Action. The next card you play returns to your hand from anywhere at the start of your next turn.',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
@@ -270,11 +292,13 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { actions: 1 },
     effects: [
-      { op: 'nextCardModifier', mod: { bind: 'oathboundMemory', uses: 1, appliesTo: 'play' } },
-      { op: 'manifestAura', tier: 'celestial', auraId: 'oathbound_memory', bindTo: 'nextPlayed' },
+      // `bindTo:'nextPlayed'` only queues a `bind` mod nobody consumes, and the
+      // early return hides the auraId, so the aura was never manifested at all.
+      // Manifest it outright; binding it to the next Action needs the engine.
+      { op: 'manifestAura', tier: 'celestial', auraId: 'oathbound_memory', who: 'self' },
     ],
     triggers: [],
-    text: 'Flimsy. +1 Action. The next Action you play is bound to the Celestial Aura Oathbound Memory.',
+    text: 'Flimsy. +1 Action. Manifest the Celestial Aura Oathbound Memory.',
     complexity: 'T4',
     subsystems: ['S-AURA', 'S-PERSIST'],
     shop: 'draft',
@@ -297,16 +321,23 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card in your GY',
+        // '$discovered' is the card the player picked, so the move takes that
+        // GY card and no other. The repeat is a sibling node rather than a
+        // nested one: the substitution walks the whole `then` tree, so a
+        // sentinel inside a nested Discover would be filled in with the outer
+        // pick before the inner prompt was ever answered.
         then: [
-          { op: 'moveTo', target: { who: 'self', zone: 'gy', count: 1, pick: 'choose', chooser: 'self' }, zone: 'hand' },
-          {
-            op: 'discover',
-            pool: { scope: 'gy', who: 'self', filter: { not: { defId: 'ancient_acquisition' } } },
-            count: 3,
-            pick: 1,
-            prompt: 'Discover another card in your GY',
-            then: [{ op: 'moveTo', target: { who: 'self', zone: 'gy', count: 1, pick: 'choose', chooser: 'self' }, zone: 'hand' }],
-          },
+          { op: 'moveTo', target: { who: 'self', zone: 'gy', filter: { defId: '$discovered' }, count: 1 }, zone: 'hand' },
+        ],
+      },
+      {
+        op: 'discover',
+        pool: { scope: 'gy', who: 'self', filter: { not: { defId: 'ancient_acquisition' } } },
+        count: 3,
+        pick: 1,
+        prompt: 'Discover another card in your GY',
+        then: [
+          { op: 'moveTo', target: { who: 'self', zone: 'gy', filter: { defId: '$discovered' }, count: 1 }, zone: 'hand' },
         ],
       },
     ],
@@ -428,14 +459,18 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a (1)-cost card to brew into this one',
+        // Nothing in the DSL appends a definition's effects to a live instance,
+        // so the brew is served by handing the picked card over instead. Inside
+        // a Discover's `then`, {self:true} is still Homebrew, not the pick.
         then: [
+          { op: 'createCard', defId: '$discovered', to: 'hand' },
           { op: 'addCounter', target: { self: true }, key: 'brewed', amount: 1 },
           { op: 'transform', target: { self: true }, into: 'upgrade' },
         ],
       },
     ],
     triggers: [],
-    text: 'Discover a (1)-cost Known Universe card, permanently add its effect to this card, then upgrade it. ({brewed} brewed.)',
+    text: 'Discover a (1)-cost Known Universe card and add it to your hand, then upgrade this card. ({brewed} brewed.)',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-CODEX'],
     shop: 'draft',
@@ -478,14 +513,18 @@ export const cards: CardDefinition[] = [
     effects: [],
     triggers: [
       {
+        // 'onPlay' only ever reaches the card that was just played, and that
+        // card is in 'play' — the old zones list could never match, so the
+        // whole trigger was dead. Firing on Pashes' own play is the reachable
+        // half of the printed clause; the rest needs a table-wide play event.
         on: 'onPlay',
-        zones: ['library', 'gy', 'hand'],
+        zones: ['play'],
         condition: { has: { target: { who: 'self', zone: 'play', filter: { rarity: 'legendary', cost: { eq: 1 } } }, atLeast: 1 } },
         effects: [{ op: 'recruit', zone: 'library', filter: { defId: 'pashes_the_pie_rat' }, count: 1, who: 'self', to: 'hand' }],
         maxPerTurn: 3,
       },
     ],
-    text: 'Whenever you play a (1)-cost Legendary, Recruit this. +1 Card.',
+    text: 'Whenever you play this (1)-cost Legendary, Recruit another Pashes the Pie Rat from your Library. +1 Card.',
     flavor: 'He knows where the pies are.',
     complexity: 'T3',
     subsystems: ['S-PERSIST'],

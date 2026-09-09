@@ -17,7 +17,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'gainCard',
-        from: { shop: 'all', filter: { cost: { lte: 2 } }, pick: 'choose' },
+        from: { shop: 'all', filter: { cost: { lte: 2 } }, pick: 'choose', count: 1 },
         to: 'gy',
         free: true,
       },
@@ -43,7 +43,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'gainCard',
-        from: { shop: 'all', filter: { cost: { eq: 4 } }, pick: 'choose' },
+        from: { shop: 'all', filter: { cost: { eq: 4 } }, pick: 'choose', count: 1 },
         to: 'hand',
         free: true,
       },
@@ -69,7 +69,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'gainCard',
-        from: { shop: 'all', filter: { cost: { eq: 8 } }, pick: 'choose' },
+        from: { shop: 'all', filter: { cost: { eq: 8 } }, pick: 'choose', count: 1 },
         to: 'hand',
         free: true,
       },
@@ -120,7 +120,7 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'gainCard', from: { shop: 'all', pick: 'random' }, to: 'hand', free: true },
+      { op: 'gainCard', from: { shop: 'all', pick: 'random', count: 1 }, to: 'hand', free: true },
     ],
     triggers: [],
     text: 'Steal a random card from the Shop into your hand. +1 Action.',
@@ -142,21 +142,33 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
-        op: 'gainCard',
-        from: { shop: 'all', filter: { cost: { lte: 2 } }, pick: 'random' },
-        to: 'hand',
-        free: true,
-      },
-      {
-        op: 'playCard',
-        target: { who: 'self', zone: 'hand', filter: { type: 'Action' }, count: 1, pick: 'lastPlayed' },
+        op: 'discover',
+        pool: { scope: 'shop', filter: { cost: { lte: 2 } } },
+        count: 3,
+        pick: 1,
+        prompt: 'Everything must go',
+        then: [
+          {
+            op: 'gainCard',
+            from: { shop: 'all', filter: { defId: '$discovered' } },
+            to: 'hand',
+            free: true,
+          },
+          {
+            // The stolen card lands at the back of hand, so `bottom` is the one
+            // just taken — and the defId filter means nothing is played when the
+            // steal was not an Action.
+            op: 'playCard',
+            target: { who: 'self', zone: 'hand', filter: { defId: '$discovered', type: 'Action' }, count: 1, pick: 'bottom' },
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Steal a random shop card costing (2) or less into your hand. If it is an Action, play it.',
+    text: 'Discover 3 shop cards costing (2) or less and steal one into your hand. If it is an Action, play it.',
     flavor: 'Everything must go, quickly.',
     complexity: 'T3',
-    subsystems: ['S-CORE'],
+    subsystems: ['S-CORE', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'firesale', status: 'placeholder' },
   },
@@ -172,28 +184,46 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
-        op: 'gainCard',
-        from: { shop: 'draft', pick: 'choose' },
-        to: 'gy',
-        free: true,
-      },
-      {
-        op: 'conditional',
-        if: { expr: 'emptyPiles' },
+        // The pick is threaded through both clauses, so the steal is about the
+        // card that was actually taken.
+        op: 'discover',
+        // Draft Shop piles only — not the basics, not the Prophet Shop, which
+        // is gated on banked Prophet rather than on money.
+        pool: {
+          scope: 'shop',
+          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+        },
+        count: 3,
+        pick: 1,
+        prompt: 'Take the last one',
         then: [
           {
-            op: 'moveTo',
-            target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], pick: 'lastPlayed' },
-            zone: 'gy',
+            op: 'gainCard',
+            from: { shop: 'all', filter: { defId: '$discovered' } },
+            to: 'gy',
+            free: true,
+          },
+          {
+            // "If that emptied the pile" — no copy of it is left in any Shop.
+            op: 'conditional',
+            if: { not: { has: { target: { zone: 'shop', filter: { defId: '$discovered' } }, atLeast: 1 } } },
+            then: [
+              {
+                op: 'moveTo',
+                target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], filter: { defId: '$discovered' } },
+                zone: 'gy',
+                who: 'self',
+              },
+            ],
           },
         ],
       },
     ],
     triggers: [],
-    text: 'Add a Draft Shop card you can currently afford to your GY. If that emptied the pile, steal every copy of it from your opponents.',
+    text: 'Discover 3 Draft Shop cards and add one to your GY. If that emptied its pile, steal every copy of it from your opponents.',
     flavor: 'He takes the last one, then all the others.',
     complexity: 'T3',
-    subsystems: ['S-STEAL'],
+    subsystems: ['S-STEAL', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'cult_leader', status: 'placeholder' },
   },
@@ -208,8 +238,10 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { buys: 2, money: 2 },
     effects: [
-      { op: 'lockPile', target: { shop: 'all', excludeJlore: false }, duration: 'turn' },
-      { op: 'unlockPile', target: { shop: 'all', pick: 'choose' } },
+      // `duration: 'turn'` expires on the turn it is applied, i.e. instantly;
+      // `{turns: 1}` is the one that actually binds for the rest of this turn.
+      { op: 'lockPile', target: { shop: 'all', excludeJlore: false }, duration: { turns: 1 } },
+      { op: 'unlockPile', target: { shop: 'all', pick: 'choose', count: 1 } },
     ],
     triggers: [],
     text: 'You may buy from only one pile this turn. +2 Buys, +2 Money.',
@@ -230,9 +262,9 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'gainCard', from: { shop: 'draft', pick: 'random' }, to: 'gy', free: true },
-      { op: 'gainCard', from: { shop: 'resource', pick: 'random' }, to: 'gy', free: true },
-      { op: 'gainCard', from: { shop: 'points', pick: 'random' }, to: 'gy', free: true },
+      { op: 'gainCard', from: { shop: 'draft', pick: 'random', count: 1 }, to: 'gy', free: true },
+      { op: 'gainCard', from: { shop: 'resource', pick: 'random', count: 1 }, to: 'gy', free: true },
+      { op: 'gainCard', from: { shop: 'points', pick: 'random', count: 1 }, to: 'gy', free: true },
     ],
     triggers: [],
     text: 'Add 1 random card from each of the Draft, Resource and Points shops to your GY.',
@@ -259,7 +291,9 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'A gift for everyone',
-        then: [{ op: 'copyCard', target: { self: true }, to: 'hand', who: 'eachPlayer' }],
+        // `{self:true}` in a discover `then` is Mediator itself, not the pick —
+        // the chosen card is only reachable through the '$discovered' sentinel.
+        then: [{ op: 'createCard', defId: '$discovered', to: 'hand', who: 'eachPlayer' }],
       },
     ],
     triggers: [],
@@ -287,7 +321,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Distribute to the table',
-        then: [{ op: 'copyCard', target: { self: true }, to: 'gy', who: 'eachPlayer' }],
+        then: [{ op: 'createCard', defId: '$discovered', to: 'gy', who: 'eachPlayer' }],
       },
     ],
     triggers: [],
@@ -311,7 +345,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose' },
+        target: { shop: 'draft', pick: 'choose', count: 1 },
         duration: 'untilEndOfYourNextTurn',
       },
     ],
@@ -336,7 +370,7 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose' },
+        target: { shop: 'draft', pick: 'choose', count: 1 },
         duration: 'untilEndOfYourNextTurn',
       },
     ],
@@ -385,20 +419,31 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
-        op: 'discard',
-        target: { who: 'eachOpponent', zone: 'hand', filter: { not: { defId: 'copper' } } },
-      },
-      {
-        op: 'lockPile',
-        target: { shop: 'all', pick: 'choose', excludeJlore: false },
-        duration: 'untilEndOfYourNextTurn',
+        // One pile, threaded through both clauses: the discard and the Lock
+        // have to be about the same pile, which only the sentinel can do.
+        op: 'discover',
+        pool: { scope: 'shop', filter: { not: { defId: 'copper' } } },
+        count: 3,
+        pick: 1,
+        prompt: 'Do you have any...',
+        then: [
+          {
+            op: 'discard',
+            target: { who: 'eachOpponent', zone: 'hand', filter: { defId: '$discovered' } },
+          },
+          {
+            op: 'lockPile',
+            target: { shop: 'all', filter: { defId: '$discovered' }, excludeJlore: false },
+            duration: 'untilEndOfYourNextTurn',
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Choose an unlocked non-Copper pile. Opponents discard every card from it in their hands. Then Lock it.',
+    text: 'Discover 3 non-Copper shop cards and name one. Opponents discard every copy of it from their hands. Then Lock its pile until the end of your next turn.',
     flavor: 'Do you have any Silvers? Go fish.',
     complexity: 'T3',
-    subsystems: ['S-LOCK', 'S-STEAL'],
+    subsystems: ['S-LOCK', 'S-STEAL', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'go_fish', status: 'placeholder' },
   },
@@ -415,15 +460,15 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose' },
+        target: { shop: 'draft', pick: 'choose', count: 1 },
         duration: 'untilEndOfYourNextTurn',
       },
-      { op: 'unlockPile', target: { shop: 'draft', pick: 'random' } },
+      { op: 'unlockPile', target: { shop: 'draft', pick: 'random', count: 1 } },
       {
         op: 'conditional',
         if: { ifPrevious: true },
         then: [
-          { op: 'gainCard', from: { shop: 'draft', pick: 'random' }, to: 'gy', free: true },
+          { op: 'gainCard', from: { shop: 'draft', pick: 'random', count: 1 }, to: 'gy', free: true },
         ],
       },
     ],
@@ -451,14 +496,14 @@ export const cards: CardDefinition[] = [
         target: { shop: 'draft', pick: 'random', count: 3 },
         duration: 'untilYourNextTurn',
       },
-      {
-        op: 'forEach',
-        over: { zone: 'shop', filter: { cost: { lte: 6 } }, count: 3 },
-        effects: [{ op: 'draw', amount: 1 }],
-      },
+      // "for each you could have afforded" cannot live in a filter —
+      // NumericFilter takes literal numbers only and cannot read the wallet —
+      // so the draw is an expression over unspent Money instead, capped at the
+      // three piles that were locked.
+      { op: 'draw', amount: { expr: 'min(3, moneyUnspent)' } },
     ],
     triggers: [],
-    text: 'Lock 3 random piles until your next turn. +1 Card for each of them you could have afforded. +1 Action.',
+    text: 'Lock 3 random Draft piles until your next turn. Draw 1 Card per unspent Money, up to 3. +1 Action.',
     flavor: 'The arm reaches three shelves.',
     complexity: 'T3',
     subsystems: ['S-LOCK'],
@@ -479,7 +524,7 @@ export const cards: CardDefinition[] = [
       {
         op: 'lockPile',
         target: { shop: 'points', filter: { defId: 'jlore' } },
-        duration: 'permanent',
+        duration: { untilDiscarded: 8 },
       },
     ],
     triggers: [],
@@ -501,20 +546,17 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1, buys: 1, cards: 1 },
     effects: [
+      // The "remove all cost changes" half needs a clearing op the DSL does not
+      // have: a delta-0 modifier cannot undo the modifiers already on a pile,
+      // and a permanent floor-0 entry would quietly clamp every negative price
+      // in the game for the rest of the match. Only the unlock ships.
       { op: 'unlockPile', target: { shop: 'all' } },
-      {
-        op: 'modifyCost',
-        scope: 'allShops',
-        delta: 0,
-        floor: 0,
-        duration: 'permanent',
-      },
     ],
     triggers: [],
-    text: 'Remove all cost changes and Locks from the Shop. +1 Action, +1 Buy, +1 Card.',
+    text: 'Remove all Locks from the Shop. +1 Action, +1 Buy, +1 Card.',
     flavor: 'Everything back to list price.',
     complexity: 'T2',
-    subsystems: ['S-LOCK', 'S-COSTMOD'],
+    subsystems: ['S-LOCK'],
     shop: 'draft',
     art: { key: 'cloud_nine', status: 'placeholder' },
   },
@@ -550,21 +592,45 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
-      { op: 'replenishPile', target: { shop: 'draft', pick: 'choose' } },
       {
-        op: 'modifyCost',
-        scope: 'pile',
-        target: { shop: 'draft', pick: 'choose' },
-        delta: -1,
-        floor: 1,
-        duration: 'permanent',
+        // One pile for both halves. Two `pick:'choose'` selectors would raise
+        // two independent prompts that can name different piles.
+        //
+        // Known gap: a *fully empty* pile is unreachable and no card-data shape
+        // fixes it. A `pool:{scope:'shop'}` Discover samples defIds off
+        // instances sitting in a pile, so an empty pile offers none;
+        // selectPilesWith drops zero-card piles inside its `filter` branch; and
+        // opReplenishPile's own empty-pile fallback resolves the pile id as a
+        // defId (`tryGetCard(pileId)`) when pile ids are `<shop>:<defId>`, so it
+        // finds nothing either. Partially-depleted piles refill correctly.
+        op: 'discover',
+        // Draft Shop piles only — not the basics, not the Prophet Shop, which
+        // is gated on banked Prophet rather than on money.
+        pool: {
+          scope: 'shop',
+          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+        },
+        count: 3,
+        pick: 1,
+        prompt: 'Fill it to the brim',
+        then: [
+          { op: 'replenishPile', target: { shop: 'all', filter: { defId: '$discovered' } } },
+          {
+            op: 'modifyCost',
+            scope: 'pile',
+            target: { shop: 'all', filter: { defId: '$discovered' } },
+            delta: -1,
+            floor: 1,
+            duration: 'permanent',
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Flimsy. Fully replenish a Draft pile. Its cards now cost (1) less, to a minimum of (1).',
+    text: 'Flimsy. Discover 3 Draft Shop cards and fully replenish the pile of the one you pick. Its cards now cost (1) less, to a minimum of (1).',
     flavor: 'And then some.',
     complexity: 'T3',
-    subsystems: ['S-COSTMOD'],
+    subsystems: ['S-COSTMOD', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'cup_runneth_over', status: 'placeholder' },
   },
@@ -638,7 +704,9 @@ export const cards: CardDefinition[] = [
       {
         op: 'modifyCost',
         scope: 'pile',
-        target: { shop: 'draft', pick: 'choose' },
+        target: { shop: 'draft', pick: 'choose', count: 1 },
+        // There is no expression variable for the average Draft pile cost, so
+        // the average deck cost stands in for it until one exists.
         setTo: { expr: 'floor(avgCostOfDeck)' },
         floor: 0,
         duration: 'untilEndOfYourNextTurn',
@@ -710,16 +778,20 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'addCounter', target: { self: true }, key: 'playCount', amount: 1 },
       {
+        // `selfPlayCount - 5` is non-zero — and therefore true — on plays 1-4,
+        // so the two branches were the wrong way round. And `scope:'nextBuy'`
+        // never reads `setTo`, so "free" has to be a delta deep enough to land
+        // on the floor. The play counter itself is kept by the engine on every
+        // play, so the card must not add its own on top.
         op: 'conditional',
-        if: { expr: 'selfPlayCount - 5' },
-        then: [{ op: 'modifyCost', scope: 'nextBuy', setTo: 0, floor: 0, duration: 'turn' }],
+        if: { expr: 'selfPlayCount >= 5' },
+        then: [{ op: 'modifyCost', scope: 'nextBuy', delta: -999, floor: 0, duration: 'turn' }],
         else: [{ op: 'modifyCost', scope: 'nextBuy', delta: -1, floor: 0, duration: 'turn' }],
       },
     ],
     triggers: [],
-    text: 'The next card you buy this turn costs (1) less. After 5 plays it costs (0) instead. ({playsLeft} left!)',
+    text: 'The next card you buy this turn costs (1) less — from its 5th play on, (0) instead. (Played {playCount} times.)',
     flavor: 'Terms and conditions accumulate.',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-COSTMOD', 'S-TEXTGEN'],
@@ -792,27 +864,35 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
+        // The Discover names the pile, which is the only way to scope the
+        // transform to one pile — a Selector has no pile axis. The Lock has to
+        // run first, while the pile's top card still matches the pick.
         op: 'discover',
-        pool: { scope: 'knownUniverse' },
+        // Draft Shop piles only — not the basics, not the Prophet Shop, which
+        // is gated on banked Prophet rather than on money.
+        pool: {
+          scope: 'shop',
+          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+        },
         count: 3,
         pick: 1,
-        prompt: 'Replace the pile with...',
+        prompt: 'Which shelf slips universe?',
         then: [
           {
+            op: 'lockPile',
+            target: { shop: 'all', filter: { defId: '$discovered' } },
+            duration: 'untilYourNextTurn',
+          },
+          {
             op: 'transform',
-            target: { zone: 'shop', pick: 'choose' },
+            target: { zone: 'shop', filter: { defId: '$discovered' } },
             into: { pool: { scope: 'knownUniverse' } },
           },
         ],
       },
-      {
-        op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose' },
-        duration: 'untilYourNextTurn',
-      },
     ],
     triggers: [],
-    text: 'Choose a Draft pile, then Discover a Known Universe card and replace every copy in that pile with it. Lock it until your next turn.',
+    text: 'Discover 3 Draft Shop cards. Lock the pile of the one you pick until your next turn, and every card in it becomes a random Known Universe card.',
     flavor: 'Same shelf. Different universe.',
     complexity: 'T3',
     subsystems: ['S-DISCOVER', 'S-LOCK', 'S-CODEX'],
@@ -831,18 +911,20 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       {
+        // `costOverride` reprices the whole pile, permanently, not the card
+        // being inserted — there is no per-instance price, so the Diamond goes
+        // in at its printed cost.
         op: 'addToPileTop',
-        target: { shop: 'draft', pick: 'random' },
+        target: { shop: 'draft', pick: 'random', count: 1 },
         defId: 'diamond',
         count: 1,
-        costOverride: 0,
       },
     ],
     triggers: [],
-    text: 'Replace the second card of a random pile with a Diamond costing (0). +1 Action.',
+    text: 'Add a Diamond to the top of a random Draft pile. +1 Action.',
     flavor: 'Buried one layer down.',
     complexity: 'T2',
-    subsystems: ['S-COSTMOD'],
+    subsystems: ['S-CORE'],
     shop: 'draft',
     art: { key: 'chron_cache', status: 'placeholder' },
   },
@@ -858,18 +940,20 @@ export const cards: CardDefinition[] = [
     stats: { buys: 1 },
     effects: [
       {
+        // The node count is per pile, so 10 piles x 10 was 100 cards. And
+        // `costOverride` prices the whole pile forever, not the cards added, so
+        // it would have made ten entire piles cost (1) for the rest of the match.
         op: 'addToPileTop',
         target: { shop: 'all', pick: 'random', count: 10 },
         defId: { pool: { scope: 'entireUniverse' } },
-        count: 10,
-        costOverride: 1,
+        count: 1,
       },
     ],
     triggers: [],
-    text: 'Add 10 random cards from the Entire Universe to the tops of shop piles. They all cost (1). +1 Buy.',
+    text: 'Add 1 random card from the Entire Universe to the top of each of 10 random shop piles. +1 Buy.',
     flavor: 'Everything in the sky lands in the shop.',
     complexity: 'T3',
-    subsystems: ['S-COSTMOD'],
+    subsystems: ['S-CORE'],
     shop: 'draft',
     art: { key: 'supernova', status: 'placeholder', anim: 'explode' },
   },
@@ -994,16 +1078,32 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       {
-        op: 'transform',
-        target: { zone: 'shop', pick: 'random' },
-        into: { pool: { scope: 'entireUniverse', filter: { subtype: 'CN' } } },
+        // A Selector has no pile axis, so the pick is what names the pile:
+        // without it `zone:'shop'` is every card in every shop.
+        op: 'discover',
+        // Draft Shop piles only — not the basics, not the Prophet Shop, which
+        // is gated on banked Prophet rather than on money.
+        pool: {
+          scope: 'shop',
+          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+        },
+        count: 3,
+        pick: 1,
+        prompt: 'Nationalise a shelf',
+        then: [
+          {
+            op: 'transform',
+            target: { zone: 'shop', filter: { defId: '$discovered' } },
+            into: { pool: { scope: 'entireUniverse', filter: { subtype: 'CN' } } },
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Replace a random Draft pile with a CN pile. +1 Action.',
+    text: 'Discover 3 Draft Shop cards. Every card in the pile of the one you pick becomes a CN card. +1 Action.',
     flavor: 'Production quotas, met on paper.',
     complexity: 'T3',
-    subsystems: ['S-CORE'],
+    subsystems: ['S-CORE', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'five_year_plan', status: 'placeholder' },
   },
@@ -1020,13 +1120,16 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'addToPileTop',
-        target: { shop: 'draft', pick: 'choose' },
+        target: { shop: 'draft', pick: 'choose', count: 1 },
         defId: 'cursed_pig',
         count: 1,
       },
     ],
     triggers: [],
-    text: 'Flimsy. Choose a pile: buying from it now also gives the buyer a Cursed Pig.',
+    // A pile is an ordered stack and the Pig goes on top, so the next buyer
+    // gets the Pig rather than the card under it. "Also gives" would need a
+    // pile-scoped purchase rider, which the DSL does not have.
+    text: 'Flimsy. Choose a Draft pile: the next card bought from it is a Cursed Pig.',
     flavor: 'Something is wrong with that shelf.',
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
@@ -1045,8 +1148,11 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
+        // The empty-pile guard in selectPilesWith only runs when a filter is
+        // present, and an empty filter matches everything — so this is the way
+        // to say "every non-empty Draft pile" and leave emptied piles emptied.
         op: 'addToPileTop',
-        target: { shop: 'draft' },
+        target: { shop: 'draft', filter: {} },
         defId: 'cursed_pig',
         count: 1,
       },
@@ -1080,7 +1186,9 @@ export const cards: CardDefinition[] = [
             count: 3,
             pick: 1,
             prompt: 'The gavel falls',
-            then: [{ op: 'moveTo', target: { self: true }, zone: 'gy' }],
+            // `{self:true}` here is Glubby Gloob, which Flimsy already put in
+            // the trash — the winner has to be paid with the sentinel.
+            then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
           },
         ],
       },

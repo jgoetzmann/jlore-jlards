@@ -71,11 +71,18 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['Flimsy'],
     stats: { prophet: 1 },
-    effects: [{ op: 'addCounter', target: { self: true }, key: 'playCount', amount: 1 }],
+    // The addCounter that stood here wrote a second increment onto the same
+    // 'playCount' key playCard already maintains, so the instance counter ran
+    // at 2x. Nothing reads it — the trigger gates on the per-player,
+    // per-definition selfPlayCount — so it is gone.
+    effects: [],
     triggers: [
       {
+        // An `expr` condition is true for any NON-ZERO value, so
+        // 'selfPlayCount - 4' fired on plays 1, 2, 3, 5, 6, ... and was false
+        // only on the 4th. The row wants the 5th play and no other.
         on: 'onPlay',
-        condition: { expr: 'selfPlayCount - 4' },
+        condition: { expr: 'selfPlayCount == 5' },
         effects: [
           { op: 'gain', stat: 'actions', amount: 1 },
           {
@@ -86,7 +93,10 @@ export const cards: CardDefinition[] = [
         ],
       },
     ],
-    text: 'Flimsy. +1 Prophet. On the 5th play, +1 Action and add a random Scripture to your hand. ({playsLeft} left!)',
+    // {playsLeft} was never written by anything and always rendered '0'.
+    // {selfPlayCount} is not a counter key either, so renderCardText falls
+    // through to the per-player play count the trigger actually gates on.
+    text: 'Flimsy. +1 Prophet. On the 5th play, +1 Action and add a random Scripture to your hand. (Played {selfPlayCount} of 5.)',
     flavor: 'Read it again. And again.',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-PROPHET', 'S-TEXTGEN'],
@@ -141,6 +151,10 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: {},
+    // forEach snapshots its targets, but a sibling trash node re-resolves
+    // against the live hand — so the K cards drawn by the payout were trashed
+    // too, without ever being paid for. Trashing inside the loop, where forEach
+    // has bound the iterated card as the source, fixes both halves to one set.
     effects: [
       {
         op: 'forEach',
@@ -150,17 +164,10 @@ export const cards: CardDefinition[] = [
           filter: { subtype: ['Prophet', 'Book', 'Relic'] },
         },
         effects: [
+          { op: 'trash', target: { self: true } },
           { op: 'gain', stat: 'prophet', amount: 1 },
           { op: 'draw', amount: 1 },
         ],
-      },
-      {
-        op: 'trash',
-        target: {
-          who: 'self',
-          zone: 'hand',
-          filter: { subtype: ['Prophet', 'Book', 'Relic'] },
-        },
       },
     ],
     triggers: [],
@@ -231,9 +238,14 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: {},
+    // Money has no floor (SB-38) and negative Money is reachable (Loan Shark,
+    // Outstanding Debt). Unclamped, min(moneyUnspent, 5) went negative and the
+    // prophet clamp — which applies to the TOTAL, not the delta — burned banked
+    // Prophet, while 0 - moneyUnspent credited the debt back. Both halves clamp
+    // at zero so a player in debt simply gains nothing.
     effects: [
-      { op: 'gain', stat: 'prophet', amount: { expr: 'min(moneyUnspent, 5)' } },
-      { op: 'gain', stat: 'money', amount: { expr: '0 - moneyUnspent' } },
+      { op: 'gain', stat: 'prophet', amount: { expr: 'max(0, min(moneyUnspent, 5))' } },
+      { op: 'gain', stat: 'money', amount: { expr: '0 - max(0, moneyUnspent)' } },
     ],
     triggers: [],
     text: 'Spend all your Money. +X Prophet, X = Money lost, up to 5.',
@@ -272,13 +284,28 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // The bonus used to be a separate forEach over the (1)-cost cards sitting in
+    // hand BEFORE the discard, so a player was paid for cards they then chose
+    // not to discard. selectCards runs its `then` once per selection with the
+    // picked card bound as the source, so selfCost is the discarded card's cost
+    // and the two sets cannot drift apart. (A { has: { target: { self: true,
+    // filter: ... } } } condition would not work here: selectInstancesWith
+    // returns on sel.self before any filter is applied.)
     effects: [
       {
-        op: 'forEach',
-        over: { who: 'self', zone: 'hand', filter: { cost: { eq: 1 } }, count: 2 },
-        effects: [{ op: 'gain', stat: 'actions', amount: 1 }],
+        op: 'selectCards',
+        from: { who: 'self', zone: 'hand' },
+        min: 2,
+        max: 2,
+        then: [
+          {
+            op: 'conditional',
+            if: { expr: 'selfCost == 1' },
+            then: [{ op: 'gain', stat: 'actions', amount: 1 }],
+          },
+          { op: 'discard', target: { self: true } },
+        ],
       },
-      { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'choose' } },
       {
         op: 'conditional',
         if: { not: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 1 } } },

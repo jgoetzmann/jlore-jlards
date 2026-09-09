@@ -96,6 +96,15 @@ function walk(nodes: unknown, out: EffectNode[]): void {
   }
 }
 
+/**
+ * `$discovered` and `$selected` are placeholders for the card the player chose,
+ * rewritten to a real defId by substituteDefId when a prompt resolves. They are
+ * legal wherever a defId is and are not catalog entries.
+ */
+function isChoiceSentinel(ref: string): boolean {
+  return ref === '$discovered' || ref === '$selected';
+}
+
 function nodesOf(c: CardDefinition): EffectNode[] {
   const out: EffectNode[] = [];
   walk(c.effects, out);
@@ -109,7 +118,10 @@ let everyNode: { card: CardDefinition; node: EffectNode }[] = [];
 beforeAll(() => {
   if (allCards().length === 0) registerCards(allCardDefinitions());
   if (allAuras().length === 0) registerAuras(allAuraDefinitions());
-  cards = allCards();
+  // The authored catalog, not the registry's view of it. The registry is keyed
+  // by id and drops a duplicate silently, so a uniqueness assertion made
+  // against `allCards()` is unfalsifiable — it deduplicates before we look.
+  cards = allCardDefinitions();
   everyNode = [];
   for (const c of cards) {
     for (const node of nodesOf(c)) everyNode.push({ card: c, node });
@@ -157,6 +169,7 @@ describe('cards — catalog integrity', () => {
       if ((node as { op: string }).op !== 'createCard') continue;
       const defId = (node as { defId: unknown }).defId;
       if (typeof defId !== 'string') continue;
+      if (isChoiceSentinel(defId)) continue;
       if (!known.has(defId)) bad.push(`${card.id} -> ${defId}`);
     }
     expect([...new Set(bad)]).toEqual([]);
@@ -170,9 +183,38 @@ describe('cards — catalog integrity', () => {
       const into = (node as { into: unknown }).into;
       if (typeof into !== 'string') continue;
       if (into === 'upgrade' || into === 'downgrade') continue;
+      if (isChoiceSentinel(into)) continue;
       if (!known.has(into)) bad.push(`${card.id} -> ${into}`);
     }
     expect([...new Set(bad)]).toEqual([]);
+  });
+
+  test('B97: the choice sentinels are only ever used inside a prompt continuation', () => {
+    // '$discovered' / '$selected' stand for the card the player picked and are
+    // swapped for a real defId on resume. Outside a `then` there is nothing to
+    // substitute them from, so they would reach the registry verbatim.
+    const stray: string[] = [];
+    for (const card of cards) {
+      const walkOutsideThen = (value: unknown, insideThen: boolean): void => {
+        if (Array.isArray(value)) {
+          for (const item of value) walkOutsideThen(item, insideThen);
+          return;
+        }
+        if (!value || typeof value !== 'object') return;
+        const obj = value as Record<string, unknown>;
+        for (const key of Object.keys(obj)) {
+          const nested = key === 'then' || key === 'effects' ? insideThen || key === 'then' : insideThen;
+          const child = obj[key];
+          if (typeof child === 'string' && isChoiceSentinel(child) && !nested) {
+            stray.push(`${card.id}.${key}`);
+          }
+          walkOutsideThen(child, nested);
+        }
+      };
+      walkOutsideThen(card.effects, false);
+      walkOutsideThen(card.triggers, false);
+    }
+    expect([...new Set(stray)]).toEqual([]);
   });
 
   test('B98: the registry holds at least 380 card definitions', () => {

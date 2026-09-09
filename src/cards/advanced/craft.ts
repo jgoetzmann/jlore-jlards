@@ -123,6 +123,9 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: ['Flimsy'],
     stats: {},
+    // The tier reads the reserved 'counter' key, so selfCounter is the price
+    // paid and nothing else — the counter SUM would fold in the playCount
+    // playCard writes at step 2.
     effects: [
       {
         op: 'conditional',
@@ -138,20 +141,39 @@ export const cards: CardDefinition[] = [
         ],
       },
     ],
+    // SB-26 wants one definition whose price resolves at purchase to the
+    // highest of (1), (5) and (10) the buyer can afford. A CardDefinition's
+    // cost is static and the buy path charges it before onBuy runs, so the pile
+    // stays priced at (1) — always affordable, which is the right floor — and
+    // the rest of the price is collected here, at buy time.
+    //
+    // Two things the old version got wrong. `moneyUnspent` inside onBuy is what
+    // is left AFTER the (1) was deducted, so the thresholds were off by the
+    // price paid: a buyer holding exactly 10 tiered as 5. Adding selfCost back
+    // restores the wallet as it stood at purchase. And nothing ever charged the
+    // 5 or the 10, so the money sink never emptied anything; the balance of the
+    // price is taken as an explicit spend, which cannot overdraw because the
+    // threshold has already proved the buyer holds it.
     triggers: [
       {
         on: 'onBuy',
         effects: [
           {
             op: 'conditional',
-            if: { expr: 'floor(moneyUnspent / 10)' },
-            then: [{ op: 'addCounter', target: { self: true }, key: 'craftPrice', amount: 10 }],
+            if: { expr: 'moneyUnspent + selfCost >= 10' },
+            then: [
+              { op: 'addCounter', target: { self: true }, key: 'counter', amount: 10 },
+              { op: 'gain', stat: 'money', amount: { expr: '0 - (10 - selfCost)' } },
+            ],
             else: [
               {
                 op: 'conditional',
-                if: { expr: 'floor(moneyUnspent / 5)' },
-                then: [{ op: 'addCounter', target: { self: true }, key: 'craftPrice', amount: 5 }],
-                else: [{ op: 'addCounter', target: { self: true }, key: 'craftPrice', amount: 1 }],
+                if: { expr: 'moneyUnspent + selfCost >= 5' },
+                then: [
+                  { op: 'addCounter', target: { self: true }, key: 'counter', amount: 5 },
+                  { op: 'gain', stat: 'money', amount: { expr: '0 - (5 - selfCost)' } },
+                ],
+                else: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 }],
               },
             ],
           },
@@ -160,7 +182,7 @@ export const cards: CardDefinition[] = [
     ],
     text:
       'Flimsy. Costs the most of (1), (5) and (10) you can afford. Craft a card from two menus and add it to your GY. ' +
-      'Paid ({craftPrice}): X and Y scale 1/1, 3/2, 6/3.',
+      'Paid ({counter}): X and Y scale 1/1, 3/2, 6/3.',
     flavor: 'Some assembly required.',
     complexity: 'T4',
     subsystems: ['S-COSTMOD', 'S-CORE'],

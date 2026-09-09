@@ -6,6 +6,17 @@
  */
 import type { CardDefinition, EffectNode, StatKey } from '@engine/types';
 
+/**
+ * A reroll REPLACES last turn's value, but every primitive that writes one adds
+ * to it: applyBuff bumps an instance statDelta that nothing ever expires, and
+ * addCounter is bumpCounter. So each branch books its own undo for the end of
+ * the turn it rolled on. SB-25 freezes the values mid-turn anyway, so the card
+ * reads its fresh roll all turn and is back at zero before the next one.
+ */
+function undoAtEndOfTurn(effects: EffectNode[]): EffectNode {
+  return { op: 'delayed', when: 'endOfTurn', effects };
+}
+
 /** SB-25: cost rerolls in [2,10] inclusive, at start of turn only. */
 function costRerollBranches(): { weight: number; effects: EffectNode[] }[] {
   const out: { weight: number; effects: EffectNode[] }[] = [];
@@ -22,6 +33,7 @@ function costRerollBranches(): { weight: number; effects: EffectNode[] }[] {
           duration: 'turn',
         },
         { op: 'addCounter', target: { self: true }, key: 'rolledCost', amount: n },
+        undoAtEndOfTurn([{ op: 'addCounter', target: { self: true }, key: 'rolledCost', amount: -n }]),
       ],
     });
   }
@@ -35,22 +47,67 @@ function statRerollBranches(stat: StatKey, counterKey: string): { weight: number
     const effects: EffectNode[] = [
       { op: 'addCounter', target: { self: true }, key: counterKey, amount: d },
     ];
+    const undo: EffectNode[] = [
+      { op: 'addCounter', target: { self: true }, key: counterKey, amount: -d },
+    ];
     if (d > 0) {
       effects.push({ op: 'buff', scope: 'instance', target: { self: true }, stat, amount: 1, times: d });
+      undo.push({ op: 'nerf', scope: 'instance', target: { self: true }, stat, amount: 1, times: d });
     } else if (d < 0) {
       effects.push({ op: 'nerf', scope: 'instance', target: { self: true }, stat, amount: 1, times: -d });
+      undo.push({ op: 'buff', scope: 'instance', target: { self: true }, stat, amount: 1, times: -d });
     }
+    effects.push(undoAtEndOfTurn(undo));
     out.push({ weight: 1, effects });
   }
   return out;
 }
 
-/** SB-25: Big Action / Combo / Recruit reroll in [1, 3]. */
-function smallRerollBranches(counterKey: string): { weight: number; effects: EffectNode[] }[] {
+/**
+ * SB-25: Big Action rerolls in [1, 3]. `counters.bigAction` is the engine's
+ * per-instance Big Action override (bigActionCost reads it ahead of
+ * def.bigAction), so the roll goes straight there rather than to a counter
+ * nothing reads.
+ */
+function bigActionRerollBranches(): { weight: number; effects: EffectNode[] }[] {
   return [1, 2, 3].map((n) => ({
     weight: 1,
-    effects: [{ op: 'addCounter', target: { self: true }, key: counterKey, amount: n } as EffectNode],
+    effects: [
+      { op: 'addCounter', target: { self: true }, key: 'bigAction', amount: n },
+      undoAtEndOfTurn([{ op: 'addCounter', target: { self: true }, key: 'bigAction', amount: -n }]),
+    ] as EffectNode[],
   }));
+}
+
+/**
+ * SB-25: Combo and Recruit both reroll in [1, 3], and both have to be legible
+ * to an expression when the card is played. buildVars exposes exactly ONE
+ * instance counter to expressions — the one keyed `counter`; every other key
+ * folds into a sum — so the pair is packed into it as `combo * 10 + recruit`
+ * and unpacked with floor/% in the card body. `rolledCombo` and `rolledRecruit`
+ * ride alongside purely so the printed text can show this turn's roll.
+ */
+function comboRecruitRerollBranches(): { weight: number; effects: EffectNode[] }[] {
+  const out: { weight: number; effects: EffectNode[] }[] = [];
+  for (const combo of [1, 2, 3]) {
+    for (const recruit of [1, 2, 3]) {
+      const packed = combo * 10 + recruit;
+      out.push({
+        weight: 1,
+        effects: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: packed },
+          { op: 'addCounter', target: { self: true }, key: 'rolledCombo', amount: combo },
+          { op: 'addCounter', target: { self: true }, key: 'rolledRecruit', amount: recruit },
+          undoAtEndOfTurn([
+            { op: 'addCounter', target: { self: true }, key: 'counter', amount: -packed },
+            { op: 'addCounter', target: { self: true }, key: 'rolledCombo', amount: -combo },
+            { op: 'addCounter', target: { self: true }, key: 'rolledRecruit', amount: -recruit },
+          ]),
+        ],
+      });
+    }
+  }
+  return out;
 }
 
 function dynamicStatAllocation(id: string, name: string, price: number, x: number): CardDefinition {
@@ -129,7 +186,10 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: '+1 Action. Combo X: +X Money. (Combo is at {comboCount}.)',
+    // `comboCount` is an expression variable, not a text token: renderCardText
+    // resolves counters/secrets/stats and falls through to '0', so the
+    // parenthetical always printed "(Combo is at 0.)". The payout itself is fine.
+    text: '+1 Action. Combo X: +X Money.',
     complexity: 'T3',
     subsystems: ['S-COMBO'],
     shop: 'draft',
@@ -176,34 +236,50 @@ export const cards: CardDefinition[] = [
         op: 'conditional',
         if: { combo: 1 },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'absorbedClauses', amount: 1 },
+          // The tally is keyed `counter` on purpose: buildVars exposes exactly
+          // one instance counter to expressions, and it is that key. Every
+          // other name reads back as the SUM of every counter on the instance
+          // (playCount included), which is not a clause count.
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
           {
-            op: 'random',
-            branches: [
+            // The COUNT is cumulative, the clauses are not: the tally grows
+            // by one per Combo 1 play and that many clauses resolve, but each
+            // one is rolled fresh. Keeping a chosen clause would need the
+            // engine's real primitive (stealComboClause -> inst.extraEffects),
+            // which no op is wired to, so these five stand in for "a random
+            // Combo clause" and the text promises no stable absorbed set.
+            op: 'repeat',
+            times: { expr: 'selfCounter' },
+            effects: [
               {
-                weight: 1,
-                effects: [
-                  { op: 'gain', stat: 'actions', amount: 1 },
-                  { op: 'draw', amount: 1 },
+                op: 'random',
+                branches: [
+                  {
+                    weight: 1,
+                    effects: [
+                      { op: 'gain', stat: 'actions', amount: 1 },
+                      { op: 'draw', amount: 1 },
+                    ],
+                  },
+                  { weight: 1, effects: [{ op: 'gain', stat: 'money', amount: { expr: 'comboCount' } }] },
+                  {
+                    weight: 1,
+                    effects: [
+                      { op: 'moveTo', target: { who: 'self', zone: 'play', filter: { type: 'Action' }, count: 1, pick: 'random' }, zone: 'hand' },
+                      { op: 'gain', stat: 'actions', amount: 1 },
+                    ],
+                  },
+                  { weight: 1, effects: [{ op: 'gain', stat: 'buys', amount: 2 }] },
+                  { weight: 1, effects: [{ op: 'gain', stat: 'cards', amount: 2 }] },
                 ],
               },
-              { weight: 1, effects: [{ op: 'gain', stat: 'money', amount: { expr: 'comboCount' } }] },
-              {
-                weight: 1,
-                effects: [
-                  { op: 'moveTo', target: { who: 'self', zone: 'play', filter: { type: 'Action' }, count: 1, pick: 'random' }, zone: 'hand' },
-                  { op: 'gain', stat: 'actions', amount: 1 },
-                ],
-              },
-              { weight: 1, effects: [{ op: 'gain', stat: 'buys', amount: 2 }] },
-              { weight: 1, effects: [{ op: 'gain', stat: 'cards', amount: 2 }] },
             ],
           },
         ],
       },
     ],
     triggers: [],
-    text: '+1 Action. Combo 1: permanently gain the Combo clause of a random Combo card. ({absorbedClauses} absorbed.)',
+    text: '+1 Action. Combo 1: resolve a random Combo clause, once for every time this card has done so. ({counter} so far.)',
     complexity: 'T4',
     subsystems: ['S-COMBO', 'S-PERSIST'],
     shop: 'draft',
@@ -438,9 +514,28 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { cards: 1, money: 1 },
+    // "Until end of turn" has to be written by hand: an instance Buff is a
+    // permanent statDelta and the buff node carries no duration, so each of the
+    // two cards also books its own end-of-turn Nerf. The forEach is what binds
+    // {self:true} — and therefore the delayed reversal — to the same instance
+    // that was buffed, wherever it has moved to by then.
     effects: [
-      { op: 'buff', scope: 'instance', target: { who: 'self', zone: 'library', count: 2, pick: 'top' }, stat: 'cards', amount: 1 },
-      { op: 'buff', scope: 'instance', target: { who: 'self', zone: 'library', count: 2, pick: 'top' }, stat: 'money', amount: 1 },
+      {
+        op: 'forEach',
+        over: { who: 'self', zone: 'library', count: 2, pick: 'top' },
+        effects: [
+          { op: 'buff', scope: 'instance', target: { self: true }, stat: 'cards', amount: 1 },
+          { op: 'buff', scope: 'instance', target: { self: true }, stat: 'money', amount: 1 },
+          {
+            op: 'delayed',
+            when: 'endOfTurn',
+            effects: [
+              { op: 'nerf', scope: 'instance', target: { self: true }, stat: 'cards', amount: 1 },
+              { op: 'nerf', scope: 'instance', target: { self: true }, stat: 'money', amount: 1 },
+            ],
+          },
+        ],
+      },
     ],
     triggers: [],
     text: 'The top 2 cards of your Library get +1 Card and +1 Money until end of turn. +1 Card, +1 Money.',
@@ -526,6 +621,9 @@ export const cards: CardDefinition[] = [
     bigAction: 3,
     art: { key: 'moon_rock', status: 'placeholder' },
   },
+  // A.23 prints one row — "6 / 8 / 10 ... X = 2/3/4 by purchase price" — as
+  // three purchasable cards. B103 forbids two definitions sharing a name, so
+  // the two dearer ones carry a numeral; the cheapest keeps the doc's own name.
   dynamicStatAllocation('dynamic_stat_allocation', 'Dynamic Stat Allocation', 6, 2),
   dynamicStatAllocation('dynamic_stat_allocation_iii', 'Dynamic Stat Allocation III', 8, 3),
   dynamicStatAllocation('dynamic_stat_allocation_iv', 'Dynamic Stat Allocation IV', 10, 4),
@@ -539,11 +637,16 @@ export const cards: CardDefinition[] = [
     rarity: 'legendary',
     keywords: [],
     stats: { money: 0, buys: 0, actions: 0, cards: 0, vp: 0, prophet: 0 },
+    // Both halves come out of the packed `counter` written at start of turn:
+    // the tens digit is this turn's Combo requirement, the units digit is this
+    // turn's Recruit count. Condition.combo only takes a literal, so the gate
+    // is spelled as an expression instead. A bare {expr:'selfCounter'} Recruit
+    // was the SUM of every counter on the card and grew all match.
     effects: [
       {
         op: 'conditional',
-        if: { combo: 1 },
-        then: [{ op: 'recruit', zone: 'library', count: { expr: 'selfCounter' }, who: 'self', to: 'hand' }],
+        if: { expr: 'comboCount >= floor(selfCounter / 10)' },
+        then: [{ op: 'recruit', zone: 'library', count: { expr: 'selfCounter % 10' }, who: 'self', to: 'hand' }],
       },
     ],
     triggers: [
@@ -557,14 +660,13 @@ export const cards: CardDefinition[] = [
           { op: 'random', branches: statRerollBranches('cards', 'rolledCards') },
           { op: 'random', branches: statRerollBranches('vp', 'rolledVp') },
           { op: 'random', branches: statRerollBranches('prophet', 'rolledProphet') },
-          { op: 'random', branches: smallRerollBranches('rolledBigAction') },
-          { op: 'random', branches: smallRerollBranches('rolledCombo') },
-          { op: 'random', branches: smallRerollBranches('rolledRecruit') },
+          { op: 'random', branches: bigActionRerollBranches() },
+          { op: 'random', branches: comboRecruitRerollBranches() },
         ],
       },
     ],
     text:
-      'At the start of every turn, every value on this card rerolls: cost {rolledCost}, Big Action {rolledBigAction}, ' +
+      'At the start of every turn, every value on this card rerolls: cost {rolledCost}, Big Action {bigAction}, ' +
       'Combo {rolledCombo}, Recruit {rolledRecruit}, and all six stats between -3 and 3. Values never change mid-turn.',
     flavor: 'The designer has been asked to stop.',
     complexity: 'T4',
@@ -583,12 +685,17 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
+    // A `selectCards` `then` runs once per selected card, so the old min/max 2
+    // wrapper raised two separate choose-2 discards (four cards) and Recruited
+    // twice. The discard prompt IS the selection; the conditional keeps the
+    // Recruit contingent on there being two cards to pay with.
+    // The "same cost" / "of that cost" linkage stays unwritten: CardFilter.cost
+    // is a NumericFilter of literal numbers and nothing binds a discarded
+    // card's cost into scope, so the text no longer promises it.
     effects: [
       {
-        op: 'selectCards',
-        from: { who: 'self', zone: 'hand' },
-        min: 2,
-        max: 2,
+        op: 'conditional',
+        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 2 } },
         then: [
           { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'choose' } },
           { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
@@ -596,7 +703,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Discard 2 cards of the same cost to Recruit an Action of that cost. +1 Action, +1 Card.',
+    text: 'Discard 2 cards to Recruit an Action. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -612,12 +719,23 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
+    // The Recruit was unsequenced from the trash and fired on an empty hand as
+    // well. `ifPrevious` is not an option — PREV_KEY is read in evalCondition
+    // and written nowhere, so it is always false — hence the explicit hand
+    // check in front. "Of that cost" is the same unwritable cost binding as on
+    // Synchro Summon, so the text no longer promises it.
     effects: [
-      { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'random' } },
-      { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+      {
+        op: 'conditional',
+        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 1 } },
+        then: [
+          { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'random' } },
+          { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+        ],
+      },
     ],
     triggers: [],
-    text: 'Trash a random card from your hand to Recruit an Action of that cost. +1 Action, +1 Card.',
+    text: 'Trash a random card from your hand to Recruit an Action. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -633,12 +751,14 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
+    // Same `selectCards` misuse as Synchro Summon: the body ran twice, for four
+    // discards and two Recruits. "Costing their sum" cannot be written — no op
+    // accumulates the cost of what was discarded and NumericFilter takes
+    // literals only — so the text stops promising the cost band.
     effects: [
       {
-        op: 'selectCards',
-        from: { who: 'self', zone: 'hand' },
-        min: 2,
-        max: 2,
+        op: 'conditional',
+        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 2 } },
         then: [
           { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'choose' } },
           { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
@@ -646,7 +766,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Discard 2 cards to Recruit an Action costing their sum. +1 Action, +1 Card.',
+    text: 'Discard 2 cards to Recruit an Action. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -662,15 +782,20 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
+    // Same `selectCards` misuse as the other Summons, at min/max 3: nine
+    // discards and three Recruits. "Most expensive" is writable, but not by
+    // `recruit` — opRecruit walks the library in array order with no ordering
+    // option, and sortLibraryByCost is hard-coded ascending, so it would fetch
+    // the cheapest. A `moveTo` with pick:'mostExpensive' plus the explicit
+    // shuffle that SB-2 requires after a Recruit is the same effect.
     effects: [
       {
-        op: 'selectCards',
-        from: { who: 'self', zone: 'hand' },
-        min: 3,
-        max: 3,
+        op: 'conditional',
+        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 3 } },
         then: [
           { op: 'discard', target: { who: 'self', zone: 'hand', count: 3, pick: 'choose' } },
-          { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+          { op: 'moveTo', target: { who: 'self', zone: 'library', filter: { type: 'Action' }, count: 1, pick: 'mostExpensive' }, zone: 'hand' },
+          { op: 'shuffle', zone: 'library' },
         ],
       },
     ],
@@ -757,7 +882,11 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a (3)-cost card',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { cost: { eq: 3 } } } }, to: 'gy' }],
+        // '$discovered' is the chosen card. A `{pool:...}` here would be
+        // re-sampled by resolveDefIdSpec, so the player could be offered A/B/C
+        // and handed D. The default Discover `then` sends the pick to hand, not
+        // GY, so the sentinel form is the one this card needs.
+        then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
       },
     ],
     triggers: [],
@@ -777,6 +906,12 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['PlayOnBuy', 'Flimsy'],
     stats: {},
+    // The Gold option is offered on every resolution, the Play-on-Buy one
+    // included: buy.ts moves the card to hand and calls playCard, so the buy
+    // resolution and a later play are indistinguishable to the effect body and
+    // nothing in ctx.vars marks which is which. The doc's "when played, Gold is
+    // added to the options" split needs that signal; until it exists the card
+    // prints the always-offered choice it actually gives you.
     effects: [
       {
         op: 'choose',
@@ -790,7 +925,7 @@ export const cards: CardDefinition[] = [
                 count: 3,
                 pick: 1,
                 prompt: 'Discover a (4)-cost card',
-                then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { cost: { eq: 4 } } } }, to: 'gy' }],
+                then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
               },
             ],
           },
@@ -802,7 +937,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Play on Buy, Flimsy. Discover a (4)-cost card to your GY. When played, Gold is added to the options.',
+    text: 'Play on Buy, Flimsy. Choose one: Discover a (4)-cost card from your Known Universe to your GY, or take a Gold to your GY.',
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     shop: 'draft',
@@ -825,11 +960,16 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a (5)- or (6)-cost card',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { cost: { gte: 5, lte: 6 } } } }, to: 'gy' }],
+        then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
       },
     ],
     triggers: [],
-    text: 'Play on Buy, Flimsy. Discover a (5)-cost card to your GY; when played, Discover a (6)-cost card instead.',
+    // The (5)-on-buy / (6)-when-played split needs a "this resolution came from
+    // Play on Buy" signal the engine does not expose — buy.ts plays the card
+    // through the same playCard path, and selfPlayCount counts plays of the
+    // DEFINITION, so a second bought copy already reads 2 on its own on-buy
+    // resolution. One (5)-or-(6) pool is what the card actually does.
+    text: 'Play on Buy, Flimsy. Discover a (5)- or (6)-cost card from your Known Universe and add it to your GY.',
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     shop: 'draft',

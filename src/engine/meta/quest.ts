@@ -113,7 +113,21 @@ export const questFloors: QuestFloor[] = [
         count: 3,
         pick: 1,
         prompt: 'Steal a card from an opponent hand',
-        then: [{ op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand' }, zone: 'hand' }],
+        // B.4 floor 3c steals the ONE card you discovered. A Selector with no
+        // `count` means every match (types.ts), so an unfiltered target here
+        // moved the opponent's whole hand. `$discovered` is substituted with
+        // the picked defId before this runs — see substituteDefId in
+        // effects/ops/choices.ts.
+        then: [
+          {
+            op: 'moveTo',
+            target: { who: 'chosenOpponent', zone: 'hand', filter: { defId: '$discovered' }, count: 1 },
+            zone: 'hand',
+            // Without this the card keeps its owner and lands back in the
+            // opponent's hand, which is not a steal.
+            who: 'self',
+          },
+        ],
       },
     ],
     rewardText: 'Discover a card in an opponent hand and steal it',

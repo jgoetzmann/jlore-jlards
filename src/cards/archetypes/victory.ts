@@ -194,15 +194,32 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // `mostExpensive` ranks by printed cost, which an upgrade never touches, and
+    // `selfCounter` sums every counter on the picked card: for a Relic that is
+    // its 'playCount' (core/play.ts stamps one per play) on top of its
+    // 'upgrades', so the old body paid out at roughly double. Both halves have
+    // to come from the 'upgrades' counter alone, and no expression variable
+    // reports the largest one.
+    //
+    // A ladder does it in card data. Each rung asks "does any Relic in my deck
+    // hold at least k upgrades?" and pays +1 VP if so, so the rungs sum to
+    // exactly the highest 'upgrades' count in the deck — never to the total
+    // across Relics, which is the "no double counting" clause. The last rung is
+    // the ceiling, so the ceiling is printed on the card.
     effects: [
-      {
-        op: 'forEach',
-        over: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic' }, count: 1, pick: 'mostExpensive' },
-        effects: [{ op: 'gain', stat: 'vp', amount: { expr: 'selfCounter' } }],
-      },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 1 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 2 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 3 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 4 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 5 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 6 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 7 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 8 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 9 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
+      { op: 'conditional', if: { has: { target: { zone: ['library', 'hand', 'gy', 'play'], filter: { type: 'Relic', counter: { key: 'upgrades', gte: 10 } } } } }, then: [{ op: 'gain', stat: 'vp', amount: 1 }] },
     ],
     triggers: [],
-    text: '+X VP, where X is the number of upgrades on the most upgraded Relic in your deck. No double counting.',
+    text: '+X VP, where X is the number of upgrades on the most upgraded Relic in your deck, to a maximum of 10. No double counting.',
     flavor: 'One monument, many chisels.',
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
@@ -279,7 +296,18 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
-        if: { expr: 'max(0, libraryHeight - countIn(opponentLibrary, tallest))' },
+        // `countIn` can only reach your own zones, so the comparison needs a
+        // real variable for the tallest opponent Library. No Condition can
+        // stand in for it either: `has.atLeast` is a literal number, never an
+        // Amount, so a selector over opponent Libraries can never be measured
+        // against `libraryHeight`.
+        //
+        // 'tallestOpponentLibrary' is not in EXPR_VARS yet, so readVar throws,
+        // evalCondition catches, and the gate reads false — the card scores
+        // nothing until the variable lands. That is the fail-closed direction
+        // on purpose: the old expression read as max(0, libraryHeight) and paid
+        // an unconditional +2 VP on every single play.
+        if: { expr: 'libraryHeight > tallestOpponentLibrary' },
         then: [{ op: 'scoreOnCard', target: { self: true }, amount: 2 }],
       },
     ],
@@ -355,9 +383,17 @@ export const cards: CardDefinition[] = [
     effects: [
       { op: 'createCard', defId: 'skyscraper', to: 'gy' },
       {
+        // `bottom` is the Skyscraper this play just appended; `top` would score
+        // onto an older one. The amount is a VP *sum*, which no card count can
+        // express, so it reads a dedicated variable: countIn counts cards, and
+        // paying +1 per Points card would turn every -1 VP card (Cursed Pig,
+        // Garlic, Chopped Chuzz) into +1, which is a worse answer than none.
+        //
+        // 'vpInHand' is not in EXPR_VARS yet, so evalAmount swallows the throw
+        // and the Skyscraper is built worth 0 while the hand is still trashed.
         op: 'scoreOnCard',
-        target: { zone: 'gy', filter: { defId: 'skyscraper' }, count: 1, pick: 'top' },
-        amount: { expr: 'countIn(hand, totalVp)' },
+        target: { zone: 'gy', filter: { defId: 'skyscraper' }, count: 1, pick: 'bottom' },
+        amount: { expr: 'vpInHand' },
       },
       { op: 'trash', target: { zone: 'hand', filter: { type: 'Points' } } },
     ],
@@ -399,17 +435,22 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [],
+    // `meta/scoring.ts` has a scorer that walks the run properly, but nothing
+    // calls it — `endgame.ts` scores through `core/scoring.computeScores`. So
+    // the payout has to ride the gameEnd trigger like every other End of Game
+    // card. `longestCostRun` is an EXPR_VAR because the run is a property of
+    // the deck's cost set, not a card count no filter can name.
     triggers: [
       {
         on: 'gameEnd',
         effects: [
-          { op: 'gain', stat: 'vp', amount: { expr: 'countIn(deck, longestCostRun)' } },
+          { op: 'gain', stat: 'vp', amount: { expr: 'longestCostRun' } },
           {
             op: 'trash',
             target: {
+              who: 'self',
               zone: ['library', 'hand', 'gy', 'play'],
-              filter: { cost: { lte: 12 } },
-              count: { expr: 'countIn(deck, longestCostRun)' },
+              count: { expr: 'longestCostRun' },
               pick: 'cheapest',
             },
           },
@@ -510,7 +551,22 @@ export const cards: CardDefinition[] = [
             op: 'forEach',
             over: { zone: 'hand', filter: { cost: { lte: 1 } } },
             effects: [
-              { op: 'nerf', scope: 'instance', target: { who: 'eachOpponent', zone: 'hand', count: 1, pick: 'random' } },
+              {
+                // A Selector pools every opponent hand into one list, so a bare
+                // `count: 1` Nerfs one card table-wide. Asking for one per
+                // opponent is the closest this can get without a per-player
+                // count. The guard keeps an empty table from falling back onto
+                // the source card, which `nerf` does when nothing is selected.
+                op: 'conditional',
+                if: { has: { target: { who: 'eachOpponent', zone: 'hand' }, atLeast: 1 } },
+                then: [
+                  {
+                    op: 'nerf',
+                    scope: 'instance',
+                    target: { who: 'eachOpponent', zone: 'hand', count: { expr: 'playerCount - 1' }, pick: 'random' },
+                  },
+                ],
+              },
             ],
           },
           { op: 'trash', target: { zone: 'hand', filter: { cost: { lte: 1 } } } },
@@ -575,11 +631,18 @@ export const cards: CardDefinition[] = [
     effects: [
       { op: 'createCard', defId: 'tix', to: 'library', position: 'random' },
       { op: 'shuffle', zone: 'library' },
-      { op: 'recruit', zone: 'library', filter: { type: 'Points' }, count: 1, to: 'hand' },
+      // Recruited aside first, so `selfCost` reads the card that was actually
+      // drawn. Recruiting straight to hand and re-scanning it paid out on the
+      // most expensive Points card already there, and paid even when the
+      // Library held none.
+      { op: 'recruit', zone: 'library', filter: { type: 'Points' }, count: 1, to: 'aside' },
       {
         op: 'forEach',
-        over: { zone: 'hand', filter: { type: 'Points' }, count: 1, pick: 'mostExpensive' },
-        effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCost' } }],
+        over: { zone: 'aside', filter: { type: 'Points' } },
+        effects: [
+          { op: 'gain', stat: 'money', amount: { expr: 'selfCost' } },
+          { op: 'moveTo', target: { self: true }, zone: 'hand' },
+        ],
       },
     ],
     triggers: [],
@@ -607,7 +670,13 @@ export const cards: CardDefinition[] = [
         over: { zone: 'aside', filter: { defId: 'tix' } },
         effects: [
           { op: 'gain', stat: 'money', amount: 1 },
-          { op: 'scoreOnCard', target: { self: true }, amount: 1 },
+          {
+            // Inside a forEach `{self:true}` is the iterated Tix, which the next
+            // node trashes — the VP has to be named onto Tixatus itself.
+            op: 'scoreOnCard',
+            target: { zone: ['play', 'gy'], filter: { defId: 'tixatus' }, count: 1, pick: 'lastPlayed' },
+            amount: 1,
+          },
         ],
       },
       { op: 'trash', target: { zone: 'aside' } },
@@ -721,11 +790,30 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
-        op: 'forEach',
-        over: { zone: 'hand', filter: { rarity: 'rare' }, count: { expr: 'handSize' }, pick: 'choose' },
-        effects: [
-          { op: 'discard', target: { zone: 'hand', filter: { rarity: 'rare' }, count: 1, pick: 'choose' } },
-          { op: 'gain', stat: 'money', amount: 2 },
+        // "Any number" has to include none. A forEach asking for handSize Rares
+        // always wants every Rare in hand, so the prompt was skipped and the
+        // discard was mandatory. The declining branch is a `choose` rather than
+        // a `min: 0` selection, because resolving a selection with nothing
+        // picked runs the continuation once against the source card instead of
+        // zero times.
+        op: 'choose',
+        options: [
+          {
+            label: 'Discard Rares for +2 Money each',
+            effects: [
+              {
+                op: 'selectCards',
+                from: { zone: 'hand', filter: { rarity: 'rare' } },
+                min: 1,
+                max: { expr: 'handSize' },
+                then: [
+                  { op: 'discard', target: { self: true } },
+                  { op: 'gain', stat: 'money', amount: 2 },
+                ],
+              },
+            ],
+          },
+          { label: 'Discard nothing', effects: [] },
         ],
       },
     ],
@@ -754,7 +842,9 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a Points card.',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { type: 'Points' } } }, to: 'gy' }],
+        // '$discovered' is the card the player actually picked. Re-sampling the
+        // pool here handed out a fourth, unrelated card.
+        then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
       },
     ],
     triggers: [],

@@ -4,143 +4,13 @@
  * 11 Heroic (activationCost 2, once per turn), 12 Celestial (persistent,
  * unlimited), 2 Hypercelestial (one at a time).
  *
- * B.4's In Too Deep floors ship as `IN_TOO_DEEP_FLOORS` and drive the
- * `in_too_deep` Celestial aura's quest triggers.
+ * B.4's In Too Deep floors are NOT here. They are engine data, not card data,
+ * and live in `src/engine/meta/quest.ts` as `questFloors` — the table that
+ * `getFloor`, `questProgress` and `questStartOfTurn` actually read. A second
+ * copy used to sit in this file, exported but imported by nobody, so an edit
+ * made here landed on a table the game never consulted.
  */
-import type { AuraDefinition, EffectNode } from '@engine/types';
-
-export interface QuestFloor {
-  /** Floor label as printed in Appendix B.4. */
-  id: string;
-  quest: string;
-  /** Counter in `QuestState.progress` this floor watches. */
-  key: string;
-  /** Value the counter must reach. */
-  target: number;
-  /** True when the counter resets every turn ("in one turn"). */
-  perTurn: boolean;
-  reward: EffectNode[];
-  leadsTo: string[];
-}
-
-export const IN_TOO_DEEP_FLOORS: QuestFloor[] = [
-  {
-    id: '1',
-    quest: 'Buy 2 cards',
-    key: 'buys',
-    target: 2,
-    perTurn: false,
-    reward: [{ op: 'delayed', when: 'startOfNextTurn', effects: [{ op: 'gain', stat: 'money', amount: 2 }], who: 'self' }],
-    leadsTo: ['2a', '2b'],
-  },
-  {
-    id: '2a',
-    quest: 'Play 5 cards',
-    key: 'plays',
-    target: 5,
-    perTurn: false,
-    reward: [{ op: 'createCard', defId: 'truss', to: 'library', position: 'top' }],
-    leadsTo: ['3a', '3b'],
-  },
-  {
-    id: '2b',
-    quest: 'Trash 3 cards',
-    key: 'trashes',
-    target: 3,
-    perTurn: false,
-    reward: [
-      { op: 'createCard', defId: { pool: { catalog: 'book' } }, to: 'hand' },
-      { op: 'gain', stat: 'actions', amount: 1 },
-    ],
-    leadsTo: ['3b', '3c'],
-  },
-  {
-    id: '3a',
-    quest: 'Draw 20 cards',
-    key: 'draws',
-    target: 20,
-    perTurn: false,
-    reward: [
-      { op: 'moveTo', target: { who: 'self', zone: 'gy' }, zone: 'library' },
-      { op: 'shuffle', zone: 'library', who: 'self' },
-      { op: 'draw', amount: 4 },
-      { op: 'gain', stat: 'actions', amount: 1 },
-    ],
-    leadsTo: ['4a', '4b'],
-  },
-  {
-    id: '3b',
-    quest: 'Buy a card costing (8) or more',
-    key: 'expensiveBuys',
-    target: 1,
-    perTurn: false,
-    reward: [{ op: 'createCard', defId: 'gold', to: 'library', position: 'top' }],
-    leadsTo: ['4b', '4c'],
-  },
-  {
-    id: '3c',
-    quest: 'Buy a Diamond',
-    key: 'diamondBuys',
-    target: 1,
-    perTurn: false,
-    reward: [
-      {
-        op: 'discover',
-        pool: { scope: 'opponentHand', who: 'chosenOpponent' },
-        count: 3,
-        pick: 1,
-        prompt: "Steal a card from an opponent's hand",
-        then: [{ op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand', count: 1, pick: 'random' }, zone: 'hand' }],
-      },
-    ],
-    leadsTo: ['4c', '4d'],
-  },
-  {
-    id: '4a',
-    quest: 'Draw 20 cards in one turn',
-    key: 'drawsThisTurn',
-    target: 20,
-    perTurn: true,
-    reward: [{ op: 'manifestAura', tier: 'celestial', auraId: 'undead_army', who: 'self' }],
-    leadsTo: ['5'],
-  },
-  {
-    id: '4b',
-    quest: 'Have 5 Diamonds in your deck',
-    key: 'diamondsInDeck',
-    target: 5,
-    perTurn: false,
-    reward: [{ op: 'manifestAura', tier: 'celestial', auraId: 'market_manipulation', who: 'self' }],
-    leadsTo: ['5'],
-  },
-  {
-    id: '4c',
-    quest: 'End a turn with (12) or more unspent Money',
-    key: 'bigUnspentTurns',
-    target: 1,
-    perTurn: false,
-    reward: [{ op: 'manifestAura', tier: 'celestial', auraId: 'double_header', who: 'self' }],
-    leadsTo: ['5'],
-  },
-  {
-    id: '4d',
-    quest: 'Have 16 unique cards in your deck',
-    key: 'uniqueInDeck',
-    target: 16,
-    perTurn: false,
-    reward: [{ op: 'manifestAura', tier: 'celestial', auraId: 'yuyas_mythical_portal', who: 'self' }],
-    leadsTo: ['5'],
-  },
-  {
-    id: '5',
-    quest: 'Win the game',
-    key: 'wins',
-    target: 1,
-    perTurn: false,
-    reward: [{ op: 'gain', stat: 'vp', amount: 5 }],
-    leadsTo: [],
-  },
-];
+import type { AuraDefinition } from '@engine/types';
 
 export const auras: AuraDefinition[] = [
   // -------------------------------------------------------------------------
@@ -174,15 +44,21 @@ export const auras: AuraDefinition[] = [
     name: 'Mycology',
     tier: 'heroic',
     activationCost: 2,
-    text: 'Discover two Known Universe cards costing (3) or less, Fuse them, and add the result to your hand.',
+    // The `then` that stood here re-rolled the pool once per pick, so the two
+    // cards delivered were fresh random samples and never the two the player
+    // chose. An empty `then` is the fix: pushChosen falls through to
+    // defaultDiscoverThen, which puts the chosen definition itself in hand.
+    // 'Fuse them' is off the text until the DSL has a fuse node — the S-FUSE
+    // helpers in systems/fuse.ts still have no op to reach them.
+    text: 'Discover two Known Universe cards costing (3) or less and add them to your hand.',
     effects: [
       {
         op: 'discover',
         pool: { scope: 'knownUniverse', filter: { cost: { lte: 3 } } },
         count: 3,
         pick: 2,
-        prompt: 'Discover two cards to Fuse',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'knownUniverse', filter: { cost: { lte: 3 } } } }, to: 'hand' }],
+        prompt: 'Discover two cards',
+        then: [],
       },
     ],
     triggers: [],

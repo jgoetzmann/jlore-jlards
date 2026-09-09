@@ -6,35 +6,9 @@
  */
 import type { CardDefinition } from '@engine/types';
 
+// Miracle Fruit itself is the (10) Legendary Food of A.16 and lives in
+// `tribes/food.ts`. This file holds only the pool it discovers from.
 export const cards: CardDefinition[] = [
-  {
-    id: 'miracle_fruit',
-    name: 'Miracle Fruit',
-    cost: { money: 3 },
-    types: ['Action', 'Food', 'Token'],
-    subtypes: ['Fruit'],
-    tags: [],
-    rarity: 'token',
-    keywords: ['Flimsy'],
-    stats: { actions: 1 },
-    effects: [
-      {
-        op: 'discover',
-        pool: { catalog: 'miracle' },
-        count: 3,
-        pick: 1,
-        prompt: 'Choose a Miracle',
-        then: [{ op: 'createCard', defId: { pool: { catalog: 'miracle' } }, to: 'play' }],
-      },
-    ],
-    triggers: [],
-    text: 'Flimsy. +1 Action. Discover 1 of 3 Miracles and perform it.',
-    flavor: 'Tastes like the outcome you wanted.',
-    complexity: 'T3',
-    subsystems: ['S-TOKEN'],
-    notPurchasable: true,
-    art: { key: 'miracle_fruit', status: 'placeholder', anim: 'summon' },
-  },
   {
     id: 'miracle_transmutation',
     name: 'Miracle: Transmutation',
@@ -147,10 +121,15 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // `who` on a moveTo names the DESTINATION owner. Without it the cards are
+      // re-filed under the opponent who already owned them and the steal is a
+      // no-op; with it they change hands, Indestructible Points included, which
+      // the copy-plus-trash shape could not do.
       {
         op: 'moveTo',
         target: { who: 'eachOpponent', zone: ['gy', 'hand'], filter: { type: 'Points' }, count: 2, pick: 'mostExpensive' },
         zone: 'gy',
+        who: 'self',
       },
     ],
     triggers: [],
@@ -275,7 +254,7 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card costing (10) or more',
-        then: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse', filter: { cost: { gte: 10 } } } }, to: 'hand' }],
+        then: [],
       },
     ],
     triggers: [],

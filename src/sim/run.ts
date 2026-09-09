@@ -66,7 +66,9 @@ export interface DetailedMatchResult extends MatchResult {
 export const DEFAULT_SIM_CONFIG: MatchConfig = {
   playerCount: 2,
   draftPileCount: 10,
-  anomalyChance: 0.25,
+  // Must track `defaultMatchConfig` — balance numbers measured at a different
+  // anomaly rate than the game actually plays at describe a different game.
+  anomalyChance: 0.3,
   winCondition: {
     kind: 'standard',
     emptyPileFraction: 0.4,
@@ -74,7 +76,11 @@ export const DEFAULT_SIM_CONFIG: MatchConfig = {
     x: null,
   },
   pileSizeScale: 1,
-  effectNodeBudget: 500,
+  // Gameplay doc 12.2 and DESIGN-CHOICES 6 both say 200. Measured over 15
+  // matches, budget 200 and budget 2000 produce byte-identical results — the
+  // cap only ever catches the paradox loops it exists for, so there is no
+  // reason for the sim to measure a different game than the one that ships.
+  effectNodeBudget: 200,
   recursionDepth: 8,
   turnSeconds: 60,
   seedCodexWithCommons: true,

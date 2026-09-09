@@ -61,7 +61,13 @@ export const cards: CardDefinition[] = [
         op: 'conditional',
         if: { combo: 1 },
         then: [
-          { op: 'trash', target: { zone: 'play', count: 1, pick: 'lastPlayed' } },
+          // Soul Slicer is already in `play` and at the head of playedThisTurn when
+          // its body runs, so an unfiltered 'lastPlayed' always ate itself. Same
+          // exclusion The Past / The Future use.
+          {
+            op: 'trash',
+            target: { zone: 'play', filter: { not: { defId: 'soul_slicer' } }, count: 1, pick: 'lastPlayed' },
+          },
           { op: 'createCard', defId: 'soul_shard', to: 'gy', count: 2 },
           { op: 'gain', stat: 'actions', amount: 3 },
         ],
@@ -134,11 +140,14 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'trash', target: { zone: ['hand', 'gy'], filter: { defId: 'soul_shard' }, count: 1, pick: 'choose' } },
+      // Same shape as Truss Flick: `{ifPrevious:true}` is never true, so the
+      // payoff never ran and the Epic resolved to "trash a Soul Shard". Gate on
+      // the Shard existing and destroy it inside the branch.
       {
         op: 'conditional',
-        if: { ifPrevious: true },
+        if: { has: { target: { zone: ['hand', 'gy'], filter: { defId: 'soul_shard' } }, atLeast: 1 } },
         then: [
+          { op: 'trash', target: { zone: ['hand', 'gy'], filter: { defId: 'soul_shard' }, count: 1, pick: 'choose' } },
           {
             op: 'createCard',
             defId: { pool: { scope: 'knownUniverse', filter: { cost: { gte: 5 } } } },

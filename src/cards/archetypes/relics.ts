@@ -115,13 +115,31 @@ export const cards: CardDefinition[] = [
     stats: { cards: 1, money: 1 },
     effects: [],
     triggers: [
+      // 'onTrash' is a SELF event (effects/triggers.ts): it reaches only the
+      // card that was trashed, so a rider listening for someone else's Felinor
+      // never ran. There is no table-wide trash event, so the Relic polls
+      // instead: 'counter' remembers how many Felinors were in the trash the
+      // last time it paid out, and each start of turn it settles the
+      // difference. 'counter' is the reserved key buildVars reports as
+      // selfCounter, which keeps the engine-written playCount out of the sum;
+      // seeding it at buy time makes the very first Felinor count.
+      { on: 'onBuy', effects: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: 0 }] },
       {
-        on: 'onTrash',
-        condition: { has: { target: { zone: 'trash', filter: { subtype: 'Felinor' } }, atLeast: 1 } },
-        effects: [{ op: 'upgradeRelic', target: { self: true }, stat: 'random', amount: 1 }],
+        on: 'startOfTurn',
+        condition: { expr: 'countIn(trash, felinor) > selfCounter' },
+        effects: [
+          {
+            op: 'repeat',
+            times: { expr: 'countIn(trash, felinor) - selfCounter' },
+            effects: [
+              { op: 'upgradeRelic', target: { self: true }, stat: 'random', amount: 1 },
+              { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+            ],
+          },
+        ],
       },
     ],
-    text: '+1 Card, +1 Money. This permanently upgrades whenever you trash a Felinor. ({upgrades} upgrades.)',
+    text: '+1 Card, +1 Money. This permanently upgrades once for each Felinor that has been trashed. ({upgrades} upgrades.)',
     flavor: 'It feeds on missing cats.',
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
@@ -159,7 +177,21 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { money: 1, actions: 1, cards: 1 },
-    effects: [{ op: 'upgradeRelic', target: { self: true }, stat: 'random', amount: 1 }],
+    // stat:'random' rolls over all five BUFFABLE_STATS, so two rolls in five
+    // upgraded Buys or VP — stats this card does not grant. The row names the
+    // three, so the roll is written out explicitly. No branch carries a
+    // displayAs: opRandom would stamp it on the instance as a permanent text
+    // override.
+    effects: [
+      {
+        op: 'random',
+        branches: [
+          { weight: 1, effects: [{ op: 'upgradeRelic', target: { self: true }, stat: 'money', amount: 1 }] },
+          { weight: 1, effects: [{ op: 'upgradeRelic', target: { self: true }, stat: 'actions', amount: 1 }] },
+          { weight: 1, effects: [{ op: 'upgradeRelic', target: { self: true }, stat: 'cards', amount: 1 }] },
+        ],
+      },
+    ],
     triggers: [],
     text: '+1 Money, +1 Action, +1 Card. Then permanently upgrade one of the three at random. ({upgrades} upgrades.)',
     flavor: 'It decides which part of you to make stronger.',
@@ -178,10 +210,22 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // X lives in one place: the reserved 'counter' key, which buildVars reports
+    // as selfCounter in preference to the sum of every counter (the sum picked
+    // up the engine-written playCount and doubled X). The upgrade used to be an
+    // {op:'upgradeRelic', stat:'all'}, which writes a permanent per-instance
+    // statDelta that playCard pays out on top of the gain block — X twice, once
+    // of it unprinted, and the statDelta VP scored in a second ledger. Bumping
+    // the counter instead keeps the whole payout in the gain block.
+    //
+    // Combo X and Big Action X are both X-driven: a literal { combo: 1 } is
+    // always true (the card is on playedThisTurn before its body runs), and the
+    // static bigAction never moves, so the counters.bigAction override tracks X
+    // and the combo gate is an expression.
     effects: [
       {
         op: 'conditional',
-        if: { combo: 1 },
+        if: { expr: 'comboCount >= selfCounter' },
         then: [
           { op: 'gain', stat: 'actions', amount: { expr: 'max(1, selfCounter)' } },
           { op: 'gain', stat: 'buys', amount: { expr: 'max(1, selfCounter)' } },
@@ -190,10 +234,19 @@ export const cards: CardDefinition[] = [
           { op: 'gain', stat: 'vp', amount: { expr: 'max(1, selfCounter)' } },
         ],
       },
-      { op: 'upgradeRelic', target: { self: true }, stat: 'all', amount: 1 },
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+      { op: 'addCounter', target: { self: true }, key: 'bigAction', amount: 1 },
     ],
-    triggers: [{ on: 'onBuy', effects: [{ op: 'addCounter', target: { self: true }, key: 'upgrades', amount: 1 }] }],
-    text: 'Big Action X, Combo X. +X Actions, +X Buys, +X Money, +X Cards, +X VP. X is 1 when you buy this and permanently rises by 1 each time you play it. (X = {upgrades}.)',
+    triggers: [
+      {
+        on: 'onBuy',
+        effects: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+          { op: 'addCounter', target: { self: true }, key: 'bigAction', amount: 1 },
+        ],
+      },
+    ],
+    text: 'Big Action X, Combo X. +X Actions, +X Buys, +X Money, +X Cards, +X VP. X is 1 when you buy this and permanently rises by 1 each time you play it. (X = {counter}.)',
     flavor: 'All of it, all at once, forever.',
     complexity: 'T4',
     subsystems: ['S-BIGACTION', 'S-COMBO', 'S-BUFF', 'S-PERSIST'],

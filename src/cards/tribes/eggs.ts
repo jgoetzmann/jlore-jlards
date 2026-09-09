@@ -10,19 +10,23 @@
  */
 import type { CardDefinition, EffectNode, StatKey } from '@engine/types';
 
-/** The standard 70 / 15 / 9 / 5 / 1 Egg drop, one Egg into hand. */
+/**
+ * The standard 70 / 15 / 9 / 5 / 1 Egg drop, one Egg into hand.
+ *
+ * No `displayAs` on the branches: a branch's label is written onto the SOURCE
+ * instance as a permanent `displayTextOverride`, and nothing ever clears it, so
+ * a noun fragment ("an Egg") replaced the whole rules text of every generator
+ * that survives its own play — Chicken Coop and Hen go to the GY and come back.
+ * The roll is already in the effect log.
+ */
 const eggDrop = (): EffectNode => ({
   op: 'random',
   branches: [
-    { weight: 70, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }], displayAs: 'an Egg' },
-    { weight: 15, effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }], displayAs: 'a Big Egg' },
-    { weight: 9, effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }], displayAs: 'a Golden Egg' },
-    { weight: 5, effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }], displayAs: 'a Rotten Egg' },
-    {
-      weight: 1,
-      effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }],
-      displayAs: 'a Diamond Egg',
-    },
+    { weight: 70, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }] },
+    { weight: 15, effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }] },
+    { weight: 9, effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }] },
+    { weight: 5, effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }] },
+    { weight: 1, effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }] },
   ],
 });
 
@@ -31,13 +35,12 @@ const eggDrops = (n: number): EffectNode => ({ op: 'repeat', times: n, effects: 
 
 const RANDOM_STATS: StatKey[] = ['money', 'buys', 'cards', 'actions'];
 
-/** Randomly one of +N Money / Buy / Card / Action. */
+/** Randomly one of +N Money / Buy / Card / Action. No `displayAs`, per eggDrop. */
 const randomStat = (n: number): EffectNode => ({
   op: 'random',
   branches: RANDOM_STATS.map((stat) => ({
     weight: 1,
     effects: [{ op: 'gain', stat, amount: n } as EffectNode],
-    displayAs: `+${n} ${stat}`,
   })),
 });
 
@@ -250,35 +253,17 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // No `displayAs`, per eggDrop: Hen survives its own play, so a branch label
+      // would permanently overwrite its rules text with a two-word fragment.
       {
         op: 'random',
         branches: [
-          {
-            weight: 35,
-            effects: [{ op: 'createCard', defId: 'feather', to: 'hand', count: 1 }],
-            displayAs: 'a Feather',
-          },
-          { weight: 35, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }], displayAs: 'an Egg' },
-          {
-            weight: 15,
-            effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }],
-            displayAs: 'a Big Egg',
-          },
-          {
-            weight: 9,
-            effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }],
-            displayAs: 'a Golden Egg',
-          },
-          {
-            weight: 5,
-            effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }],
-            displayAs: 'a Rotten Egg',
-          },
-          {
-            weight: 1,
-            effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }],
-            displayAs: 'a Diamond Egg',
-          },
+          { weight: 35, effects: [{ op: 'createCard', defId: 'feather', to: 'hand', count: 1 }] },
+          { weight: 35, effects: [{ op: 'createCard', defId: 'egg', to: 'hand', count: 1 }] },
+          { weight: 15, effects: [{ op: 'createCard', defId: 'big_egg', to: 'hand', count: 1 }] },
+          { weight: 9, effects: [{ op: 'createCard', defId: 'golden_egg', to: 'hand', count: 1 }] },
+          { weight: 5, effects: [{ op: 'createCard', defId: 'rotten_egg', to: 'hand', count: 1 }] },
+          { weight: 1, effects: [{ op: 'createCard', defId: 'diamond_egg', to: 'hand', count: 1 }] },
         ],
       },
     ],

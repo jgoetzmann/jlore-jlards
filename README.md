@@ -72,7 +72,7 @@ src/engine/   pure rules engine — no I/O, no React, no fetch
   view.ts       viewFor(state, player) — the only security in the system
   effects/      the effect-node interpreter (~60 ops)
   shop/ systems/ meta/
-src/cards/    533 card definitions + 25 auras, as typed data
+src/cards/    534 card definitions + 25 auras, as typed data
 src/net/      relay poll loop, host, client, storage tiers
 src/ui/       React components
 src/sim/      bots, headless match runner, balance telemetry

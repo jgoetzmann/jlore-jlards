@@ -17,6 +17,7 @@ import type {
   GameState,
   InstanceId,
   PlayerId,
+  Prompt,
   QueuedEffect,
   Selector,
 } from '@engine/types';
@@ -69,6 +70,7 @@ import {
 
 export type { EffectContext };
 export { matchesFilter, matchesDefFilter, NAMED_FILTERS } from './select';
+export { substituteDefId, DISCOVERED_SENTINEL, SELECTED_SENTINEL } from './ops/choices';
 export { buildVars } from './context';
 export { samplePool, poolCandidates } from './pools';
 export { evaluateExpr } from '@engine/expr';
@@ -357,6 +359,49 @@ export function resolveEffects(state: GameState, nodes: EffectNode[], ctx: Effec
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
+
+/**
+ * Re-run the node a prompt suspended on, now that the answer is known.
+ *
+ * `runQueue` shifts an item off the queue before resolving it and, on
+ * 'suspend', parks only what was left — the suspended node itself is gone. That
+ * is fine for discover / choose / selectCards, which carry their continuation
+ * in `prompt.then`, but a `pick:'choose'` selector inside discard / trash /
+ * moveTo, and every pile prompt, suspend expecting to be re-entered with the
+ * choice. `resolveTargets` and `resolvePiles` are already written for it: both
+ * return `pre.iids` / `pre.pileIds` straight back when handed one. Nothing ever
+ * handed them one, so those cards prompted and then did nothing.
+ *
+ * The mode lives on the prompt's ctx (`payloadFrom(item, 'targets' | 'piles')`),
+ * not on `prompt.type` — a target prompt is typed 'selectCards' too.
+ */
+export function resumeNode(state: GameState, prompt: Prompt, pre: Pre): GameState {
+  const raw = (prompt.ctx ?? {}) as Record<string, unknown>;
+  const node = raw['node'] as EffectNode | undefined;
+  if (!node || typeof node !== 'object') return state;
+
+  const s = state;
+  const item: QueuedEffect = {
+    node,
+    player: typeof raw['player'] === 'string' ? (raw['player'] as PlayerId) : prompt.player,
+    sourceIid: typeof raw['sourceIid'] === 'string' ? (raw['sourceIid'] as InstanceId) : null,
+    depth: typeof raw['depth'] === 'number' ? (raw['depth'] as number) : 0,
+    multiplier: typeof raw['multiplier'] === 'number' ? (raw['multiplier'] as number) : 1,
+    vars:
+      raw['vars'] && typeof raw['vars'] === 'object'
+        ? { ...(raw['vars'] as Record<string, number>) }
+        : {},
+  };
+
+  const q: QueuedEffect[] = [];
+  s.nodesResolvedThisTurn += 1;
+  const result = applyNode(s, item, q, pre);
+  if (result === 'suspend') {
+    s.queue = q.concat(s.queue);
+    return s;
+  }
+  return runQueue(s, q, item.depth + maxDepth(s));
+}
 
 /** Convenience for callers holding only a player and a node list. */
 export function makeContext(

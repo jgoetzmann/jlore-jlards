@@ -86,20 +86,16 @@ export const cards: CardDefinition[] = [
     rarity: 'token',
     keywords: ['Flimsy'],
     stats: { actions: 1, cards: 2 },
-    effects: [
-      {
-        op: 'conditional',
-        if: {
-          any: [
-            { has: { target: { zone: 'hand', self: true, pick: 'top', count: 1 }, atLeast: 1 } },
-            { has: { target: { zone: 'hand', self: true, pick: 'bottom', count: 1 }, atLeast: 1 } },
-          ],
-        },
-        then: [{ op: 'setKeyword', target: { self: true }, keyword: 'Flimsy', on: false }],
-      },
-    ],
+    // A.16 prints "loses Flimsy if on the edge of your hand", and that clause is
+    // not expressible yet: a `{self:true}` selector short-circuits to the source
+    // instance without ever reading `zone`/`pick`, so the old `any:[top, bottom]`
+    // guard passed unconditionally and every Brownie shed Flimsy and persisted.
+    // Hand position has to be captured before `playCard` moves the card out of
+    // hand, which is an engine change; until then Brownie ships as plain Flimsy,
+    // the doc row's base state, rather than as a permanent free engine.
+    effects: [],
     triggers: [],
-    text: 'Flimsy — loses Flimsy while it sits on the edge of your hand. +1 Action, +2 Cards.',
+    text: 'Flimsy. +1 Action, +2 Cards.',
     flavor: 'Corner piece.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
@@ -266,7 +262,12 @@ export const cards: CardDefinition[] = [
     rarity: 'token',
     keywords: ['Flimsy'],
     stats: { actions: 1 },
-    effects: [{ op: 'recruit', zone: 'library', filter: { type: 'Food' }, to: 'hand' }],
+    // An omitted `count` on `recruit` means ONE, not "all matches" the way it
+    // does on a Selector, so "draw all Food" needs an explicit ceiling. The
+    // Library height is that ceiling: `recruit` only takes cards that match.
+    effects: [
+      { op: 'recruit', zone: 'library', filter: { type: 'Food' }, to: 'hand', count: { expr: 'libraryHeight' } },
+    ],
     triggers: [],
     text: 'Flimsy. +1 Action. Draw every Food card in your Library.',
     flavor: 'I am your huckleberry.',
@@ -275,31 +276,8 @@ export const cards: CardDefinition[] = [
     notPurchasable: true,
     art: { key: 'huckleberry', status: 'placeholder' },
   },
-  {
-    id: 'milkshake',
-    name: 'Milkshake',
-    cost: { money: 4 },
-    types: ['Action', 'Food', 'Token'],
-    subtypes: ['Food'],
-    tags: [],
-    rarity: 'token',
-    keywords: ['Flimsy'],
-    stats: { actions: 1, cards: 4 },
-    effects: [
-      {
-        op: 'delayed',
-        when: 'endOfTurn',
-        effects: [{ op: 'gain', stat: 'cards', amount: -2 }],
-      },
-    ],
-    triggers: [],
-    text: 'Flimsy. +1 Action, +4 Cards. Draw 2 fewer cards at the end of this turn.',
-    flavor: 'It brings all the boys to the yard, then it takes two of them away.',
-    complexity: 'T2',
-    subsystems: ['S-TOKEN'],
-    notPurchasable: true,
-    art: { key: 'milkshake', status: 'placeholder' },
-  },
+  // Milkshake lives in `economy/draw.ts`: A.7 prices it at (4) and rates it
+  // Rare, so it is a purchasable draw card, not a generated Food token.
   {
     id: 'slice_of_bread',
     name: 'Slice of Bread',
@@ -555,14 +533,23 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['Flimsy'],
     stats: {},
-    effects: [{ op: 'repeat', times: { expr: '4 + selfCounter * 2' }, effects: [grapeDrop()] }],
+    effects: [
+      // The vintage is kept under the key `counter`, and seeded here, because
+      // `selfCounter` is the SUM of every counter on the instance unless a key
+      // named counter/uses/charges exists — and `playCard` has already written
+      // `playCount` by the time effects run, which inflated a fresh Grapevine
+      // from 4 Grapes to 6. Seeding at amount 0 creates the key on the first
+      // play, so an undiscarded Grapevine drops the printed 4.
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: 0 },
+      { op: 'repeat', times: { expr: '4 + selfCounter * 2' }, effects: [grapeDrop()] },
+    ],
     triggers: [
       {
         on: 'onDiscard',
-        effects: [{ op: 'addCounter', target: { self: true }, key: 'vintage', amount: 1 }],
+        effects: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 }],
       },
     ],
-    text: 'Flimsy. Add {vintage} Grapes to your GY — 79% Grape, 20% Big Grape, 1% Golden Grape. When discarded, it grows: +2 Grapes next time.',
+    text: 'Flimsy. Add 4 Grapes to your GY, plus 2 more for each time it has been discarded ({counter} so far) — 79% Grape, 20% Big Grape, 1% Golden Grape.',
     flavor: 'Heard it through.',
     complexity: 'T3',
     subsystems: ['S-PERSIST', 'S-EFFECTS'],
@@ -644,7 +631,17 @@ export const cards: CardDefinition[] = [
       {
         on: 'endOfTurn',
         zones: ['play', 'hand'],
-        condition: { not: { expr: 'cardsGainedThisTurn' } },
+        // "Used no Buys" is `buysUsedThisTurn`, which exists on PlayerState
+        // (types.ts) but is not an EXPR_VAR yet, so no expression can read it and
+        // no card node can express the doc's gate. `cardsGainedThisTurn` was not a
+        // stand-in at all — every minted token counts, so a Food deck blocked this
+        // with zero Buys spent, which is nearly every turn. An unspent Buy is the
+        // near-proxy, and it diverges in exactly one case: a card granted an extra
+        // Buy and one was spent. A Prophet-cost purchase is NOT a second divergence
+        // — core/buy.ts skips both `p.buys -= 1` and `p.buysUsedThisTurn += 1` on
+        // that branch (B59), so the real gate would read that turn as "no Buy used"
+        // too. Text below prints the proxy, not the doc row, until the var exists.
+        condition: { expr: 'buysRemaining >= 1' },
         effects: [
           { op: 'createCard', defId: foodPool, to: 'library', count: 10, position: 'random' },
           { op: 'shuffle', zone: 'library' },
@@ -652,7 +649,7 @@ export const cards: CardDefinition[] = [
         maxPerTurn: 1,
       },
     ],
-    text: 'At end of turn, if you used no Buys, shuffle 10 random Foods into your Library.',
+    text: 'At end of turn, if you still have a Buy left, shuffle 10 random Foods into your Library.',
     flavor: 'It refills while you are looking at it.',
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
@@ -867,8 +864,22 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       {
+        // A real comparison. `selfCounter - 4` was truthy everywhere except at
+        // exactly 4, so the payout fired from the first play. The gate reads the
+        // `counter` key the trigger below keeps in step with the Plague Token,
+        // because a bare `selfCounter` is the SUM of every counter — including
+        // the `playCount` that `playCard` writes before effects run.
+        //
+        // `counter` therefore means "times THIS card was discarded", which is
+        // the number the printed line shows. A Plague Token dealt from outside
+        // (plague.ts plagues cards sitting in a GY) lands on the `plague` key
+        // and cannot reach the gate: no expression reads a named counter other
+        // than counter/uses/charges, and a `{self:true}` selector short-circuits
+        // in selectInstancesWith before any `counter` filter is read. So the
+        // text prints {counter} — the number that actually gates — rather than
+        // {plague}, which can drift above it.
         op: 'conditional',
-        if: { expr: 'selfCounter - 4' },
+        if: { expr: 'selfCounter >= 5' },
         then: [
           { op: 'createCard', defId: 'jlore', to: 'gy', count: 1 },
           { op: 'gain', stat: 'vp', amount: 3 },
@@ -880,10 +891,13 @@ export const cards: CardDefinition[] = [
     triggers: [
       {
         on: 'onDiscard',
-        effects: [{ op: 'plague', target: { self: true }, amount: 1 }],
+        effects: [
+          { op: 'plague', target: { self: true }, amount: 1 },
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+        ],
       },
     ],
-    text: 'When discarded, gain a Plague Token. ({plague} so far.) Active only at 5+ tokens: add a Jlore to your GY, +3 VP, +1 Action, +1 Card.',
+    text: 'When discarded, gain a Plague Token. Active only after 5 discards ({counter} so far): add a Jlore to your GY, +3 VP, +1 Action, +1 Card.',
     flavor: 'It has been ticking for a while now.',
     complexity: 'T4',
     subsystems: ['S-PLAGUE', 'S-PERSIST'],

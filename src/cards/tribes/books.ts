@@ -247,7 +247,12 @@ export const cards: CardDefinition[] = [
     keywords: ['Temporary'],
     stats: { actions: 1 },
     effects: [
-      { op: 'discard', target: { who: 'eachPlayer', zone: 'hand', count: 2, pick: 'random' } },
+      // `count` is applied to the pooled candidate list rather than per player,
+      // so one `eachPlayer` node discards 2 cards in total. Split in two, you
+      // always lose 2 yourself and the opponents lose 2 between them; exactly 2
+      // each needs a per-player count in the selector.
+      { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'random' } },
+      { op: 'discard', target: { who: 'eachOpponent', zone: 'hand', count: 2, pick: 'random' } },
       { op: 'createCard', defId: 'felinor', to: 'hand', who: 'eachPlayer', count: 2 },
     ],
     triggers: [],
@@ -269,6 +274,11 @@ export const cards: CardDefinition[] = [
     keywords: ['Temporary'],
     stats: { actions: 1 },
     effects: [
+      // A.14 also prints ‘when trashed, add an original copy to their hand’ on
+      // the marked cards. A keyword is the only rider an instance can carry —
+      // triggers are read off the definition — so that half is unimplemented,
+      // and `text` says only what the card actually does rather than promising
+      // it.
       {
         op: 'setKeyword',
         target: {
@@ -381,12 +391,16 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'createCard', defId: bookPool, to: 'aside', count: { expr: 'floor(handSize / 2)' } },
-      { op: 'trash', target: { zone: 'hand' } },
-      { op: 'moveTo', target: { zone: 'aside', filter: { type: 'Book' } }, zone: 'hand' },
+      // The Books are dealt straight into the hand — `count` is evaluated
+      // before anything moves, so `handSize` is still the hand about to burn —
+      // and the trash then spares them. Parking them in `aside` loses them:
+      // createCard gives an unowned zone no owner and nothing can select them
+      // back out.
+      { op: 'createCard', defId: bookPool, to: 'hand', count: { expr: 'floor(handSize / 2)' } },
+      { op: 'trash', target: { zone: 'hand', filter: { not: { type: 'Book' } } } },
     ],
     triggers: [],
-    text: '+1 Action. Trash your hand, then add X Books to your hand, X = cards trashed / 2.',
+    text: '+1 Action. Add X Books to your hand, X = half your hand size rounded down, then trash every non-Book card in your hand.',
     flavor: 'He woke up holding half a library.',
     complexity: 'T2',
     subsystems: ['S-TOKEN'],

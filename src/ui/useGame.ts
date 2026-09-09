@@ -60,7 +60,9 @@ export function defaultConfig(playerCount: number, patch?: Partial<MatchConfig>)
   const base: MatchConfig = {
     playerCount,
     draftPileCount: 10,
-    anomalyChance: 0.15,
+    // Gameplay doc 8.1: 30%. Was 0.15, so real games rolled anomalies at half
+    // the rate the sim measured balance at.
+    anomalyChance: 0.3,
     winCondition: {
       kind: 'standard',
       emptyPileFraction: 0.4,
@@ -68,7 +70,9 @@ export function defaultConfig(playerCount: number, patch?: Partial<MatchConfig>)
       x: null,
     },
     pileSizeScale: 1,
-    effectNodeBudget: 2000,
+    // Gameplay doc 12.2: 200. Was 2000, so the shipped game ran a cap ten times
+    // looser than the one the docs and the sim describe.
+    effectNodeBudget: 200,
     recursionDepth: 8,
     turnSeconds: DEFAULT_TURN_SECONDS,
     seedCodexWithCommons: true,

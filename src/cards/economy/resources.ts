@@ -76,40 +76,33 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1, money: 5 },
     effects: [],
     triggers: [
-      {
-        on: 'startOfTurn',
-        zones: ['shop'],
-        effects: [
-          {
-            op: 'forEach',
-            over: { who: 'self', zone: 'hand', filter: { type: 'Action', cost: { lte: 1 } } },
-            effects: [
-              {
-                op: 'modifyCost',
-                scope: 'pile',
-                target: { shop: 'draft', filter: { defId: 'blood_diamond_cutter' } },
-                delta: -2,
-                floor: 0,
-                duration: 'turn',
-              },
-            ],
-          },
-        ],
-      },
+      // A shop pile never receives startOfTurn, so the discount has to be paid
+      // back at the moment of purchase instead of shaved off the price: buy()
+      // debits the price first (core/buy.ts) and only then fires onBuy, so no
+      // trigger on this card can reach the price it was bought at. The refund
+      // is the same arithmetic one step later — the doc row's "reduce cost by
+      // (2) each" now reads "refund (2) each", and nothing here touches a cost
+      // modifier any more, so this card is no longer an S-COSTMOD card.
       {
         on: 'onBuy',
         effects: [
           {
-            op: 'trash',
-            target: { who: 'self', zone: 'hand', filter: { type: 'Action', cost: { lte: 1 } } },
+            op: 'selectCards',
+            from: { who: 'self', zone: 'hand', filter: { type: 'Action', cost: { lte: 1 } } },
+            min: 0,
+            max: 99,
+            then: [
+              { op: 'trash', target: { self: true } },
+              { op: 'gain', stat: 'money', amount: 2 },
+            ],
           },
         ],
       },
     ],
-    text: 'Trash Actions costing (1) or less from your hand to reduce this card’s cost by (2) each. +1 Action, +5 Money.',
+    text: 'When you buy this you may trash any number of Actions costing (1) or less from your hand; each one refunds (2) Money. +1 Action, +5 Money.',
     flavor: 'A steady hand and a cheap conscience.',
     complexity: 'T3',
-    subsystems: ['S-COSTMOD'],
+    subsystems: ['S-CORE'],
     shop: 'draft',
     art: { key: 'blood_diamond_cutter', status: 'placeholder', anim: 'trash' },
   },
@@ -124,12 +117,20 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // gainCard takes one card per matching pile, and there is exactly one
+      // Copper pile — so visit it three times rather than asking for three.
       {
-        op: 'gainCard',
-        from: { shop: 'resource', filter: { defId: 'copper' } },
-        to: 'hand',
-        count: 3,
-        free: true,
+        op: 'repeat',
+        times: 3,
+        effects: [
+          {
+            op: 'gainCard',
+            from: { shop: 'resource', filter: { defId: 'copper' } },
+            to: 'hand',
+            count: 1,
+            free: true,
+          },
+        ],
       },
     ],
     triggers: [],
@@ -154,7 +155,9 @@ export const cards: CardDefinition[] = [
       {
         op: 'transform',
         target: { who: 'self', zone: 'hand', filter: { defId: 'copper' }, count: 1, pick: 'choose' },
-        into: 'upgrade',
+        // `upgrade` resolves as "a random card costing one more", which can
+        // never be a Silver. Name the rung.
+        into: 'silver',
       },
     ],
     triggers: [],
@@ -176,14 +179,92 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // The ladder is spelled out rung by rung: `into:'upgrade'` resolves as a
+      // random card costing one more, which leaves the ladder entirely.
+      //
+      // opChoose builds its prompt from every option unconditionally — it never
+      // hides a rung the player cannot take — and auto-resolve (defaultKeys
+      // ['0']) and the sim bot both take option 0. So option 0 is the one that
+      // always lands: it upgrades the best rung actually in hand. The three
+      // named rungs stay for a player who wants a particular one.
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'hand', filter: { type: 'Resource' }, count: 1, pick: 'choose' },
-        into: 'upgrade',
+        op: 'choose',
+        options: [
+          {
+            label: 'Upgrade the best rung you hold',
+            effects: [
+              {
+                op: 'conditional',
+                if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'gold' } }, atLeast: 1 } },
+                then: [
+                  {
+                    op: 'transform',
+                    target: { who: 'self', zone: 'hand', filter: { defId: 'gold' }, count: 1, pick: 'choose' },
+                    into: 'diamond',
+                  },
+                ],
+                else: [
+                  {
+                    op: 'conditional',
+                    if: {
+                      has: { target: { who: 'self', zone: 'hand', filter: { defId: 'silver' } }, atLeast: 1 },
+                    },
+                    then: [
+                      {
+                        op: 'transform',
+                        target: { who: 'self', zone: 'hand', filter: { defId: 'silver' }, count: 1, pick: 'choose' },
+                        into: 'gold',
+                      },
+                    ],
+                    // No Gold and no Silver: the Copper rung, which is a no-op
+                    // of its own if the hand holds none of those either.
+                    else: [
+                      {
+                        op: 'transform',
+                        target: { who: 'self', zone: 'hand', filter: { defId: 'copper' }, count: 1, pick: 'choose' },
+                        into: 'silver',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            label: 'Copper → Silver',
+            effects: [
+              {
+                op: 'transform',
+                target: { who: 'self', zone: 'hand', filter: { defId: 'copper' }, count: 1, pick: 'choose' },
+                into: 'silver',
+              },
+            ],
+          },
+          {
+            label: 'Silver → Gold',
+            effects: [
+              {
+                op: 'transform',
+                target: { who: 'self', zone: 'hand', filter: { defId: 'silver' }, count: 1, pick: 'choose' },
+                into: 'gold',
+              },
+            ],
+          },
+          {
+            label: 'Gold → Diamond',
+            effects: [
+              {
+                op: 'transform',
+                target: { who: 'self', zone: 'hand', filter: { defId: 'gold' }, count: 1, pick: 'choose' },
+                into: 'diamond',
+              },
+            ],
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Trash a Resource in your hand and add its upgrade to your hand.',
+    text: 'Trash a Copper, Silver or Gold in your hand and add its upgrade to your hand. Name the rung, or let it take the best one you hold.',
     flavor: 'Copper to Silver to Gold to Diamond. No further.',
     complexity: 'T2',
     subsystems: ['S-CORE'],
@@ -201,19 +282,150 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // Each rung is named outright — `into:'downgrade'` picks a random card
+      // costing one less — and the second copy is bound to the card that was
+      // just melted rather than re-picked out of the hand.
+      //
+      // As on Advanced Refining, opChoose offers every rung whether or not the
+      // hand holds it and auto-resolve takes option 0, so option 0 walks down
+      // to the best rung actually present instead of dudding out.
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'hand', filter: { type: 'Resource' }, count: 1, pick: 'choose' },
-        into: 'downgrade',
-      },
-      {
-        op: 'copyCard',
-        target: { who: 'self', zone: 'hand', filter: { type: 'Resource' }, count: 1, pick: 'cheapest' },
-        to: 'hand',
+        op: 'choose',
+        options: [
+          {
+            label: 'Melt the best rung you hold',
+            effects: [
+              {
+                op: 'conditional',
+                if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } }, atLeast: 1 } },
+                then: [
+                  {
+                    op: 'selectCards',
+                    from: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
+                    min: 1,
+                    max: 1,
+                    then: [
+                      { op: 'transform', target: { self: true }, into: 'gold' },
+                      { op: 'copyCard', target: { self: true }, to: 'hand' },
+                    ],
+                  },
+                ],
+                else: [
+                  {
+                    op: 'conditional',
+                    if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'gold' } }, atLeast: 1 } },
+                    then: [
+                      {
+                        op: 'selectCards',
+                        from: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
+                        min: 1,
+                        max: 1,
+                        then: [
+                          { op: 'transform', target: { self: true }, into: 'silver' },
+                          { op: 'copyCard', target: { self: true }, to: 'hand' },
+                        ],
+                      },
+                    ],
+                    else: [
+                      {
+                        op: 'conditional',
+                        if: {
+                          has: { target: { who: 'self', zone: 'hand', filter: { defId: 'silver' } }, atLeast: 1 },
+                        },
+                        then: [
+                          {
+                            op: 'selectCards',
+                            from: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
+                            min: 1,
+                            max: 1,
+                            then: [
+                              { op: 'transform', target: { self: true }, into: 'copper' },
+                              { op: 'copyCard', target: { self: true }, to: 'hand' },
+                            ],
+                          },
+                        ],
+                        // Bottom of the ladder, and a silent no-op when the
+                        // hand holds no Resource at all.
+                        else: [
+                          {
+                            op: 'selectCards',
+                            from: { who: 'self', zone: 'hand', filter: { defId: 'copper' } },
+                            min: 1,
+                            max: 1,
+                            then: [{ op: 'copyCard', target: { self: true }, to: 'hand' }],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            label: 'Copper → 2 Copper',
+            effects: [
+              {
+                op: 'selectCards',
+                from: { who: 'self', zone: 'hand', filter: { defId: 'copper' } },
+                min: 1,
+                max: 1,
+                // A Copper is the bottom rung and stays a Copper, so it only
+                // gains its second copy.
+                then: [{ op: 'copyCard', target: { self: true }, to: 'hand' }],
+              },
+            ],
+          },
+          {
+            label: 'Silver → 2 Copper',
+            effects: [
+              {
+                op: 'selectCards',
+                from: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
+                min: 1,
+                max: 1,
+                then: [
+                  { op: 'transform', target: { self: true }, into: 'copper' },
+                  { op: 'copyCard', target: { self: true }, to: 'hand' },
+                ],
+              },
+            ],
+          },
+          {
+            label: 'Gold → 2 Silver',
+            effects: [
+              {
+                op: 'selectCards',
+                from: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
+                min: 1,
+                max: 1,
+                then: [
+                  { op: 'transform', target: { self: true }, into: 'silver' },
+                  { op: 'copyCard', target: { self: true }, to: 'hand' },
+                ],
+              },
+            ],
+          },
+          {
+            label: 'Diamond → 2 Gold',
+            effects: [
+              {
+                op: 'selectCards',
+                from: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
+                min: 1,
+                max: 1,
+                then: [
+                  { op: 'transform', target: { self: true }, into: 'gold' },
+                  { op: 'copyCard', target: { self: true }, to: 'hand' },
+                ],
+              },
+            ],
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Trash a Resource in your hand and add 2 copies of its downgrade to your hand. +1 Action.',
+    text: 'Trash a Resource in your hand and add 2 copies of its downgrade to your hand. Name the rung, or let it take the best one you hold. +1 Action.',
     flavor: 'Two worse things beat one better thing. Sometimes.',
     complexity: 'T2',
     subsystems: ['S-CORE'],
@@ -324,22 +536,32 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // Each transformed card walks itself to the GY, so Points cards the
+      // player was already holding stay in hand.
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
-        into: 'tix',
+        op: 'forEach',
+        over: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
+        effects: [
+          { op: 'transform', target: { self: true }, into: 'tix' },
+          { op: 'moveTo', target: { self: true }, zone: 'gy' },
+        ],
       },
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
-        into: 'robux',
+        op: 'forEach',
+        over: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
+        effects: [
+          { op: 'transform', target: { self: true }, into: 'robux' },
+          { op: 'moveTo', target: { self: true }, zone: 'gy' },
+        ],
       },
       {
-        op: 'transform',
-        target: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
-        into: 'jlore',
+        op: 'forEach',
+        over: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
+        effects: [
+          { op: 'transform', target: { self: true }, into: 'jlore' },
+          { op: 'moveTo', target: { self: true }, zone: 'gy' },
+        ],
       },
-      { op: 'moveTo', target: { who: 'self', zone: 'hand', filter: { type: 'Points' } }, zone: 'gy' },
     ],
     triggers: [],
     text: 'Turn each Silver into a Tix, each Gold into a Robux and each Diamond into a Jlore, then move them from your hand to your GY.',
@@ -404,15 +626,32 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // Stage the four cards aside first: a filtered library selector matches
+      // before it counts, so it would tutor Resources off the bottom and then
+      // discard four cards nobody ever saw.
       { op: 'reveal', target: { who: 'self', zone: 'library', count: 4, pick: 'top' } },
       {
         op: 'moveTo',
-        target: { who: 'self', zone: 'library', count: 4, pick: 'top', filter: { type: 'Resource' } },
+        target: { who: 'self', zone: 'library', count: 4, pick: 'top' },
+        zone: 'aside',
+      },
+      // `aside` is ONE shared staging pile per player and nothing empties it at
+      // end of turn, so a Hand Box's stored hand — parked there by Save for
+      // Later / Repackage and tagged with the `boxed` counter — is sitting in
+      // it too. Both sweeps skip anything boxed, or this card would empty the
+      // box into hand and GY on its way past.
+      {
+        op: 'moveTo',
+        target: {
+          who: 'self',
+          zone: 'aside',
+          filter: { type: 'Resource', not: { counter: { key: 'boxed', gte: 1 } } },
+        },
         zone: 'hand',
       },
       {
         op: 'moveTo',
-        target: { who: 'self', zone: 'library', count: 4, pick: 'top' },
+        target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
         zone: 'gy',
       },
     ],
@@ -489,7 +728,9 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Take what is theirs',
-        then: [{ op: 'copyCard', target: { self: true }, to: 'hand', who: 'self' }],
+        // An empty `then` is the default "the discovered card enters your
+        // hand". A `then` cannot say it: {self:true} there is this card.
+        then: [],
       },
     ],
     triggers: [],
@@ -513,9 +754,11 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'copyCard',
+        // Their play area is emptied into the GY at the end of their turn, so
+        // by the time this resolves the card they last played is sitting there.
         target: {
           who: 'chosenOpponent',
-          zone: 'play',
+          zone: 'gy',
           filter: { type: 'Resource' },
           count: 1,
           pick: 'lastPlayed',
@@ -557,16 +800,21 @@ export const cards: CardDefinition[] = [
           },
         },
         then: [
+          // moveTo cannot change an owner, so a plain move just shuffles the
+          // card inside their own hand. Copy it to yours, then trash theirs.
           {
-            op: 'moveTo',
-            target: {
+            op: 'forEach',
+            over: {
               who: 'chosenOpponent',
               zone: 'hand',
               filter: { type: 'Resource' },
               count: 1,
               pick: 'random',
             },
-            zone: 'hand',
+            effects: [
+              { op: 'copyCard', target: { self: true }, to: 'hand', who: 'self' },
+              { op: 'trash', target: { self: true } },
+            ],
           },
         ],
         else: [{ op: 'createCard', defId: 'silver', to: 'gy' }],
@@ -597,7 +845,9 @@ export const cards: CardDefinition[] = [
     stats: { money: 3, actions: 1 },
     effects: [
       { op: 'lockPile', target: { shop: 'all', excludeJlore: true }, duration: 'turn' },
-      { op: 'unlockPile', target: { shop: 'all', pick: 'choose' } },
+      // Without a count the "choose" branch returns every pile and never
+      // prompts, which would unlock everything it just locked.
+      { op: 'unlockPile', target: { shop: 'all', pick: 'choose', count: 1, excludeJlore: true } },
     ],
     triggers: [],
     text: '+3 Money, +1 Action. Lock every pile but one of your choice until end of turn.',

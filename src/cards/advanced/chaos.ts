@@ -55,7 +55,11 @@ const branches: { weight: number; effects: EffectNode[]; displayAs?: string }[] 
   // 6 — Medium
   {
     weight: 5,
-    effects: [{ op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand', count: 3, pick: 'random' }, zone: 'hand' }],
+    // `who` on a moveTo names the DESTINATION owner. Without it the three cards
+    // went back into the opponent's own hand and the branch was a no-op.
+    effects: [
+      { op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand', count: 3, pick: 'random' }, zone: 'hand', who: 'self' },
+    ],
     displayAs: "Steal 3 cards from an opponent's hand.",
   },
   // 7 — Medium
@@ -203,7 +207,10 @@ const branches: { weight: number; effects: EffectNode[]; displayAs?: string }[] 
       { op: 'createCard', defId: 'call_to_chaos', to: 'hand', count: 1, keywords: ['Flimsy'] },
       { op: 'playCard', target: { who: 'self', zone: 'hand', filter: { defId: 'call_to_chaos' }, count: 1 } },
     ],
-    displayAs: 'Discover another Call to Chaos effect and cast it.',
+    // The doc row asks for a Discover among Chaos effects, which needs a way to
+    // offer branches as prompt options that {op:'random'} does not have. The
+    // roll is what actually happens, so the printed line says so.
+    displayAs: 'Cast another Call to Chaos effect.',
   },
   // 28 — High
   { weight: 9, effects: [{ op: 'gain', stat: 'prophet', amount: 3 }], displayAs: '+3 Prophet.' },

@@ -23,7 +23,13 @@ import type {
 } from '@engine/types';
 import { bigActionCost, effectiveStats, elementMultiplierFor, hasKeyword } from '@engine/systems';
 import { appendLog } from './log.js';
-import { makeContext, fireInstanceTriggers, fireOwnedTriggers, runEffects } from './triggers.js';
+import {
+  makeContext,
+  fireFieldTriggers,
+  fireInstanceTriggers,
+  fireOwnedTriggers,
+  runEffects,
+} from './triggers.js';
 import { defOfInstance, drawCards, moveInstance, safeDef, trashInstance } from './zones.js';
 
 export interface PlayOptions {
@@ -280,8 +286,10 @@ export function playCard(
     if (host) host.extraEffects.push(...def.effects);
   }
 
-  // 7. onPlay triggers on the card itself, then table-wide onOpponentPlay.
+  // 7. onPlay triggers on the card itself and on the Field (Blessed by Raza
+  // refreshes on every Action), then table-wide onOpponentPlay.
   s = fireInstanceTriggers(s, 'onPlay', player, iid, depth);
+  s = fireFieldTriggers(s, 'onPlay', player, depth);
   for (const other of s.playerOrder) {
     if (other === player) continue;
     s = fireOwnedTriggers(s, 'onOpponentPlay', other, depth);

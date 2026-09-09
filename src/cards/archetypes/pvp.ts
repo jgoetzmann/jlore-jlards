@@ -4,9 +4,30 @@
  * Slice S7 (cards-archetypes).
  *
  * Notes on shapes used here:
- *  - "steal" that means "add a copy" is `copyCard`; "steal" that really removes
- *    the card from its owner is `moveTo`. The source doc is inconsistent card to
- *    card, so each one was read individually.
+ *  - "steal" that means "add a copy" is `copyCard`. A steal that really takes
+ *    the card off its owner is `moveTo` with a `who`: `who` names the owner the
+ *    card ENDS UP with, so `{op:'moveTo', target:{who:'eachOpponent', ...},
+ *    zone:'gy', who:'self'}` moves a card across the table. Without a `who` the
+ *    card keeps its owner and lands back in the zone of the player you took it
+ *    from. Where the doc destroys the card rather than taking it, the shape
+ *    stays `copyCard` + `trash`. The source doc is inconsistent card to card,
+ *    so each one was read individually.
+ *  - `count` on a `who:'eachOpponent'` / `who:'eachPlayer'` selector is a
+ *    table-wide total over the merged candidate list, not a per-player count.
+ *    `recruit` is the one op that loops the players itself, so "each opponent
+ *    loses one card" is spelled with recruit and a staging pass through
+ *    `aside`. Recruit shuffles its source zone afterwards (SB-2 / B42) — that
+ *    is the rule for reaching into a hidden Library, not a rider these cards
+ *    print.
+ *  - `aside` is ONE staging pile per player, and a Hand Box parks its stored
+ *    cards there across turns carrying the `boxed` counter. Every read of
+ *    `aside` below is staging for the length of a single effect, so each one
+ *    excludes stored cards with `filter:{not:{counter:{key:'boxed',gte:1}}}`.
+ *    Without it War! antes somebody's stored card and Mother Witch turns one
+ *    into a Cursed Pig.
+ *  - A Discover `pool` ignores its own `who` (zoneDefIds walks every opponent),
+ *    so an 'opponentLibrary' / 'opponentHand' pool offers cards from the whole
+ *    table and whatever acts on the pick has to span the whole table too.
  *  - Hired Shrimp's `wordCount` is a frozen build-time constant. Its rules text
  *    length is never measured at runtime.
  */
@@ -132,8 +153,19 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card in an opponent’s Library.',
+        // '$discovered' is the card the player actually picked. A `{pool:...}`
+        // here is re-sampled by resolveDefIdSpec, so the player could be shown
+        // A/B/C and handed D. The copy is minted at the bottom of the Library
+        // and then moved to the top, which is the only handle on it: `pick`
+        // 'bottom' is the newest card of that name in the pile.
         then: [
-          { op: 'createCard', defId: { pool: { scope: 'opponentLibrary', who: 'chosenOpponent' } }, to: 'library', position: 'top' },
+          {
+            op: 'copyCard',
+            target: { who: 'eachOpponent', zone: 'library', filter: { defId: '$discovered' }, count: 1 },
+            to: 'library',
+            who: 'self',
+          },
+          { op: 'moveTo', target: { zone: 'library', filter: { defId: '$discovered' }, count: 1, pick: 'bottom' }, zone: 'library', position: 'top' },
         ],
       },
     ],
@@ -156,6 +188,9 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // The two Discovers are siblings, not nested: '$discovered' is
+      // substituted across a whole `then` tree, so a Discover inside another
+      // Discover's `then` would see the outer pick in both places.
       {
         op: 'discover',
         pool: { scope: 'library', who: 'self' },
@@ -163,19 +198,49 @@ export const cards: CardDefinition[] = [
         pick: 1,
         prompt: 'Discover a card in your Library to trade away.',
         then: [
-          { op: 'moveTo', target: { zone: 'library', count: 1, pick: 'choose' }, zone: 'aside' },
           {
-            op: 'discover',
-            pool: { scope: 'opponentLibrary', who: 'chosenOpponent' },
-            count: 3,
-            pick: 1,
-            prompt: 'Discover a card in an opponent’s Library to take.',
-            then: [
-              { op: 'moveTo', target: { who: 'chosenOpponent', zone: 'library', count: 1, pick: 'choose' }, zone: 'library', position: 'random' },
-              { op: 'moveTo', target: { zone: 'aside' }, zone: 'library', position: 'random' },
+            op: 'forEach',
+            over: { zone: 'library', filter: { defId: '$discovered' }, count: 1 },
+            effects: [{ op: 'moveTo', target: { self: true }, zone: 'aside' }],
+          },
+        ],
+      },
+      {
+        op: 'discover',
+        pool: { scope: 'opponentLibrary', who: 'chosenOpponent' },
+        count: 3,
+        pick: 1,
+        prompt: 'Discover a card in an opponent’s Library to take.',
+        // The pool ignores its `who` and offers cards out of every opponent's
+        // Library, so the take spans every opponent too — bound to one seat it
+        // matched nothing whenever the pick belonged to somebody else, and the
+        // give-half fired anyway and posted your staged card away for free.
+        // Both halves are `moveTo` with a destination `who`, so the swap moves
+        // the real cards, and the give sits inside the take: nothing leaves
+        // your deck unless a card came back for it.
+        then: [
+          {
+            op: 'forEach',
+            over: { who: 'eachOpponent', zone: 'library', filter: { defId: '$discovered' }, count: 1 },
+            effects: [
+              { op: 'moveTo', target: { self: true }, zone: 'library', who: 'self' },
+              {
+                op: 'moveTo',
+                target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+                zone: 'library',
+                who: 'chosenOpponent',
+              },
               { op: 'shuffle', zone: 'library' },
               { op: 'shuffle', zone: 'library', who: 'chosenOpponent' },
             ],
+          },
+          // The card was gone by the time this resolved. Put yours back at an
+          // unknown depth rather than stranding it in `aside` for the match.
+          {
+            op: 'moveTo',
+            target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+            zone: 'library',
+            position: 'random',
           },
         ],
       },
@@ -199,15 +264,23 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'chosenOpponent', to: 'hand' },
+      // opRecruit moves a card inside its own owner's zones, so recruiting from
+      // an opponent's Library only tutors it into *their* hand. The borrow is a
+      // Temporary copy in your hand while the original goes to their GY, which
+      // is where the printed card leaves it anyway.
       {
-        op: 'delayed',
-        when: 'endOfTurn',
-        effects: [{ op: 'moveTo', target: { zone: 'hand', filter: { type: 'Action' }, count: 1, pick: 'lastPlayed' }, zone: 'gy' }],
+        op: 'forEach',
+        over: { who: 'chosenOpponent', zone: 'library', filter: { type: 'Action' }, count: 1 },
+        effects: [
+          { op: 'copyCard', target: { self: true }, to: 'hand', who: 'self', keywords: ['Temporary'] },
+          { op: 'moveTo', target: { self: true }, zone: 'gy' },
+        ],
       },
+      // B42 / SB-34: a tutor out of a hidden library shuffles it afterwards.
+      { op: 'shuffle', zone: 'library', who: 'chosenOpponent' },
     ],
     triggers: [],
-    text: 'Recruit an Action from an opponent’s Library into your hand. At end of turn it returns to their GY.',
+    text: 'Take a Temporary copy of an Action from an opponent’s Library into your hand. The original goes to their GY.',
     flavor: 'Borrowed, loudly.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -225,13 +298,24 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'reveal', target: { who: 'eachOpponent', zone: 'library', count: 1, pick: 'top' } },
+      // recruit stages one top card per opponent (a `count` on the merged
+      // selector would reveal one card in total). Staging is also what keeps
+      // the choice to the revealed cards: SB-34 keeps the rest of a Library
+      // hidden, and choosing straight out of `zone:'library'` would list it.
+      { op: 'recruit', zone: 'library', count: 1, who: 'eachOpponent', to: 'aside' },
+      { op: 'reveal', target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } } },
       {
-        op: 'copyCard',
-        target: { who: 'eachOpponent', zone: 'library', count: 1, pick: 'choose' },
-        to: 'hand',
-        who: 'self',
-        keywords: ['Temporary'],
+        op: 'selectCards',
+        from: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+        min: 1,
+        max: 1,
+        then: [{ op: 'copyCard', target: { self: true }, to: 'hand', who: 'self', keywords: ['Temporary'] }],
+      },
+      {
+        op: 'moveTo',
+        target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+        zone: 'library',
+        position: 'top',
       },
     ],
     triggers: [],
@@ -253,23 +337,46 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'reveal', target: { zone: 'library', count: 1, pick: 'top' } },
-      { op: 'reveal', target: { who: 'randomOpponent', zone: 'library', count: 1, pick: 'top' } },
+      // Both tops are staged in `aside` so one selector can weigh them against
+      // each other, and so the random opponent is rolled once rather than once
+      // per node.
+      { op: 'moveTo', target: { zone: 'library', count: 1, pick: 'top' }, zone: 'aside' },
+      { op: 'moveTo', target: { who: 'randomOpponent', zone: 'library', count: 1, pick: 'top' }, zone: 'aside' },
+      { op: 'reveal', target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } } },
+      // No expression reads a revealed card's cost, so the comparison is made
+      // by discarding the cheaper of the two: whoever still has a card staged
+      // revealed the dearer one. Equal costs fall to seat order.
+      {
+        op: 'forEach',
+        over: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } }, count: 1, pick: 'cheapest' },
+        effects: [{ op: 'discard', target: { self: true } }],
+      },
       {
         op: 'conditional',
-        if: { expr: 'max(0, countIn(library, topCost) - countIn(opponentLibrary, topCost))' },
+        if: {
+          has: {
+            target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+            atLeast: 1,
+          },
+        },
         then: [
           { op: 'gain', stat: 'money', amount: 2 },
-          { op: 'draw', amount: 1 },
+          {
+            op: 'moveTo',
+            target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+            zone: 'hand',
+          },
         ],
         else: [
-          { op: 'discard', target: { zone: 'library', count: 1, pick: 'top' } },
-          { op: 'discard', target: { who: 'randomOpponent', zone: 'library', count: 1, pick: 'top' } },
+          {
+            op: 'discard',
+            target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+          },
         ],
       },
     ],
     triggers: [],
-    text: '+1 Action. Reveal your top card and a random opponent’s. If yours costs more, +2 Money and draw it. Otherwise discard both.',
+    text: '+1 Action. Reveal your top card and a random opponent’s and discard the cheaper. If yours cost more, take it into your hand and +2 Money. Otherwise both are discarded.',
     flavor: 'Bid blind, win loud.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -328,12 +435,26 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card in an opponent’s hand to take.',
-        then: [{ op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand', count: 1, pick: 'choose' }, zone: 'gy' }],
+        // The pick is bound through '$discovered'; without it the steal raised
+        // a second prompt over the whole hand. The pool spans every opponent's
+        // hand, so the steal does too, and the card really changes hands: a
+        // `moveTo` with `who:'self'`. The Diamond is paid from inside the take
+        // rather than beside it, so a pick that is no longer there when this
+        // resolves no longer buys an opponent a free Diamond.
+        then: [
+          {
+            op: 'forEach',
+            over: { who: 'eachOpponent', zone: 'hand', filter: { defId: '$discovered' }, count: 1 },
+            effects: [
+              { op: 'moveTo', target: { self: true }, zone: 'gy', who: 'self' },
+              { op: 'createCard', defId: 'diamond', to: 'gy', who: 'chosenOpponent' },
+            ],
+          },
+        ],
       },
-      { op: 'createCard', defId: 'diamond', to: 'gy', who: 'chosenOpponent' },
     ],
     triggers: [],
-    text: 'Flimsy. Discover a card in an opponent’s hand and take it. Give that opponent a Diamond.',
+    text: 'Flimsy. Discover a card in an opponent’s hand and take it into your GY. Give an opponent a Diamond.',
     flavor: 'Everyone left satisfied. One of them was wrong.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -351,11 +472,14 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
-      { op: 'moveTo', target: { who: 'chosenOpponent', zone: 'hand' }, zone: 'gy' },
+      // moveTo would have emptied the hand into that opponent's own GY. The
+      // hand really changes hands: copy it into yours, then trash theirs.
+      { op: 'copyCard', target: { who: 'chosenOpponent', zone: 'hand' }, to: 'gy', who: 'self' },
+      { op: 'trash', target: { who: 'chosenOpponent', zone: 'hand' } },
       { op: 'createCard', defId: 'diamond', to: 'gy', who: 'chosenOpponent', count: 5 },
     ],
     triggers: [],
-    text: 'Flimsy. Take an opponent’s entire hand. Give that opponent 5 Diamonds.',
+    text: 'Flimsy. Take an opponent’s entire hand into your GY. Give that opponent 5 Diamonds.',
     flavor: 'A settlement, technically.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -379,7 +503,9 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a card in an opponent’s hand to trash.',
-        then: [{ op: 'trash', target: { who: 'chosenOpponent', zone: 'hand', count: 1, pick: 'choose' } }],
+        // Bound to the pick: an unbound `pick:'choose'` re-prompted over the
+        // opponent's entire hand, which is strictly more than the card prints.
+        then: [{ op: 'trash', target: { who: 'eachOpponent', zone: 'hand', filter: { defId: '$discovered' }, count: 1 } }],
       },
     ],
     triggers: [],
@@ -549,17 +675,27 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // A Discover pool ignores `who` and its prompt always goes to the player
+      // resolving the card, so the printed Discover offered *your* hand to
+      // *you*. recruit is the one op that loops the players itself, so each
+      // opponent loses a card of their own rather than one between them. Its
+      // shuffle-after (SB-2) lands on a hand here, whose order zones.ts calls
+      // meaningful (B13) — no other op takes one card per player, so that is
+      // the price of the loop until one exists.
+      { op: 'recruit', zone: 'hand', count: 1, who: 'eachOpponent', to: 'aside' },
       {
-        op: 'discover',
-        pool: { scope: 'hand', who: 'eachOpponent' },
-        count: 3,
-        pick: 1,
-        prompt: 'Discover a card in your hand to turn into a Cursed Pig.',
-        then: [{ op: 'transform', target: { who: 'eachOpponent', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' }, into: 'cursed_pig' }],
+        op: 'transform',
+        target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+        into: 'cursed_pig',
+      },
+      {
+        op: 'moveTo',
+        target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+        zone: 'hand',
       },
     ],
     triggers: [],
-    text: 'Each opponent Discovers a card in their hand and turns it into a Cursed Pig.',
+    text: 'Each opponent turns a card in their hand into a Cursed Pig.',
     flavor: 'She taught the baby everything.',
     complexity: 'T3',
     subsystems: ['S-PVP', 'S-TOKEN'],
@@ -664,7 +800,7 @@ export const cards: CardDefinition[] = [
       { op: 'trash', target: { who: 'eachOpponent', zone: 'hand', filter: { name: 'wordsFewerThan:16' } } },
     ],
     triggers: [],
-    text: 'Trash all cards in opponents hands with fewer words than this card has words.',
+    text: 'Trash every card in each opponent’s hand that has fewer words in its text than this.',
     flavor: 'Sixteen. Count them.',
     complexity: 'T4',
     subsystems: ['S-PVP'],
@@ -718,8 +854,9 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'reveal', target: { who: 'eachOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' } },
-      { op: 'copyCard', target: { who: 'eachOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' }, to: 'gy', who: 'self' },
+      // One opponent's graveyard, not every graveyard merged into one pile.
+      { op: 'reveal', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' } },
+      { op: 'copyCard', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' }, to: 'gy', who: 'self' },
     ],
     triggers: [],
     text: 'Add a copy of the last card an opponent discarded to your GY. If several, take the most expensive. You see it first.',
@@ -786,7 +923,17 @@ export const cards: CardDefinition[] = [
         op: 'forEach',
         over: { zone: ['library', 'hand', 'gy', 'play'], filter: { defId: 'grubbing_goblin' } },
         effects: [
-          { op: 'moveTo', target: { who: 'randomOpponent', zone: ['hand', 'gy'], filter: { defId: 'gold' }, count: 1, pick: 'random' }, zone: 'gy' },
+          // The inner forEach picks the Gold once and binds it, so the copy and
+          // the trash are the same card. A plain moveTo would have shuffled the
+          // Gold between the victim's own zones and never reached your GY.
+          {
+            op: 'forEach',
+            over: { who: 'randomOpponent', zone: ['hand', 'gy'], filter: { defId: 'gold' }, count: 1, pick: 'random' },
+            effects: [
+              { op: 'copyCard', target: { self: true }, to: 'gy', who: 'self' },
+              { op: 'trash', target: { self: true } },
+            ],
+          },
         ],
       },
     ],
@@ -809,25 +956,76 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'reveal', target: { who: 'eachPlayer', zone: 'library', count: 1, pick: 'top' } },
-      { op: 'moveTo', target: { who: 'eachPlayer', zone: 'library', count: 1, pick: 'top' }, zone: 'aside' },
+      // The ante is dealt by recruit, the one op that takes `count` from each
+      // player: a `who:'eachPlayer'` selector with `count:1` moves one card in
+      // total, which is what left every other player's bet out of the pot.
+      { op: 'recruit', zone: 'library', count: 1, who: 'eachPlayer', to: 'aside' },
+      { op: 'reveal', target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } } },
       {
         op: 'conditional',
-        if: { expr: 'max(0, countIn(aside, myCost) - countIn(aside, bestOpponentCost))' },
-        then: [{ op: 'moveTo', target: { zone: 'aside' }, zone: 'gy' }],
-        else: [
-          { op: 'moveTo', target: { who: 'eachPlayer', zone: 'library', count: 3, pick: 'top' }, zone: 'aside' },
+        if: {
+          has: {
+            target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+            atLeast: 1,
+          },
+        },
+        then: [
+          // Nothing reads a revealed card's cost, so the dearest bet is sent to
+          // its owner's GY and the pot is awarded by who is left holding one:
+          // an empty aside pile of your own means yours was the dearest.
+          {
+            op: 'forEach',
+            over: {
+              who: 'eachPlayer',
+              zone: 'aside',
+              filter: { not: { counter: { key: 'boxed', gte: 1 } } },
+              count: 1,
+              pick: 'mostExpensive',
+            },
+            effects: [{ op: 'moveTo', target: { self: true }, zone: 'gy' }],
+          },
           {
             op: 'conditional',
-            if: { expr: 'max(0, countIn(aside, myCost) - countIn(aside, bestOpponentCost))' },
-            then: [{ op: 'moveTo', target: { zone: 'aside' }, zone: 'gy' }],
-            else: [{ op: 'moveTo', target: { zone: 'aside' }, zone: 'gy', position: 'bottom' }],
+            if: {
+              not: {
+                has: {
+                  target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+                  atLeast: 1,
+                },
+              },
+            },
+            // You won the pot, so it really changes hands: `who:'self'` on the
+            // moveTo is the owner the bets end up with.
+            then: [
+              {
+                op: 'moveTo',
+                target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+                zone: 'gy',
+                who: 'self',
+              },
+            ],
+            // Somebody else won it. Every bet goes home rather than sitting in
+            // `aside` for the rest of the match.
+            else: [
+              {
+                op: 'moveTo',
+                target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+                zone: 'gy',
+              },
+            ],
+          },
+        ],
+        else: [
+          {
+            op: 'moveTo',
+            target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
+            zone: 'gy',
           },
         ],
       },
     ],
     triggers: [],
-    text: 'Every player reveals their top card and casts it in. The highest cost takes all of them. On a tie, each tied player bets 3 more cards and compares again.',
+    text: 'Every player antes the top card of their Library. The dearest card wins: if it is yours, the whole pot joins your GY. Otherwise every card goes to its owner’s GY.',
     flavor: 'War. War never changes the shuffle.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -864,7 +1062,9 @@ export const cards: CardDefinition[] = [
     keywords: ['PlayOnBuy', 'Flimsy'],
     stats: {},
     effects: [
-      { op: 'incDoomsday', amount: 3 },
+      // The row prints a three-turn fuse and nothing about the shared Doomsday
+      // Counter; Project: Doomsday and Doomsday Button are the cards that move
+      // it. Advancing it 3 here was 30% of an unrelated instant end.
       { op: 'delayed', when: { inTurns: 3 }, effects: [{ op: 'endGame', reason: 'doomsdayClock' }] },
     ],
     triggers: [],
