@@ -235,6 +235,8 @@ export const EXPR_VARS = [
   'selfPlayCount',
   'selfCounter',
   'selfCost',
+  /** What this copy was actually paid for at purchase, not its printed cost. */
+  'selfPricePaid',
   'x',
 ] as const;
 export type ExprVar = (typeof EXPR_VARS)[number];
@@ -465,6 +467,13 @@ export interface NextCardMod {
   grantSubtype?: string;
   /** Which stat `buffTimes`/`nerfTimes` moves. Omitted means a random one. */
   buffStat?: StatKey;
+  /**
+   * Only apply to a card matching this. Without it "the next Resource you play"
+   * can only be written as "the next card you play, if it is a Resource" — the
+   * modifier is spent by whatever comes first. A non-matching card neither
+   * consumes the modifier nor receives it.
+   */
+  filter?: CardFilter;
   /** Effects appended to the next card played. */
   appendEffects?: EffectNode[];
   /** Buff the next card played N times. */

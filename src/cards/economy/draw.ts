@@ -21,6 +21,29 @@ const NOT_STORED: CardFilter = {
   not: { counter: { key: 'boxed', gte: 1 }, not: { type: 'Token' } },
 };
 
+/**
+ * SB-21's ace rule, written as arithmetic for Counting Cards.
+ *
+ * `selfCounter - sumOfDeckCosts` is the hard total: every card turned over is
+ * worth its printed cost, an ace included. `sumOfDeckCosts` reads Library, hand,
+ * GY and play, so a card moved into `aside` drops out of it and the difference
+ * from the snapshot is exactly what has been turned up.
+ *
+ * A (1)-cost card may count as 11 instead of 1 — once, and only while that keeps
+ * the total at 21 or under, which is the standard soft-ace rule: two aces at 11
+ * would already be 22. So the adjustment is a flat +10 gated on "there is at
+ * least one ace" and "the hard total is 11 or less".
+ *
+ * The expression grammar has no conditional, and a comparison only parses at the
+ * top level of an expression, so both gates are written as 0/1 indicators over
+ * integers: `max(0, min(1, n))` is 1 when n >= 1 and 0 when n <= 0. `ccAces` is
+ * the player counter Counting Cards bumps as each ace is turned up, and
+ * `12 - hard >= 1` is exactly `hard + 10 <= 21`.
+ */
+const BLACKJACK_TOTAL =
+  'selfCounter - sumOfDeckCosts' +
+  ' + 10 * max(0, min(1, ccAces)) * max(0, min(1, 12 - (selfCounter - sumOfDeckCosts)))';
+
 export const cards: CardDefinition[] = [
   {
     id: 'rapid_draw',
@@ -247,37 +270,98 @@ export const cards: CardDefinition[] = [
     // the `then` runs once per pick with '$selected' swapped for that pick's
     // defId, so a name filter over the pair is a real same-name test, and the
     // `x == 0` guard makes the pair fire it once rather than once per card.
-    // The doc's "repeat" is not implemented — re-testing the next pair needs a
-    // loop that can break, which the DSL has no way to express.
+    //
+    // A.7's "repeat" is a loop with a break, and {op:'repeat'} always runs its
+    // full count. The break is one cumulative player counter read against the
+    // repeat index: `compassMatch` counts the passes that matched, `x` is the
+    // pass number, so `compassMatch == x` is "every pass so far matched" and a
+    // pass that finds nothing leaves the counter behind, which makes every later
+    // pass a no-op gate. One counter rather than a stop flag plus a per-pass
+    // reset, which is two nodes cheaper a pass and re-entrant the safe way: a
+    // Star Compass played from inside another one's resolution zeroes the
+    // counter, and the outer loop then stops early instead of running on.
+    //
+    // The pair is returned to hand before the fresh draw, so the next pass's
+    // `pick:'bottom'` names the two cards this pass drew and nothing older, and
+    // it goes back in ONE node over the whole staging pile rather than one node
+    // per card — the two cards leave `aside` together or not at all. That
+    // matters because nothing sweeps `aside`: if the per-turn effect-node budget
+    // (200, gameplay doc 12.2) runs out between the two, a card parked there is
+    // out of the deck for the rest of the game. The budget cannot be read from
+    // card data, so the exposure is bounded rather than closed — the ceiling
+    // below is what bounds it.
+    //
+    // That ceiling is 5, and it is real, not decorative: a duplicate-heavy
+    // Library reaches it with cards to spare, so the card prints "up to 5 more
+    // times" the way the Racketeers and Snowball print theirs. Five passes cost
+    // ~52 nodes against the 200 a whole turn gets; the ten it used to run cost
+    // ~113, which is most of a turn's budget spent by one (2)-cost card.
+    //
+    // The draw is not gated on having a full pair left. SB-37 is "draw as many
+    // as possible, then stop, no penalty", so a pass with one card left draws
+    // that card and then stops — the counter is walked back BEFORE the draw, so
+    // `compassMatch == x` fails next pass. Gating the draw instead forfeited the
+    // last card and contradicted the printed +2 Cards.
+    //
+    // The counter is zeroed on the way in, so a second Star Compass in the same
+    // turn does not inherit the first one's tally; the `turn:` prefix clears it
+    // at the start of the turn. That first write is also what creates the key —
+    // an expression naming a counter nobody has written is an unknown
+    // identifier, and a condition reads one of those as false.
     effects: [
-      { op: 'moveTo', target: { who: 'self', zone: 'hand', count: 2, pick: 'bottom' }, zone: 'aside' },
+      { op: 'addCounter', scope: 'player', key: 'turn:compassMatch', amount: { expr: '0 - compassMatch' } },
       {
-        op: 'selectCards',
-        from: { who: 'self', zone: 'aside', filter: NOT_STORED },
-        min: 2,
-        max: 2,
-        then: [
+        op: 'repeat',
+        times: 5,
+        effects: [
           {
             op: 'conditional',
-            if: {
-              all: [
-                { expr: 'x == 0' },
-                {
-                  has: {
-                    target: { who: 'self', zone: 'aside', filter: { defId: '$selected', ...NOT_STORED } },
-                    atLeast: 2,
+            if: { expr: 'compassMatch == x' },
+            then: [
+              { op: 'moveTo', target: { who: 'self', zone: 'hand', count: 2, pick: 'bottom' }, zone: 'aside' },
+              {
+                op: 'selectCards',
+                from: { who: 'self', zone: 'aside', filter: NOT_STORED },
+                min: 2,
+                max: 2,
+                then: [
+                  {
+                    op: 'conditional',
+                    if: {
+                      all: [
+                        { expr: 'x == 0' },
+                        {
+                          has: {
+                            target: { who: 'self', zone: 'aside', filter: { defId: '$selected', ...NOT_STORED } },
+                            atLeast: 2,
+                          },
+                        },
+                      ],
+                    },
+                    then: [{ op: 'addCounter', scope: 'player', key: 'turn:compassMatch', amount: 1 }],
                   },
-                },
-              ],
-            },
-            then: [{ op: 'draw', amount: 2 }],
+                ],
+              },
+              { op: 'moveTo', target: { who: 'self', zone: 'aside', filter: NOT_STORED }, zone: 'hand' },
+              {
+                op: 'conditional',
+                if: { expr: 'compassMatch > x' },
+                then: [
+                  {
+                    op: 'conditional',
+                    if: { expr: 'libraryHeight + gyHeight < 2' },
+                    then: [{ op: 'addCounter', scope: 'player', key: 'turn:compassMatch', amount: -1 }],
+                  },
+                  { op: 'draw', amount: 2 },
+                ],
+              },
+            ],
           },
-          { op: 'moveTo', target: { self: true }, zone: 'hand' },
         ],
       },
     ],
     triggers: [],
-    text: '+2 Cards. If the two cards drawn share a name, +2 Cards.',
+    text: '+2 Cards. If the two cards drawn share a name, +2 Cards and repeat, up to 5 more times.',
     flavor: 'North, north, north again.',
     complexity: 'T2',
     subsystems: ['S-CORE'],
@@ -1176,33 +1260,57 @@ export const cards: CardDefinition[] = [
     // drops out of it and `snapshot - sumOfDeckCosts` is exactly what has been
     // turned over. The old test compared 21 against the whole deck's cost sum,
     // which is far above it, so the hand never busted and nothing accumulated.
-    // The 12-card ceiling keeps an all-(0) deck terminating. The ace rule has no
-    // expression to stand on and is off the text until it does.
+    // The 12-card ceiling keeps an all-(0) deck terminating.
+    //
+    // The ace rule is `BLACKJACK_TOTAL` above. Counting the aces cannot be done
+    // by reading `aside` — `countIn` has no `aside` zone, and the pile is shared
+    // with stored hands anyway — so each one is counted as it is turned up: the
+    // move runs inside a `forEach` bound to the top card of the Library, where
+    // `selfCost` is that card's cost, and a (1) bumps the `ccAces` player
+    // counter. The running-total tests stay outside that binding, because inside
+    // it `selfCounter` would read the turned card rather than this one. Both
+    // ends zero `ccAces` so a second Counting Cards in the same turn starts
+    // clean, and the first write is what creates the key: a counter nobody has
+    // written is an unknown identifier, which reads as 0 in an amount and as
+    // false in a condition.
     effects: [
       { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: 'sumOfDeckCosts' } },
+      { op: 'addCounter', scope: 'player', key: 'turn:ccAces', amount: { expr: '0 - ccAces' } },
       {
         op: 'repeat',
         times: 12,
         effects: [
           {
             op: 'conditional',
-            if: { expr: 'selfCounter - sumOfDeckCosts < 17' },
+            if: { expr: BLACKJACK_TOTAL + ' < 17' },
             then: [
-              { op: 'moveTo', target: { who: 'self', zone: 'library', count: 1, pick: 'top' }, zone: 'aside' },
+              {
+                op: 'forEach',
+                over: { who: 'self', zone: 'library', count: 1, pick: 'top' },
+                effects: [
+                  {
+                    op: 'conditional',
+                    if: { expr: 'selfCost == 1' },
+                    then: [{ op: 'addCounter', scope: 'player', key: 'turn:ccAces', amount: 1 }],
+                  },
+                  { op: 'moveTo', target: { self: true }, zone: 'aside' },
+                ],
+              },
             ],
           },
         ],
       },
       {
         op: 'conditional',
-        if: { expr: 'selfCounter - sumOfDeckCosts <= 21' },
+        if: { expr: BLACKJACK_TOTAL + ' <= 21' },
         then: [{ op: 'playCard', target: { who: 'self', zone: 'aside', filter: NOT_STORED } }],
         else: [{ op: 'moveTo', target: { who: 'self', zone: 'aside', filter: NOT_STORED }, zone: 'gy' }],
       },
       { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: '0 - selfCounter' } },
+      { op: 'addCounter', scope: 'player', key: 'turn:ccAces', amount: { expr: '0 - ccAces' } },
     ],
     triggers: [],
-    text: 'Turn cards off the top of your Library one at a time, adding their costs, until the total reaches 17 or more. At 21 or under, play them all; if you bust, discard them all.',
+    text: 'Turn cards off the top of your Library one at a time, adding their costs — a (1)-cost card counts as 11 or 1, whichever keeps the total at 21 or under — until the total reaches 17 or more. At 21 or under, play them all; if you bust, discard them all.',
     flavor: 'The house is your own Library.',
     complexity: 'T4',
     subsystems: ['S-CORE'],

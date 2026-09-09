@@ -320,7 +320,14 @@ export const cards: CardDefinition[] = [
         when: 'endOfTurn',
         effects: [
           { op: 'trash', target: { zone: 'hand' } },
-          { op: 'trash', target: { who: 'eachOpponent', zone: 'hand', count: 1, pick: 'random' } },
+          // `count` is a TOTAL across everyone `who` reached, so without
+          // `perPlayer` this pooled every opponent's hand and took a single card
+          // from one of them — correct only at two players. `perPlayer` runs the
+          // count-and-pick once per opponent, which is the printed line.
+          {
+            op: 'trash',
+            target: { who: 'eachOpponent', zone: 'hand', count: 1, pick: 'random', perPlayer: true },
+          },
         ],
       },
     ],
@@ -342,7 +349,15 @@ export const cards: CardDefinition[] = [
     rarity: 'token',
     keywords: ['Flimsy'],
     stats: { actions: 2, cards: 1 },
-    effects: [{ op: 'trash', target: { who: 'eachPlayer', zone: 'hand', count: 1, pick: 'cheapest' } }],
+    // Same pooling trap as Distilled Potato: `pick: 'cheapest'` over the union of
+    // every hand trashed one card overall. `perPlayer` resolves the cheapest card
+    // in each player's hand separately.
+    effects: [
+      {
+        op: 'trash',
+        target: { who: 'eachPlayer', zone: 'hand', count: 1, pick: 'cheapest', perPlayer: true },
+      },
+    ],
     triggers: [],
     text: 'Flimsy. +2 Actions, +1 Card. Trash the cheapest card in each player’s hand.',
     flavor: 'Gluten free, in the sense that it is now free of you.',
@@ -631,17 +646,14 @@ export const cards: CardDefinition[] = [
       {
         on: 'endOfTurn',
         zones: ['play', 'hand'],
-        // "Used no Buys" is `buysUsedThisTurn`, which exists on PlayerState
-        // (types.ts) but is not an EXPR_VAR yet, so no expression can read it and
-        // no card node can express the doc's gate. `cardsGainedThisTurn` was not a
-        // stand-in at all — every minted token counts, so a Food deck blocked this
-        // with zero Buys spent, which is nearly every turn. An unspent Buy is the
-        // near-proxy, and it diverges in exactly one case: a card granted an extra
-        // Buy and one was spent. A Prophet-cost purchase is NOT a second divergence
-        // — core/buy.ts skips both `p.buys -= 1` and `p.buysUsedThisTurn += 1` on
-        // that branch (B59), so the real gate would read that turn as "no Buy used"
-        // too. Text below prints the proxy, not the doc row, until the var exists.
-        condition: { expr: 'buysRemaining >= 1' },
+        // The doc gate is "if you used no Buys", which is exactly
+        // `buysUsedThisTurn` — now an EXPR_VAR, filled from PlayerState in
+        // buildVars. The two earlier readings are both gone: `cardsGainedThisTurn`
+        // counted every minted token, so a Food deck blanked this with zero Buys
+        // spent, and `buysRemaining >= 1` diverged on a turn that granted an extra
+        // Buy and spent one. `resetTurnStats` zeroes the counter at the START of a
+        // turn, so it is still live while endOfTurn triggers run.
+        condition: { expr: 'buysUsedThisTurn == 0' },
         effects: [
           { op: 'createCard', defId: foodPool, to: 'library', count: 10, position: 'random' },
           { op: 'shuffle', zone: 'library' },
@@ -649,7 +661,7 @@ export const cards: CardDefinition[] = [
         maxPerTurn: 1,
       },
     ],
-    text: 'At end of turn, if you still have a Buy left, shuffle 10 random Foods into your Library.',
+    text: 'At end of turn, if you used no Buys, shuffle 10 random Foods into your Library.',
     flavor: 'It refills while you are looking at it.',
     complexity: 'T3',
     subsystems: ['S-TOKEN'],

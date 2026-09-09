@@ -246,6 +246,7 @@ export function buildVars(
       }
       vars.selfCounter = sawNamed ? named : counterTotal;
       vars.selfCost = instanceCost(state, sourceIid);
+      vars.selfPricePaid = src.counters['pricePaid'] ?? 0;
     }
   }
 

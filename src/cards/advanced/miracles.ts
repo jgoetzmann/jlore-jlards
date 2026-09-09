@@ -293,16 +293,27 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // The doc row's "(0)-cost" (B.1, Miracle 13) has no home in the data, so
+      // the printed text drops it. `costOverride` prices the PILE, not the card
+      // added to it: three Draft piles would read (0) to every player, through
+      // `pileCost`, `costOf` and every `pick:'cheapest'` pile selector, until
+      // someone happened to play the one card that clears a pile's price (Cloud
+      // Nine — a `modifyCost` carrying neither `delta` nor `setTo`). And no
+      // price is reachable in any case: `lunar_fragment` is a Token marked
+      // notPurchasable, which `canBuyPile` (core/buy.ts) refuses before it ever
+      // reads a price, so the Fragment sits on top of the pile as a blocker
+      // rather than as a free buy. Seeded as printed with no price written; a
+      // per-instance price is engine work. Chron Caché and Supernova
+      // (economy/shop-manip.ts) dropped the same clause for the same reason.
       {
         op: 'addToPileTop',
         target: { shop: 'draft', count: 3, pick: 'random', excludeJlore: true },
         defId: 'lunar_fragment',
         count: 1,
-        costOverride: 0,
       },
     ],
     triggers: [],
-    text: 'Add a (0)-cost Lunar Fragment to the top of 3 random Draft piles.',
+    text: 'Add a Lunar Fragment to the top of 3 random Draft piles.',
     complexity: 'T3',
     subsystems: ['S-SHOP', 'S-TOKEN'],
     notPurchasable: true,

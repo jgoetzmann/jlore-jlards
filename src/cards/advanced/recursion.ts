@@ -115,6 +115,12 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // The doc row's pool is "costing (handSize)". A NumericFilter bound may now
+    // be an expression, but only the SELECTOR path resolves one: `poolCandidates`
+    // (effects/pools.ts) hands the raw filter to `matchesDefFilter`, and
+    // `matchesNumeric` skips any bound that is not already a literal — so an
+    // `{expr:'handSize'}` here would fail OPEN and offer cards at any price.
+    // The literal ceiling stays until the pool path resolves filters too.
     effects: [
       {
         op: 'discover',
@@ -202,6 +208,14 @@ export const cards: CardDefinition[] = [
     rarity: 'mythic',
     keywords: [],
     stats: {},
+    // SB-24 wants the actual chain — a resolving The Past whose copy target is a
+    // The Future whose copy target is this instance. Two things are still in the
+    // way. The cycle detector (`__playing:` guard, effects/ops/replay.ts) writes
+    // only a `replayCycleBlocked` log line, leaving no state a Condition can
+    // read; and The Future copies through a `nextCardModifier`, which only
+    // core/play.ts consumes — a REPLAYED The Future re-queues the mod instead of
+    // copying anything, so the chain cannot even form. Until then the condition
+    // tests the nearest readable thing: both Paradoxes are in your play area.
     effects: [
       {
         op: 'conditional',
@@ -412,7 +426,16 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 1 },
-    effects: [{ op: 'nextCardModifier', mod: { bind: 'pointer', uses: 1, appliesTo: 'play' } }],
+    // `bind:'pointer'` is still the SB-7 hook and still nothing reads it, so the
+    // binding itself does not exist yet. What DOES read it is the autofill in
+    // effects/ops/timing.ts: any mod carrying a `bind` and no `absorbInto` has
+    // `absorbInto` filled in with the source instance, which was quietly making
+    // Pointer a permanent Hivemind — the next card you played had its effects
+    // grafted onto this instance forever. An empty instance id is not a real
+    // instance, so it stops the autofill and both consumers (`consumePlayMods`
+    // and play.ts step 6 test it for truthiness) skip the absorption. When the
+    // engine consumes the bind, this line comes out with it.
+    effects: [{ op: 'nextCardModifier', mod: { bind: 'pointer', absorbInto: '', uses: 1, appliesTo: 'play' } }],
     triggers: [],
     text: '+1 Action. The next card you play is Pointed to this one: they are Played, Mutilated and Trashed together.',
     flavor: 'Dereference at your own risk.',
@@ -431,6 +454,16 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 1 },
+    // `absorbInto` is the engine's own name for this clause (see NextCardMod in
+    // types.ts) and it is typed InstanceId — an id minted at runtime, which card
+    // data has no way to write. 'self' is a sentinel nobody resolves, so
+    // play.ts's `s.instances[mods.absorbInto]` is undefined and the headline
+    // clause is silent while the Flimsy grant and the {absorbed} tally work.
+    // The one path that fills a real id is the autofill in ops/timing.ts, and it
+    // keys off `mod.bind` — whose three legal values each name a different
+    // mechanic (Oathbound Memory, Pointer's Mutilate, Right Hand Man), all of
+    // which SB-7 says will be consumed. Borrowing one to trip the autofill would
+    // hand Hivemind a second, wrong clause the day that bind is read.
     effects: [
       { op: 'nextCardModifier', mod: { grantKeyword: 'Flimsy', absorbInto: 'self', uses: 1, appliesTo: 'play' } },
       { op: 'addCounter', target: { self: true }, key: 'absorbed', amount: 1 },

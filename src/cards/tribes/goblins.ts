@@ -145,17 +145,33 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: {},
+    // A buy-scoped `nextCardModifier` was a complete no-op: the buy path reads
+    // only costDelta / costFloor / buyTo off a mod, and the sole reader of
+    // appendEffects skips anything whose appliesTo is not a play. It also never
+    // expired — nextCardMods survive end of turn, so `uses:99` outlived "this
+    // turn" as well. A rider sitting in play is the shape that works: `buyCard`
+    // fires onBuy across the buyer's own play area for triggers that declare
+    // where they watch from, and the play area empties at end-of-turn cleanup,
+    // which bounds this to exactly one turn with nothing to unwind.
+    //
+    // A rider only watches from the moment it lands in play, so the buys already
+    // made this turn are behind it — the printed "every card you buy this turn"
+    // covers those too, and the play pays them off up front. `buysUsedThisTurn`
+    // counts the purchases that spent a Buy, which is what the line means; a
+    // Prophet purchase spends banked Prophet and no Buy, and is the one thing
+    // this catch-up cannot see. Two copies never double-pay one purchase: a buy
+    // is caught either by the riders already in play or by the catch-up on a
+    // copy played later, never by both, so N copies pay N Goblins per buy.
     effects: [
+      { op: 'createCard', defId: 'grubbing_goblin', to: 'gy', count: { expr: 'buysUsedThisTurn' } },
+    ],
+    triggers: [
       {
-        op: 'nextCardModifier',
-        mod: {
-          appliesTo: 'buy',
-          uses: 99,
-          appendEffects: [{ op: 'createCard', defId: 'grubbing_goblin', to: 'gy', count: 1 }],
-        },
+        on: 'onBuy',
+        zones: ['play'],
+        effects: [{ op: 'createCard', defId: 'grubbing_goblin', to: 'gy', count: 1 }],
       },
     ],
-    triggers: [],
     text: 'Every card you buy this turn also adds a Grubbing Goblin to your GY.',
     flavor: 'They follow the money.',
     complexity: 'T2',

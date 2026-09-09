@@ -44,21 +44,50 @@ export const auras: AuraDefinition[] = [
     name: 'Mycology',
     tier: 'heroic',
     activationCost: 2,
-    // The `then` that stood here re-rolled the pool once per pick, so the two
-    // cards delivered were fresh random samples and never the two the player
-    // chose. An empty `then` is the fix: pushChosen falls through to
-    // defaultDiscoverThen, which puts the chosen definition itself in hand.
-    // 'Fuse them' is off the text until the DSL has a fuse node — the S-FUSE
-    // helpers in systems/fuse.ts still have no op to reach them.
-    text: 'Discover two Known Universe cards costing (3) or less and add them to your hand.',
+    text: 'Discover two Known Universe cards costing (3) or less, Fuse them, and add the result to your hand.',
     effects: [
+      // Swept before the Discover, not after it: a pool too small to offer two
+      // options leaves one marked card behind, and it must not be dragged into
+      // the next activation's merge.
+      {
+        op: 'addCounter',
+        target: { zone: 'hand', filter: { counter: { key: 'mycology', gte: 1 } } },
+        key: 'mycology',
+        amount: -1,
+      },
       {
         op: 'discover',
         pool: { scope: 'knownUniverse', filter: { cost: { lte: 3 } } },
         count: 3,
         pick: 2,
         prompt: 'Discover two cards',
-        then: [],
+        // `then` runs once per pick with `$discovered` swapped for the card the
+        // player actually chose — writing the pool spec again here would have
+        // re-rolled it and delivered two fresh strangers. The counter is how the
+        // Fuse finds exactly these two and not the rest of the hand.
+        //
+        // The Fuse rides the LAST pick (`x` is the 0-based pick index) rather
+        // than sitting after the Discover: a resume drains the parked queue
+        // between picks, so a node written after the prompt would have run with
+        // only the first card on the table and merged nothing. Clearing the mark
+        // is part of the same step — the composite is the first component reused
+        // in place, counters and all.
+        then: [
+          { op: 'createCard', defId: '$discovered', to: 'hand', counters: { mycology: 1 } },
+          {
+            op: 'conditional',
+            if: { expr: 'x' },
+            then: [
+              { op: 'fuse', target: { zone: 'hand', filter: { counter: { key: 'mycology', gte: 1 } } }, to: 'hand' },
+              {
+                op: 'addCounter',
+                target: { zone: 'hand', filter: { counter: { key: 'mycology', gte: 1 } } },
+                key: 'mycology',
+                amount: -1,
+              },
+            ],
+          },
+        ],
       },
     ],
     triggers: [],
@@ -283,42 +312,17 @@ export const auras: AuraDefinition[] = [
     name: 'In Too Deep',
     tier: 'celestial',
     text: 'The descent. Complete each floor\'s quest to claim its reward and choose the next room. One instance at a time.',
-    effects: [{ op: 'questProgress', key: 'floor', amount: 1 }],
-    triggers: [
-      { on: 'onBuy', effects: [{ op: 'questProgress', key: 'buys', amount: 1 }] },
-      {
-        on: 'onBuy',
-        condition: { has: { target: { who: 'self', zone: 'gy', filter: { cost: { gte: 8 } } }, atLeast: 1 } },
-        effects: [{ op: 'questProgress', key: 'expensiveBuys', amount: 1 }],
-      },
-      {
-        on: 'onBuy',
-        condition: { has: { target: { who: 'self', zone: 'gy', filter: { defId: 'diamond' } }, atLeast: 1 } },
-        effects: [{ op: 'questProgress', key: 'diamondBuys', amount: 1 }],
-      },
-      { on: 'onPlay', effects: [{ op: 'questProgress', key: 'plays', amount: 1 }] },
-      { on: 'onTrash', effects: [{ op: 'questProgress', key: 'trashes', amount: 1 }] },
-      {
-        on: 'onDraw',
-        effects: [
-          { op: 'questProgress', key: 'draws', amount: 1 },
-          { op: 'questProgress', key: 'drawsThisTurn', amount: 1 },
-        ],
-      },
-      {
-        on: 'endOfTurn',
-        condition: { expr: 'floor(moneyUnspent / 12)' },
-        effects: [{ op: 'questProgress', key: 'bigUnspentTurns', amount: 1 }],
-      },
-      {
-        on: 'startOfTurn',
-        effects: [
-          { op: 'questProgress', key: 'diamondsInDeck', amount: { expr: 'count(diamond)' } },
-          { op: 'questProgress', key: 'uniqueInDeck', amount: { expr: 'uniqueCardsInDeck' } },
-        ],
-      },
-      { on: 'gameEnd', effects: [{ op: 'questProgress', key: 'wins', amount: 1 }] },
-    ],
+    // B.4 is engine data, not card data. Manifesting this aura seeds `p.quest`
+    // at floor 1 (meta/auras.ts) and the buy / play / trash / draw / end-of-turn
+    // paths call meta/quest.ts's questProgress, the only thing that settles a
+    // floor and pays its reward. The triggers that used to stand here called
+    // {op:'questProgress'}, which only writes `p.quest.progress` under key names
+    // no floor reads and never settles anything — and their two onBuy conditions
+    // asked "do I hold any (8)+ card" rather than "is the card I just bought
+    // one", which an aura context (sourceIid === null) cannot ask at all.
+    // Deleted rather than left to burn node budget on every draw.
+    effects: [],
+    triggers: [],
     art: { key: 'aura_in_too_deep', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
@@ -432,12 +436,33 @@ export const auras: AuraDefinition[] = [
     name: 'Shooting Star',
     tier: 'hypercelestial',
     text: 'On summon, gain the effect of 3 random Celestial Auras.',
-    effects: [
-      { op: 'manifestAura', tier: 'celestial', who: 'self' },
-      { op: 'manifestAura', tier: 'celestial', who: 'self' },
-      { op: 'manifestAura', tier: 'celestial', who: 'self' },
+    // An aura's `effects` array is only ever run by activateAura, and
+    // canActivateAura refuses a non-heroic aura with no activationCost, so the
+    // three manifests sat here unreachable. There is no onManifest event, but
+    // play.ts fires the Field's onPlay triggers in step 7 — after the card body
+    // in step 5 that summoned this — so the summoning play itself is the window.
+    // Giving it an activationCost instead would turn "on summon" into a
+    // repeatable once-per-turn purchase, which is worse than inert.
+    effects: [],
+    triggers: [
+      {
+        on: 'onPlay',
+        maxPerTurn: 1,
+        // Once per game, not once per turn. `shootingStarSummons` is a player
+        // counter; while it has never been written the expression names an
+        // unknown identifier, which evalCondition scores as false, and `not`
+        // turns that into "this has never happened" — the same answer it gives
+        // once the counter exists and reads 0. The increment inside is what
+        // closes the gate for good.
+        condition: { not: { expr: 'shootingStarSummons' } },
+        effects: [
+          { op: 'addCounter', scope: 'player', key: 'shootingStarSummons', amount: 1, who: 'self' },
+          { op: 'manifestAura', tier: 'celestial', who: 'self' },
+          { op: 'manifestAura', tier: 'celestial', who: 'self' },
+          { op: 'manifestAura', tier: 'celestial', who: 'self' },
+        ],
+      },
     ],
-    triggers: [],
     art: { key: 'aura_shooting_star', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];

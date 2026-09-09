@@ -15,7 +15,7 @@
  * `floor(n/k) - floor((n-1)/k)` is 1 exactly on every kth play;
  * `max(0, 1 - abs(n - k))` is 1 exactly on the kth play.
  */
-import type { CardDefinition, Condition } from '@engine/types';
+import type { CardDefinition, Condition, EffectNode, Zone } from '@engine/types';
 
 function onExactPlay(n: number): Condition {
   return { expr: `max(0, 1 - abs(selfPlayCount - ${n}))` };
@@ -23,6 +23,97 @@ function onExactPlay(n: number): Condition {
 
 function onEveryNthPlay(n: number): Condition {
   return { expr: `floor(selfPlayCount / ${n}) - floor((selfPlayCount - 1) / ${n})` };
+}
+
+/** Where the Astrologists live once trashed, plus the copy still mid-play. */
+const ASTROLOGIST_ZONES: Zone[] = ['trash', 'play'];
+/** The receipt: one counter on one copy per Lunar Fragment already handed out. */
+const ASTROLOGIST_MARK = 'fragmentPaid';
+/** Scratch player counters, both recomputed from the table on every run. */
+const ASTROLOGIST_TALLY = 'turn:astrologistsTrashed';
+const ASTROLOGIST_PAID = 'turn:astrologistsPaid';
+/**
+ * One Fragment, and only if the ordinal has earned a Fragment nobody has
+ * collected. One per run is enough: N trashes fire this N times and only ever
+ * owe floor(N / 2), so the arrears always clear.
+ */
+const ASTROLOGIST_OWED = 'min(1, max(0, floor(astrologistsTrashed / 2) - astrologistsPaid))';
+
+/**
+ * The whole of Astrologist: work out the ordinal of the trash that just
+ * happened, then pay a Fragment if that ordinal has earned one no copy has
+ * already been paid for.
+ *
+ * Counting, first. The trash is permanent and global — `zoneIds` reads it
+ * without an owner — so the number of Astrologists in it IS the number trashed
+ * this game, which is the doc row's scope. No expression can count them:
+ * `countIn(trash, x)` resolves x through NAMED_FILTERS and there is no
+ * registered Astrologist filter, so naming one would read 0 forever. `forEach`
+ * walks the instances instead and ticks a player counter, which an expression
+ * reads back by name (the `turn:` prefix is stripped). The seed makes the key
+ * exist so the reset has a name to read rather than throwing on an unknown
+ * identifier; the reset is because the same counter is recomputed many times a
+ * turn and must not tally on top of the last run.
+ *
+ * `play` is in the zone list because the ordinary Flimsy route runs this body
+ * BEFORE the trash: core/play.ts resolves the body at step 5 and trashes at
+ * step 8, so this copy is still on the table and the trash count is one short
+ * of the ordinal it is about to take. Every other route — `{op:'playCard'}`,
+ * which calls trashWithTrigger the moment resolveCardPlay returns and so has
+ * already trashed the card by the time the queued body runs, and the `onTrash`
+ * trigger below — sees it in the trash and nothing in play. Adding the two
+ * zones gives the same ordinal on all of them.
+ *
+ * Paying, second. The receipt is a counter on the copies themselves, not a
+ * number on the seat, and that is deliberate: the trash is one shared pile and
+ * `CardFilter` cannot ask who owned a card, so a per-seat ledger would let two
+ * players each claim arrears for the same global ordinal and the table would
+ * pay twice over. Counting marked copies instead makes the ledger as global as
+ * the pile it is counting. A payment always marks a copy that was not marked
+ * before — `counter: { lt: 1 }` picks one, and there is always one to pick,
+ * since the marks can never exceed floor(n / 2) and so never reach n.
+ *
+ * Both call sites run this identical list, ungated, because a second run over
+ * the same table finds nothing owed and creates nothing. That is what makes the
+ * card safe on the three routes that fire it more than once for one trash — a
+ * `{op:'playCard'}` play (body AND trigger), a batch `{op:'trash'}` where every
+ * trigger body resolves after all N cards are already in the trash and so reads
+ * the same final count, and a Misery / Around the World replay, which re-fires
+ * `onTrash` on a copy trashed turns ago. Under the old parity pair each of
+ * those minted a spurious Fragment.
+ *
+ * Eight nodes plus one per Astrologist on the table, with no per-copy payout
+ * loop, so even a batch trash of the whole pile stays inside the 200-node turn
+ * budget.
+ */
+function astrologistPayout(): EffectNode[] {
+  const astrologists = { who: 'self' as const, zone: ASTROLOGIST_ZONES, filter: { defId: 'astrologist' } };
+  return [
+    { op: 'addCounter', scope: 'player', key: ASTROLOGIST_TALLY, amount: 0 },
+    { op: 'addCounter', scope: 'player', key: ASTROLOGIST_TALLY, amount: { expr: '0 - astrologistsTrashed' } },
+    {
+      op: 'forEach',
+      over: astrologists,
+      effects: [{ op: 'addCounter', scope: 'player', key: ASTROLOGIST_TALLY, amount: 1 }],
+    },
+    { op: 'addCounter', scope: 'player', key: ASTROLOGIST_PAID, amount: 0 },
+    { op: 'addCounter', scope: 'player', key: ASTROLOGIST_PAID, amount: { expr: '0 - astrologistsPaid' } },
+    {
+      op: 'forEach',
+      over: { ...astrologists, filter: { defId: 'astrologist', counter: { key: ASTROLOGIST_MARK, gte: 1 } } },
+      effects: [{ op: 'addCounter', scope: 'player', key: ASTROLOGIST_PAID, amount: 1 }],
+    },
+    // Hand it over, then write the receipt. Nothing between the two touches
+    // either counter, so both read the same `owed`; the receipt goes onto an
+    // unmarked copy so the mark count rises by exactly the Fragments paid.
+    { op: 'createCard', defId: 'lunar_fragment', to: 'hand', count: { expr: ASTROLOGIST_OWED } },
+    {
+      op: 'addCounter',
+      target: { ...astrologists, filter: { defId: 'astrologist', counter: { key: ASTROLOGIST_MARK, lt: 1 } }, count: 1 },
+      key: ASTROLOGIST_MARK,
+      amount: { expr: ASTROLOGIST_OWED },
+    },
+  ];
 }
 
 export const cards: CardDefinition[] = [
@@ -82,24 +173,22 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['Flimsy'],
     stats: { actions: 1 },
-    // Flimsy means playing this IS trashing it, and the play-cleanup trash
-    // raises no 'onTrash' — so the clause lives in the body, where it can count
-    // Astrologists. `selfPlayCount` is the per-game, per-player total and is
-    // bumped before the body runs, so an even value is an even-numbered trash.
-    // A per-instance counter cannot do it: each copy is trashed at most once,
-    // and `selfCounter` under any other key sums `playCount` in as well.
-    // That makes the clause narrower than the doc row's "trashed this game":
-    // it counts the copies YOU PLAY, so a copy another card trashes out of
-    // hand does not tick and neither does an opponent's. The text says so.
-    effects: [
+    // Flimsy means playing this IS trashing it, and the play-cleanup trash in
+    // core/play.ts calls `trashInstance` directly, so it raises no 'onTrash'.
+    // The body therefore carries the ordinary case and the trigger below
+    // carries every other route into the trash. Both run the same list, and it
+    // is safe to run twice for one trash — see `astrologistPayout`.
+    effects: [...astrologistPayout()],
+    triggers: [
       {
-        op: 'conditional',
-        if: { not: { expr: 'selfPlayCount % 2' } },
-        then: [{ op: 'createCard', defId: 'lunar_fragment', to: 'hand' }],
+        // No `zones`: an 'onTrash' trigger is dispatched to the instance it
+        // happened to, and by the time it fires that instance is in the trash —
+        // any zone list at all would exclude the only zone it can be in.
+        on: 'onTrash',
+        effects: [...astrologistPayout()],
       },
     ],
-    triggers: [],
-    text: 'Flimsy. +1 Action. On every 2nd Astrologist you play this game — Flimsy trashes it — add a Lunar Fragment to your hand. ({selfPlayCount} played.)',
+    text: 'Flimsy. +1 Action. On every even-numbered Astrologist trashed this game, add a Lunar Fragment to hand.',
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',

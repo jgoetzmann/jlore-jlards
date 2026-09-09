@@ -76,13 +76,22 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1, money: 5 },
     effects: [],
     triggers: [
-      // A shop pile never receives startOfTurn, so the discount has to be paid
-      // back at the moment of purchase instead of shaved off the price: buy()
-      // debits the price first (core/buy.ts) and only then fires onBuy, so no
-      // trigger on this card can reach the price it was bought at. The refund
-      // is the same arithmetic one step later — the doc row's "reduce cost by
-      // (2) each" now reads "refund (2) each", and nothing here touches a cost
-      // modifier any more, so this card is no longer an S-COSTMOD card.
+      // STILL BLOCKED as a real discount, and deliberately so at both ends.
+      // A shop pile never receives startOfTurn (fireOwnedTriggers builds its
+      // candidates from the owned zones and a shop instance has owner null), and
+      // buyCard debits `p.money -= price` before it fires onBuy, so no trigger
+      // on this card can reach the price it was bought at. The board-reading
+      // price table in engine/shop/dynamic.ts cannot take it either, and says so
+      // in its own comment: every entry there must be a pure function of
+      // (state, buyer), and this price depends on a choice the buyer has not
+      // made yet. It needs a buy-time hook that lets a pile's own card prompt
+      // and then modify its price.
+      //
+      // So the discount is paid back one step later instead of shaved off the
+      // price: the doc row's "reduce cost by (2) each" reads "refund (2) each",
+      // and nothing here touches a cost modifier any more, so this card is no
+      // longer an S-COSTMOD card. If the hook lands, revert to a `modifyCost`
+      // with scope:'pile' and restore the printed wording.
       {
         on: 'onBuy',
         effects: [
@@ -179,92 +188,27 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      // The ladder is spelled out rung by rung: `into:'upgrade'` resolves as a
-      // random card costing one more, which leaves the ladder entirely.
-      //
-      // opChoose builds its prompt from every option unconditionally — it never
-      // hides a rung the player cannot take — and auto-resolve (defaultKeys
-      // ['0']) and the sim bot both take option 0. So option 0 is the one that
-      // always lands: it upgrades the best rung actually in hand. The three
-      // named rungs stay for a player who wants a particular one.
+      // `into:'upgrade'` walks the real Resource ladder now: opTransform
+      // resolves it through upgradedDefId() (effects/ops/movement.ts) and only
+      // falls back to "a random card costing one more" for a defId that is not
+      // on the ladder at all. So the rung-by-rung choose tree this card used to
+      // need is gone, and one `pick:'choose'` over the three climbable rungs is
+      // the whole card. Diamond is left out because it is the top rung and its
+      // upgrade is itself, which would make it an option that does nothing.
       {
-        op: 'choose',
-        options: [
-          {
-            label: 'Upgrade the best rung you hold',
-            effects: [
-              {
-                op: 'conditional',
-                if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'gold' } }, atLeast: 1 } },
-                then: [
-                  {
-                    op: 'transform',
-                    target: { who: 'self', zone: 'hand', filter: { defId: 'gold' }, count: 1, pick: 'choose' },
-                    into: 'diamond',
-                  },
-                ],
-                else: [
-                  {
-                    op: 'conditional',
-                    if: {
-                      has: { target: { who: 'self', zone: 'hand', filter: { defId: 'silver' } }, atLeast: 1 },
-                    },
-                    then: [
-                      {
-                        op: 'transform',
-                        target: { who: 'self', zone: 'hand', filter: { defId: 'silver' }, count: 1, pick: 'choose' },
-                        into: 'gold',
-                      },
-                    ],
-                    // No Gold and no Silver: the Copper rung, which is a no-op
-                    // of its own if the hand holds none of those either.
-                    else: [
-                      {
-                        op: 'transform',
-                        target: { who: 'self', zone: 'hand', filter: { defId: 'copper' }, count: 1, pick: 'choose' },
-                        into: 'silver',
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            label: 'Copper → Silver',
-            effects: [
-              {
-                op: 'transform',
-                target: { who: 'self', zone: 'hand', filter: { defId: 'copper' }, count: 1, pick: 'choose' },
-                into: 'silver',
-              },
-            ],
-          },
-          {
-            label: 'Silver → Gold',
-            effects: [
-              {
-                op: 'transform',
-                target: { who: 'self', zone: 'hand', filter: { defId: 'silver' }, count: 1, pick: 'choose' },
-                into: 'gold',
-              },
-            ],
-          },
-          {
-            label: 'Gold → Diamond',
-            effects: [
-              {
-                op: 'transform',
-                target: { who: 'self', zone: 'hand', filter: { defId: 'gold' }, count: 1, pick: 'choose' },
-                into: 'diamond',
-              },
-            ],
-          },
-        ],
+        op: 'transform',
+        target: {
+          who: 'self',
+          zone: 'hand',
+          filter: { defId: ['copper', 'silver', 'gold'] },
+          count: 1,
+          pick: 'choose',
+        },
+        into: 'upgrade',
       },
     ],
     triggers: [],
-    text: 'Trash a Copper, Silver or Gold in your hand and add its upgrade to your hand. Name the rung, or let it take the best one you hold.',
+    text: 'Trash a Copper, Silver or Gold in your hand and add its upgrade to your hand.',
     flavor: 'Copper to Silver to Gold to Diamond. No further.',
     complexity: 'T2',
     subsystems: ['S-CORE'],
@@ -282,150 +226,34 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      // Each rung is named outright — `into:'downgrade'` picks a random card
-      // costing one less — and the second copy is bound to the card that was
-      // just melted rather than re-picked out of the hand.
+      // The same ladder fix as Advanced Refining, run backwards:
+      // `into:'downgrade'` resolves through downgradedDefId() in opTransform
+      // rather than picking a random card costing one less, so the rung-by-rung
+      // choose tree is gone. A Copper is the bottom rung and stays a Copper —
+      // opTransform's `nextDefId === oldDefId` guard makes that a no-op — so a
+      // melted Copper simply gains its second copy.
       //
-      // As on Advanced Refining, opChoose offers every rung whether or not the
-      // hand holds it and auto-resolve takes option 0, so option 0 walks down
-      // to the best rung actually present instead of dudding out.
+      // `selectCards` rather than a bare transform because the second copy has
+      // to be of the card that was just melted: `{self:true}` inside `then` is
+      // the picked instance, and it is read after the transform has already
+      // rewritten that instance's defId.
       {
-        op: 'choose',
-        options: [
-          {
-            label: 'Melt the best rung you hold',
-            effects: [
-              {
-                op: 'conditional',
-                if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } }, atLeast: 1 } },
-                then: [
-                  {
-                    op: 'selectCards',
-                    from: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
-                    min: 1,
-                    max: 1,
-                    then: [
-                      { op: 'transform', target: { self: true }, into: 'gold' },
-                      { op: 'copyCard', target: { self: true }, to: 'hand' },
-                    ],
-                  },
-                ],
-                else: [
-                  {
-                    op: 'conditional',
-                    if: { has: { target: { who: 'self', zone: 'hand', filter: { defId: 'gold' } }, atLeast: 1 } },
-                    then: [
-                      {
-                        op: 'selectCards',
-                        from: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
-                        min: 1,
-                        max: 1,
-                        then: [
-                          { op: 'transform', target: { self: true }, into: 'silver' },
-                          { op: 'copyCard', target: { self: true }, to: 'hand' },
-                        ],
-                      },
-                    ],
-                    else: [
-                      {
-                        op: 'conditional',
-                        if: {
-                          has: { target: { who: 'self', zone: 'hand', filter: { defId: 'silver' } }, atLeast: 1 },
-                        },
-                        then: [
-                          {
-                            op: 'selectCards',
-                            from: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
-                            min: 1,
-                            max: 1,
-                            then: [
-                              { op: 'transform', target: { self: true }, into: 'copper' },
-                              { op: 'copyCard', target: { self: true }, to: 'hand' },
-                            ],
-                          },
-                        ],
-                        // Bottom of the ladder, and a silent no-op when the
-                        // hand holds no Resource at all.
-                        else: [
-                          {
-                            op: 'selectCards',
-                            from: { who: 'self', zone: 'hand', filter: { defId: 'copper' } },
-                            min: 1,
-                            max: 1,
-                            then: [{ op: 'copyCard', target: { self: true }, to: 'hand' }],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            label: 'Copper → 2 Copper',
-            effects: [
-              {
-                op: 'selectCards',
-                from: { who: 'self', zone: 'hand', filter: { defId: 'copper' } },
-                min: 1,
-                max: 1,
-                // A Copper is the bottom rung and stays a Copper, so it only
-                // gains its second copy.
-                then: [{ op: 'copyCard', target: { self: true }, to: 'hand' }],
-              },
-            ],
-          },
-          {
-            label: 'Silver → 2 Copper',
-            effects: [
-              {
-                op: 'selectCards',
-                from: { who: 'self', zone: 'hand', filter: { defId: 'silver' } },
-                min: 1,
-                max: 1,
-                then: [
-                  { op: 'transform', target: { self: true }, into: 'copper' },
-                  { op: 'copyCard', target: { self: true }, to: 'hand' },
-                ],
-              },
-            ],
-          },
-          {
-            label: 'Gold → 2 Silver',
-            effects: [
-              {
-                op: 'selectCards',
-                from: { who: 'self', zone: 'hand', filter: { defId: 'gold' } },
-                min: 1,
-                max: 1,
-                then: [
-                  { op: 'transform', target: { self: true }, into: 'silver' },
-                  { op: 'copyCard', target: { self: true }, to: 'hand' },
-                ],
-              },
-            ],
-          },
-          {
-            label: 'Diamond → 2 Gold',
-            effects: [
-              {
-                op: 'selectCards',
-                from: { who: 'self', zone: 'hand', filter: { defId: 'diamond' } },
-                min: 1,
-                max: 1,
-                then: [
-                  { op: 'transform', target: { self: true }, into: 'gold' },
-                  { op: 'copyCard', target: { self: true }, to: 'hand' },
-                ],
-              },
-            ],
-          },
+        op: 'selectCards',
+        from: {
+          who: 'self',
+          zone: 'hand',
+          filter: { defId: ['copper', 'silver', 'gold', 'diamond'] },
+        },
+        min: 1,
+        max: 1,
+        then: [
+          { op: 'transform', target: { self: true }, into: 'downgrade' },
+          { op: 'copyCard', target: { self: true }, to: 'hand' },
         ],
       },
     ],
     triggers: [],
-    text: 'Trash a Resource in your hand and add 2 copies of its downgrade to your hand. Name the rung, or let it take the best one you hold. +1 Action.',
+    text: 'Trash a Resource in your hand and add 2 copies of its downgrade to your hand. +1 Action.',
     flavor: 'Two worse things beat one better thing. Sometimes.',
     complexity: 'T2',
     subsystems: ['S-CORE'],
@@ -581,7 +409,79 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { money: 2 },
-    effects: [{ op: 'buff', scope: 'nextPlayed', stat: 'money', amount: 1, times: 1 }],
+    effects: [
+      // `scope:'nextPlayed'` is the wrong primitive here twice over: runBuffNode
+      // drops the `stat` when it queues the mod (effects/ops/buff.ts), so the +1
+      // landed on a RANDOM stat, and a NextCardMod carries no card filter, so
+      // nothing restricted it to a Resource. `onPlay` is no way out either —
+      // core/play.ts fires it on the played instance and on the Field, never on
+      // a rider sitting in play — so a card in play cannot watch a later play.
+      //
+      // A modifier's `appendEffects` are the one hook that runs INSIDE the next
+      // play with that card as their source, so the type test happens there:
+      // mark the played card, buff it only if the mark landed on a Resource,
+      // then clear the mark either way. The clear is unconditional because
+      // `selfCounter` sums every non-bookkeeping counter, and a stray one would
+      // be read by whatever card it stuck to.
+      //
+      // The gate is `selectCards` rather than a `buff` with a filtered target
+      // because runBuffNode falls back to its own source instance when the
+      // selector matches nothing — which would buff the non-Resource — while
+      // opSelectCards does nothing at all on an empty selection. Only one card
+      // ever carries the mark, so the pick resolves without a prompt.
+      //
+      // Two residuals are left standing on purpose, and one engine field closes
+      // both: a `filter?: CardFilter` on NextCardMod, consulted by
+      // consumePlayMods (core/play.ts), so a mod that does not match the card
+      // being played is neither applied nor spent.
+      //
+      // 1. TIMING. `appendEffects` run at step 5 of playCard, after the stat
+      //    step, so the +1 does not pay out on the play that earns it — a Gold
+      //    buffed here yields 3 Money that play and 4 from the next one on. The
+      //    `buffTimes` path (Performance Enhancing Cookie/Crumb) does land at
+      //    step 3, before stats, but it is unconditional: nothing at step 3 can
+      //    ask whether the played card is a Resource. Buffing at step 3 and
+      //    nerfing back at step 5 is not a way round it — the non-Resource
+      //    would be paid the Money anyway, and applyMany fires `onBuff` on a
+      //    nerf too, so the undo would trip every card that watches for a buff.
+      //    The late buff is the only shape that is never wrong on a
+      //    non-Resource, and "permanently gains +1 Money" does not name the
+      //    play it starts paying on.
+      //
+      // 2. SCOPE. `uses:1` is decremented by consumePlayMods on ANY play, so a
+      //    non-Resource played next spends the offer and this card does nothing
+      //    — the printed "next Resource" is really "next card, if it is a
+      //    Resource". Under fire that branch is clean: no buff, no stray
+      //    counter, the mark cleared. The card-data alternatives are worse: a
+      //    mod that re-arms itself needs `appendEffects` to contain themselves,
+      //    and a cyclic effect tree would break `cards:export` and the
+      //    nextCardModifier log entry that carries the mod; a large `uses` with
+      //    a player-counter arm leaks that counter into later copies whenever
+      //    no Resource is played, and burns nodes on every play until it
+      //    expires. The text is left matching the A.6 doc row.
+      {
+        op: 'nextCardModifier',
+        mod: {
+          appliesTo: 'play',
+          uses: 1,
+          appendEffects: [
+            { op: 'addCounter', target: { self: true }, key: 'shiningKit', amount: 1 },
+            {
+              op: 'selectCards',
+              from: {
+                who: 'self',
+                zone: 'play',
+                filter: { type: 'Resource', counter: { key: 'shiningKit', gte: 1 } },
+              },
+              min: 1,
+              max: 1,
+              then: [{ op: 'buff', scope: 'self', stat: 'money', amount: 1 }],
+            },
+            { op: 'addCounter', target: { self: true }, key: 'shiningKit', amount: -1 },
+          ],
+        },
+      },
+    ],
     triggers: [],
     text: 'The next Resource you play permanently gains +1 Money. +2 Money.',
     flavor: 'A cloth, a polish, a permanent improvement.',

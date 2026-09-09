@@ -218,14 +218,19 @@ export function trashInstance(state: GameState, iid: InstanceId): boolean {
   // and keeps every card any player ever trashed. Counted here rather than in
   // the effects layer so `core` never has to import `meta` from a zone move.
   const p = owner ? state.players[owner] : undefined;
-  if (p) {
-    p.counters['trashedTotal'] = (p.counters['trashedTotal'] ?? 0) + 1;
-    p.counters['turn:trashed'] = (p.counters['turn:trashed'] ?? 0) + 1;
+  if (p) p.counters['trashedTotal'] = (p.counters['trashedTotal'] ?? 0) + 1;
+  // The per-turn tallies credit the player DOING the trashing, not the card's
+  // owner: "if you trashed a Felinor this turn" is about your action, and
+  // trashing an opponent's Felinor has to count for you. Only the seat taking
+  // the turn can trash anything, so `activePlayer` is that actor.
+  const actor = state.players[state.activePlayer];
+  if (actor) {
+    actor.counters['turn:trashed'] = (actor.counters['turn:trashed'] ?? 0) + 1;
     for (const sub of safeDef(inst.defId).subtypes) {
       // Readable from an expression as `trashedFelinor`, so the key has to be a
       // bare identifier once the `turn:` prefix is stripped.
       const key = `turn:trashed${sub.replace(/[^A-Za-z0-9]/g, '')}`;
-      p.counters[key] = (p.counters[key] ?? 0) + 1;
+      actor.counters[key] = (actor.counters[key] ?? 0) + 1;
     }
   }
   moveInstance(state, iid, owner, 'trash');

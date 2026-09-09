@@ -168,6 +168,12 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
     p.buysUsedThisTurn += 1;
   }
 
+  // What this copy actually cost, kept on the instance. Lead pays "+[buy
+  // price] Money", and a card played from hand has no other way to know: the
+  // price it was bought at is neither its printed cost nor anything the
+  // purchase left behind. Read from an expression as `selfPricePaid`.
+  inst.counters['pricePaid'] = paid;
+
   // B5: to GY, unless a NextCardMod redirected it (Express Shipping).
   const dest: Zone = mods.buyTo ?? 'gy';
   moveInstance(s, iid, player, dest, dest === 'library' ? 'top' : 'bottom');
@@ -199,8 +205,13 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
   // instance-only for cards — sweeping every owned card here would fire riders
   // from a player's graveyard — but the Field has to see them, or Double Header
   // never copies a purchase.
-  s = fireInstanceTriggers(s, 'onBuy', player, iid, 0);
-  s = firePlayTriggers(s, 'onBuy', player, iid, 0);
+  // `paid` is the price this purchase actually charged, after every modifier.
+  // A rider in play cannot read it any other way, so Rebate's "refunds 60% of
+  // its cost" and Professor of Curvature's "that purchase is free" both hang
+  // off it rather than off the bought card's printed cost.
+  const buyVars = { paid, pileCost: paid };
+  s = fireInstanceTriggers(s, 'onBuy', player, iid, 0, buyVars);
+  s = firePlayTriggers(s, 'onBuy', player, iid, 0, buyVars);
   s = fireFieldTriggers(s, 'onBuy', player, 0);
   s = fireInstanceTriggers(s, 'onGain', player, iid, 0);
   s = firePlayTriggers(s, 'onGain', player, iid, 0);
