@@ -7,7 +7,6 @@
  */
 
 import type { EffectNode, GameState, InstanceId, PlayerId, Prompt } from '@engine/types';
-import * as Effects from '@engine/effects';
 import { appendLog } from './log.js';
 import { makeContext, runEffects } from './triggers.js';
 import { createInstance } from './zones.js';
@@ -67,9 +66,9 @@ function contextFromPrompt(prompt: Prompt): ReturnType<typeof makeContext> {
 }
 
 /**
- * Fallback resolution used when the effects slice does not expose a resume
- * entry point. It records the selection on the prompt's ctx, runs any
- * per-option effects the interpreter stashed there, then runs `then`.
+ * How a prompt resolves. Records the selection on the prompt's ctx, runs any
+ * per-option effects the interpreter stashed there (`{op:'choose'}` writes them
+ * to `ctx.optionEffects`), then runs `then`.
  */
 function localResume(state: GameState, prompt: Prompt, keys: string[]): GameState {
   let s = state;
@@ -158,16 +157,14 @@ export function resolvePrompt(
   s.pending = null;
   appendLog(s, 'resolve', player, { promptId, keys: picked, type: prompt.type });
 
-  const resume = (Effects as unknown as Record<string, unknown>)['resumePrompt'];
-  if (typeof resume === 'function') {
-    try {
-      s = (resume as (a: GameState, b: Prompt, c: string[]) => GameState)(s, prompt, picked) ?? s;
-    } catch (err) {
-      appendLog(s, 'effectError', player, { message: String(err) });
-    }
-  } else {
-    s = localResume(s, prompt, picked);
-  }
+  // `localResume` is the resume path. There used to be a dynamic lookup for a
+  // `resumePrompt` export on the effects barrel here, taken when present — but
+  // no such export has ever existed, so the branch was unreachable and every
+  // `vite build` warned about the missing name. It was the same
+  // two-rival-implementations shape as SB-43, which is precisely how the
+  // `{op:'choose'}` bug hid for the whole build: one path live, one dead, and
+  // the dead one holding the logic people assumed was running.
+  s = localResume(s, prompt, picked);
 
   return drainQueue(s);
 }
