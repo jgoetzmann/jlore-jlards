@@ -453,6 +453,17 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [],
+    // STILL BLOCKED — a trash REDIRECT has no hook. `onTrash` is in SELF_EVENTS
+    // (effects/triggers.ts), so fireEvent only ever offers it to the card that
+    // was trashed, and trashWithTrigger calls trashInstance BEFORE fireEvent, so
+    // by the time any listener runs the subject is already in the trash and its
+    // zone no longer matches `zones` — this trigger is inert in every path, and
+    // inert is the right failure. It needs a table-wide pre-move event carrying
+    // the subject iid so a listener can divert it, plus an owner axis on trash
+    // selection: `zone:'trash'` ignores `who` (select.ts scans the whole pile),
+    // so an end-of-turn approximation would rescue an OPPONENT'S card into the
+    // opponent's GY, which is worse than doing nothing. When the hook lands, the
+    // condition and target below both need rewriting, not just re-pointing.
     triggers: [
       {
         on: 'onTrash',
@@ -490,6 +501,13 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 1 },
     effects: [],
+    // STILL BLOCKED, same hook as Safety Net. A bystander sitting in the Library
+    // can never see another card's trash: `onTrash` is a SELF_EVENT, so fireEvent
+    // pushes only the subject as a candidate, and the zone test runs after the
+    // move. Substituting one card for another additionally needs the pre-move
+    // event to carry the subject iid, and the printed 'non-Flimsy effect' guard
+    // needs the trash SOURCE in the trigger vars — neither exists. Left inert
+    // rather than approximated; the +1 Card stat line is all this does today.
     triggers: [
       {
         on: 'onTrash',
@@ -554,13 +572,20 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      // `recruit` is the only per-player fan-out in the DSL: a selector's
-      // `count` is a TOTAL across everyone it matched, so a single 'eachPlayer'
-      // moveTo ate one card at the whole table, and a self + 'eachOpponent'
-      // pair only reaches the first opponent. `recruit`'s count is per player.
-      // Its price is that it reshuffles each Library it drew from, the same
-      // trade Corpo Espionage makes for the same reason.
-      { op: 'recruit', zone: 'library', count: 1, who: 'eachPlayer', to: 'aside' },
+      // A selector's `count` is a TOTAL across everyone `who` reached, so a bare
+      // 'eachPlayer' moveTo ate one card at the whole table — always the
+      // caster's own. `perPlayer` runs the count-and-pick once per resolved
+      // player, which is exactly this row, and it costs none of the collateral
+      // `recruit` charged for the same fan-out: recruit reshuffles every Library
+      // it draws from (B42) and nothing on this card prints a shuffle.
+      //
+      // No `who` on the move, so each card keeps its owner and lands in ITS
+      // player's aside, which is what the nodes below read.
+      {
+        op: 'moveTo',
+        target: { who: 'eachPlayer', zone: 'library', count: 1, pick: 'top', perPlayer: true },
+        zone: 'aside',
+      },
       // `aside` is one shared staging pile per player (SB-51), so the tops are
       // marked and every node below reads the mark rather than "whatever is in
       // aside": a Hand Box's stored hand sits in the same pile under `boxed`

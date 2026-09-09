@@ -29,7 +29,15 @@ const branches: { weight: number; effects: EffectNode[]; displayAs?: string }[] 
   // 3 — Low
   {
     weight: 2,
-    effects: [{ op: 'trash', target: { who: 'eachPlayer', zone: ['library', 'hand', 'gy'], count: 5, pick: 'random' } }],
+    // `perPlayer` runs the count-and-pick once per player. Without it the five
+    // came off one merged, once-shuffled candidate list, so a four-player table
+    // lost five cards between them and all five could come out of one deck.
+    effects: [
+      {
+        op: 'trash',
+        target: { who: 'eachPlayer', zone: ['library', 'hand', 'gy'], count: 5, pick: 'random', perPlayer: true },
+      },
+    ],
     displayAs: 'All players trash 5 random cards from their deck.',
   },
   // 4 — Low

@@ -25,10 +25,15 @@ export const cards: CardDefinition[] = [
         target: { zone: ['hand', 'library', 'gy', 'play'], filter: { subtype: 'CN' } },
         times: 1,
       },
-      { op: 'nextCardModifier', mod: { buffTimes: 1, appliesTo: 'play', uses: 1 } },
+      // A.22 grants the next card the CN TAG — not a buff. This was encoded as
+      // `buffTimes`, which is a different effect the doc never prints, so the node
+      // is replaced rather than merely switched on. `grantSubtype` writes
+      // `addedSubtypes` on the played instance and `matchesFilter` reads it, so the
+      // granted tribe is visible to every `{ subtype: 'CN' }` selector afterwards.
+      { op: 'nextCardModifier', mod: { grantSubtype: 'CN', appliesTo: 'play', uses: 1 } },
     ],
     triggers: [],
-    text: 'Flimsy. +1 Action. The next card you play joins the CN tribe. Buff every CN card in your deck.',
+    text: 'Flimsy. +1 Action. Next card played gains the CN tag. Buff all CN cards in your deck.',
     flavor: 'Randomised, controlled, and extremely CN.',
     complexity: 'T4',
     subsystems: ['S-BUFF'],

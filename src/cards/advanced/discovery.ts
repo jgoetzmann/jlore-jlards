@@ -7,12 +7,13 @@
  * interpreter is meant to call to fill those pools with the heuristic picks
  * — nothing in the engine reads it yet, so those three still sample at random.
  *
- * SB-13: the four Fusion cards route through `@engine/systems` fusion.
+ * SB-13: the Fusion cards merge through `{op:'fuse'}`. The op runs the fusion
+ * arithmetic in `@engine/systems`, gives each component its `onFuse` window
+ * first (Chopped Chuzz's refusal) and consumes the components, so card data
+ * never assembles a composite itself.
  */
-import type { CardDefinition, CardDefId, EffectNode, GameState, PlayerId, Rarity } from '@engine/types';
+import type { CardDefId, CardDefinition, CardFilter, EffectNode, GameState, PlayerId, Rarity } from '@engine/types';
 import { perfectCardFor, winningDeckFor } from '@engine/meta';
-import { fusedDefinition } from '@engine/systems';
-import { getCard } from '@engine/registry';
 import { rarityPullWeight } from '@engine/shop';
 
 /**
@@ -28,9 +29,74 @@ export const simSubstitutes: Record<CardDefId, (state: GameState, player: Player
   infinite_realities: (state, player) => winningDeckFor(state, player),
 };
 
-/** SB-13 fusion hook: fuse the given component definitions into one card. */
-export function fuseForCard(components: CardDefId[]): CardDefinition {
-  return fusedDefinition(components.map((id) => getCard(id)));
+/**
+ * Matchmaker and Freaky Phil fuse "non-fused" cards. A composite carries no
+ * mark a `CardFilter` can read — `CardInstance.fusedFrom` is instance state the
+ * filter layer never looks at — but SB-13 fixes a fused card's NAME as
+ * "<A> · <B>", and no printed card in the catalog holds that separator, so the
+ * name is an exact test for "this is already a fusion".
+ */
+const NOT_ALREADY_FUSED: CardFilter = { not: { nameContainsAny: [' · '] } };
+
+/**
+ * One "Discover 2 Known Universe cards and Fuse them" pass for What is Love?.
+ *
+ * Both picks are created in hand carrying `tag`, and the fuse runs from inside
+ * the Discover's own `then`, on the LAST pick — `x` is the pick index, so
+ * `x == 1` is the second of two. That is the only point where both picks are
+ * guaranteed to exist: `then` runs once per chosen card (pushChosen in
+ * effects/ops/choices.ts, and the same contract in core/resume.ts), and each of
+ * those runs ends in `runQueue`'s tail drain (effects/index.ts, "drain anything
+ * parked earlier"), which empties the queue parked behind the prompt — so a
+ * fuse written as a sibling node after the Discover would resolve after pick 0,
+ * with one card on the table, and merge nothing. Heroic Aura Mycology
+ * (advanced/auras.ts) is the same shape for the same reason. That drain is also
+ * why each pass carries its own tag: the second Discover runs between the first
+ * one's two picks, so the two passes interleave and each fuse has to be able to
+ * find its own pair.
+ *
+ * The mark is `trg:`-prefixed, the engine's "bookkeeping, not a game tally"
+ * namespace: `selfCounter` skips it (effects/context.ts), the client view hides
+ * it (view.ts) and start of turn wipes it (core/triggers.ts). The cleanup below
+ * clears it in the ordinary case; the prefix is what keeps the one case that
+ * cannot reach the cleanup harmless — a codex too small to offer 2 options
+ * makes `pick` clamp to 1 (opDiscover), so `x == 1` never comes round and the
+ * single card would otherwise carry a permanent tally no effect ever meant to
+ * read. The component consumed into the composite keeps its mark in the trash
+ * for the same reason.
+ */
+function discoverAndFuse(tag: string): EffectNode {
+  return {
+    op: 'discover',
+    pool: { scope: 'knownUniverse' },
+    count: 3,
+    pick: 2,
+    prompt: 'Discover 2 cards to Fuse',
+    then: [
+      { op: 'createCard', defId: '$discovered', to: 'hand', counters: { [tag]: 1 } },
+      {
+        op: 'conditional',
+        if: { expr: 'x == 1' },
+        then: [
+          {
+            op: 'fuse',
+            target: { who: 'self', zone: 'hand', filter: { counter: { key: tag, gte: 1 } } },
+            to: 'hand',
+          },
+          // The composite is the first component reused in place, counters and
+          // all, so the mark has to come off it: a second copy of this card
+          // played the same turn writes the same key, and its fuse would
+          // otherwise pull this composite in as a third component.
+          {
+            op: 'addCounter',
+            target: { who: 'self', zone: 'hand', filter: { counter: { key: tag, gte: 1 } } },
+            key: tag,
+            amount: -1,
+          },
+        ],
+      },
+    ],
+  };
 }
 
 /** Hearthstone pack odds expressed over the shop's own rarity pull weights. */
@@ -382,39 +448,11 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 2 },
-    effects: [
-      {
-        op: 'repeat',
-        times: 2,
-        effects: [
-          {
-            op: 'discover',
-            pool: { scope: 'knownUniverse' },
-            count: 3,
-            pick: 2,
-            prompt: 'Discover 2 cards to Fuse',
-            // SB-13's fusion arithmetic exists (`fusedDefinition`) but no op
-            // reaches it, so card data cannot merge the two picks. A bare
-            // `then: []` is worse than nothing here: the resume path's default
-            // Discover branch creates EVERY pick in hand, so `pick: 2` inside
-            // `repeat times: 2` handed out four cards where the printed yield
-            // is two. The `x == 0` guard — North Star's idiom in
-            // economy/draw.ts — runs the body once per prompt instead of once
-            // per pick, so each repeat still yields one card. When a fuse op
-            // lands, replace this whole conditional with it.
-            then: [
-              {
-                op: 'conditional',
-                if: { expr: 'x == 0' },
-                then: [{ op: 'createCard', defId: '$discovered', to: 'hand' }],
-              },
-            ],
-          },
-        ],
-      },
-    ],
+    // Written out twice rather than wrapped in `repeat`, because the two passes
+    // need different tags to keep their pairs apart — see `discoverAndFuse`.
+    effects: [discoverAndFuse('trg:wil:1'), discoverAndFuse('trg:wil:2')],
     triggers: [],
-    text: 'Discover 2 Known Universe cards, Fuse them and add the result to your hand — twice. +2 Actions.',
+    text: 'Discover 2 Known Universe cards to Fuse and add the result to your hand — twice. +2 Actions.',
     flavor: 'Baby don\'t hurt me.',
     complexity: 'T4',
     subsystems: ['S-FUSE', 'S-CODEX'],
@@ -431,13 +469,15 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 1 },
+    // No `to`: the fusion mutates the first component in place, so the
+    // composite stays at that card's position in the Library (SB-13) and the
+    // Library shrinks by one. Nothing is copied and nothing is shuffled — the
+    // printed line is deck compression, not deck growth.
     effects: [
       {
-        op: 'copyCard',
-        target: { who: 'self', zone: 'library', count: 2, pick: 'random' },
-        to: 'library',
+        op: 'fuse',
+        target: { who: 'self', zone: 'library', count: 2, pick: 'random', filter: NOT_ALREADY_FUSED },
       },
-      { op: 'shuffle', zone: 'library', who: 'self' },
     ],
     triggers: [],
     text: 'Fuse 2 random non-fused cards in your Library. +1 Action.',
@@ -456,13 +496,14 @@ export const cards: CardDefinition[] = [
     rarity: 'legendary',
     keywords: [],
     stats: { actions: 1 },
+    // Matchmaker with three components. `fusedDefinition` sums the three costs
+    // and caps the result at 20 (SB-13); a Library holding fewer than 2
+    // non-fused cards fuses nothing rather than half-merging.
     effects: [
       {
-        op: 'copyCard',
-        target: { who: 'self', zone: 'library', count: 3, pick: 'random' },
-        to: 'library',
+        op: 'fuse',
+        target: { who: 'self', zone: 'library', count: 3, pick: 'random', filter: NOT_ALREADY_FUSED },
       },
-      { op: 'shuffle', zone: 'library', who: 'self' },
     ],
     triggers: [],
     text: 'Fuse 3 random non-fused cards in your Library. +1 Action.',
@@ -482,10 +523,20 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { buys: 1 },
     effects: [
+      // Both clauses are still engine-blocked, and the mods below are the
+      // closest inert placeholders. `appendEffects` is only read by
+      // `consumePlayMods` (core/play.ts), which skips every `appliesTo:'buy'`
+      // mod, and the buy path's own `peekBuyMods`/`consumeBuyMods`
+      // (core/buy.ts) read costDelta, costFloor and buyTo alone — so the refund
+      // never pays out, and `selfCost` would read Frankenstein's (3) rather
+      // than the purchase's cost even if it did.
       {
         op: 'nextCardModifier',
         mod: { appliesTo: 'buy', uses: 1, costDelta: 0, appendEffects: [{ op: 'gain', stat: 'money', amount: { expr: 'floor(selfCost / 2)' } }] },
       },
+      // `consumeBuyMods` decrements every `appliesTo:'buy'` mod on the FIRST
+      // purchase, so this lands there too instead of on the second one, and
+      // NextCardMod has no ordering or skip field to say otherwise.
       {
         op: 'nextCardModifier',
         mod: { appliesTo: 'buy', uses: 1, buyTo: 'hand' },

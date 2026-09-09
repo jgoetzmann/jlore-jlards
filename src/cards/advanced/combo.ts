@@ -295,12 +295,23 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: {},
+    // "One Ricochet per turn" is subtype-wide and seat-scoped: the mark has to
+    // stop a DIFFERENT Ricochet firing later the same turn, so it lives on the
+    // player rather than on the instance. `turn:` is the prefix resetTurnStats
+    // clears at the start of the owner's turn (src/engine/core/turn.ts).
+    //
+    // The 0-amount write in front is not a no-op. `addCounter` creates the key,
+    // and the expression grammar THROWS on an identifier that is in neither
+    // EXPR_VARS nor `vars`; evalCondition swallows that throw as `false`, so
+    // without the seed the gate would be permanently closed on the first play
+    // of every turn — the exact opposite of what it is for.
     effects: [
+      { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 0 },
       {
         op: 'conditional',
-        if: { combo: 3 },
+        if: { all: [{ combo: 3 }, { expr: 'ricochetUsed == 0' }] },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'ricochetUsedThisTurn', amount: 1 },
+          { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 1 },
           { op: 'moveTo', target: { who: 'self', zone: 'play', filter: { type: 'Action' }, count: 1, pick: 'random' }, zone: 'hand' },
           { op: 'gain', stat: 'actions', amount: 1 },
         ],
@@ -323,12 +334,15 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // Same seat-scoped, turn-cleared mark as Ricochet — all three share it, so
+    // playing Ricochet+ after Ricochet is the second Ricochet and does nothing.
     effects: [
+      { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 0 },
       {
         op: 'conditional',
-        if: { combo: 3 },
+        if: { all: [{ combo: 3 }, { expr: 'ricochetUsed == 0' }] },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'ricochetUsedThisTurn', amount: 1 },
+          { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 1 },
           { op: 'moveTo', target: { who: 'self', zone: 'play', filter: { type: 'Action' }, count: 2, pick: 'random' }, zone: 'hand' },
           { op: 'gain', stat: 'actions', amount: 2 },
         ],
@@ -351,12 +365,14 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // Shares the one `turn:ricochetUsed` mark with Ricochet and Ricochet+.
     effects: [
+      { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 0 },
       {
         op: 'conditional',
-        if: { combo: 3 },
+        if: { all: [{ combo: 3 }, { expr: 'ricochetUsed == 0' }] },
         then: [
-          { op: 'addCounter', target: { self: true }, key: 'ricochetUsedThisTurn', amount: 1 },
+          { op: 'addCounter', scope: 'player', key: 'turn:ricochetUsed', amount: 1 },
           { op: 'moveTo', target: { who: 'self', zone: 'play', filter: { type: 'Action' }, count: 3, pick: 'random' }, zone: 'hand' },
           { op: 'gain', stat: 'actions', amount: 3 },
         ],
@@ -685,25 +701,70 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
-    // A `selectCards` `then` runs once per selected card, so the old min/max 2
-    // wrapper raised two separate choose-2 discards (four cards) and Recruited
-    // twice. The discard prompt IS the selection; the conditional keeps the
-    // Recruit contingent on there being two cards to pay with.
-    // The "same cost" / "of that cost" linkage stays unwritten: CardFilter.cost
-    // is a NumericFilter of literal numbers and nothing binds a discarded
-    // card's cost into scope, so the text no longer promises it.
+    // "Same cost" needs a card to name the cost, so the first of the two
+    // discards is chosen first and `forEach` binds it as the source — inside
+    // that body `selfCost` IS its cost, and a NumericFilter bound may now be an
+    // expression. The `has` gate counts the anchor itself, so `atLeast: 2` is
+    // "there is a partner at this cost"; the second discard then picks from
+    // that cost band only.
+    //
+    // The fetch is a `moveTo` + explicit shuffle rather than `{op:'recruit'}`
+    // because opRecruit matches through `matchesDefFilter` WITHOUT calling
+    // resolveFilter, so an expression bound in a recruit filter is not a
+    // number, is skipped, and silently matches every Action.
+    //
+    // KNOWN DIVERGENCE: the anchor is picked before the gate can see it, so a
+    // player holding a valid pair who picks an unpairable card as the anchor
+    // gets nothing — no discard, no Recruit. It is inert rather than wrong (the
+    // gate is what stops a half-paid cost), and it cannot be closed from card
+    // data: CardFilter has no "has a same-cost partner in this zone" axis to
+    // narrow the anchor pool with, and Selector carries no prompt string, so
+    // the pick cannot even be labelled — opForEach passes a fixed
+    // 'Choose cards'.
     effects: [
       {
         op: 'conditional',
         if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 2 } },
         then: [
-          { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'choose' } },
-          { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+          {
+            op: 'forEach',
+            over: { who: 'self', zone: 'hand', count: 1, pick: 'choose' },
+            effects: [
+              {
+                op: 'conditional',
+                if: {
+                  has: {
+                    target: { who: 'self', zone: 'hand', filter: { cost: { eq: { expr: 'selfCost' } } } },
+                    atLeast: 2,
+                  },
+                },
+                then: [
+                  { op: 'discard', target: { self: true } },
+                  {
+                    op: 'discard',
+                    target: { who: 'self', zone: 'hand', filter: { cost: { eq: { expr: 'selfCost' } } }, count: 1, pick: 'choose' },
+                  },
+                  {
+                    op: 'moveTo',
+                    target: {
+                      who: 'self',
+                      zone: 'library',
+                      filter: { type: 'Action', cost: { eq: { expr: 'selfCost' } } },
+                      count: 1,
+                      pick: 'top',
+                    },
+                    zone: 'hand',
+                  },
+                  { op: 'shuffle', zone: 'library' },
+                ],
+              },
+            ],
+          },
         ],
       },
     ],
     triggers: [],
-    text: 'Discard 2 cards to Recruit an Action. +1 Action, +1 Card.',
+    text: 'Discard 2 same-cost cards to Recruit an Action of that cost. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -719,23 +780,37 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
-    // The Recruit was unsequenced from the trash and fired on an empty hand as
-    // well. `ifPrevious` is not an option — PREV_KEY is read in evalCondition
-    // and written nowhere, so it is always false — hence the explicit hand
-    // check in front. "Of that cost" is the same unwritable cost binding as on
-    // Synchro Summon, so the text no longer promises it.
+    // `forEach` over the one random hand card binds it as the source, and that
+    // is what carries "of that cost" into the fetch: inside the body `selfCost`
+    // is the trashed card's cost, and instanceCost is zone-independent, so it
+    // still reads the same number once the card is sitting in the trash. The
+    // forEach also replaces the old explicit hand check — an empty hand selects
+    // nothing and the body never runs. Same `moveTo` + shuffle as Synchro
+    // Summon, for the same reason: opRecruit does not resolve expression bounds
+    // in its filter.
     effects: [
       {
-        op: 'conditional',
-        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 1 } },
-        then: [
-          { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'random' } },
-          { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+        op: 'forEach',
+        over: { who: 'self', zone: 'hand', count: 1, pick: 'random' },
+        effects: [
+          { op: 'trash', target: { self: true } },
+          {
+            op: 'moveTo',
+            target: {
+              who: 'self',
+              zone: 'library',
+              filter: { type: 'Action', cost: { eq: { expr: 'selfCost' } } },
+              count: 1,
+              pick: 'top',
+            },
+            zone: 'hand',
+          },
+          { op: 'shuffle', zone: 'library' },
         ],
       },
     ],
     triggers: [],
-    text: 'Trash a random card from your hand to Recruit an Action. +1 Action, +1 Card.',
+    text: 'Trash a random card from your hand to Recruit an Action of that cost. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -751,22 +826,49 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1, cards: 1 },
-    // Same `selectCards` misuse as Synchro Summon: the body ran twice, for four
-    // discards and two Recruits. "Costing their sum" cannot be written — no op
-    // accumulates the cost of what was discarded and NumericFilter takes
-    // literals only — so the text stops promising the cost band.
+    // "Costing their sum" needs an accumulator, because `selfCost` only ever
+    // names ONE card and the forEach rebinds it per discard. A player counter
+    // is the one writable running total: each iteration adds its own cost to
+    // `turn:fusedCost`, the fetch reads it back by name (the `turn:` prefix is
+    // stripped for expressions), and the last node subtracts the total away
+    // again so a second Fusion Summon in the same turn starts from zero. The
+    // `turn:` prefix is the backstop for that — a suspended resolution that
+    // never reaches the subtraction is cleared at the start of the next turn.
+    //
+    // `moveTo` + shuffle rather than `{op:'recruit'}`: opRecruit matches through
+    // matchesDefFilter without resolveFilter, so an expression cost bound there
+    // is skipped and every Action matches.
     effects: [
       {
         op: 'conditional',
         if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 2 } },
         then: [
-          { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'choose' } },
-          { op: 'recruit', zone: 'library', filter: { type: 'Action' }, count: 1, who: 'self', to: 'hand' },
+          {
+            op: 'forEach',
+            over: { who: 'self', zone: 'hand', count: 2, pick: 'choose' },
+            effects: [
+              { op: 'addCounter', scope: 'player', key: 'turn:fusedCost', amount: { expr: 'selfCost' } },
+              { op: 'discard', target: { self: true } },
+            ],
+          },
+          {
+            op: 'moveTo',
+            target: {
+              who: 'self',
+              zone: 'library',
+              filter: { type: 'Action', cost: { eq: { expr: 'fusedCost' } } },
+              count: 1,
+              pick: 'top',
+            },
+            zone: 'hand',
+          },
+          { op: 'shuffle', zone: 'library' },
+          { op: 'addCounter', scope: 'player', key: 'turn:fusedCost', amount: { expr: '0 - fusedCost' } },
         ],
       },
     ],
     triggers: [],
-    text: 'Discard 2 cards to Recruit an Action. +1 Action, +1 Card.',
+    text: 'Discard 2 cards to Recruit an Action costing their sum. +1 Action, +1 Card.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
@@ -906,38 +1008,94 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['PlayOnBuy', 'Flimsy'],
     stats: {},
-    // The Gold option is offered on every resolution, the Play-on-Buy one
-    // included: buy.ts moves the card to hand and calls playCard, so the buy
-    // resolution and a later play are indistinguishable to the effect body and
-    // nothing in ctx.vars marks which is which. The doc's "when played, Gold is
-    // added to the options" split needs that signal; until it exists the card
-    // prints the always-offered choice it actually gives you.
+    // "When played, Gold is added to the options" needs the body to know which
+    // resolution it is in, and buy.ts plays a Play-on-Buy card through the same
+    // playCard path as a hand play. The discriminator is timing: buy.ts fires
+    // the bought instance's own onBuy triggers BEFORE it hands the instance to
+    // playCard, so the trigger below stamps this instance as "bought, not yet
+    // resolved" and the Play-on-Buy resolution immediately spends the stamp.
+    // Any later play — the card is Flimsy, so that means a copy gained rather
+    // than bought — reads 0 and gets the Gold option.
+    //
+    // The 0-amount write in front creates the `counter` key without changing
+    // it, which is what makes the read mean the stamp: buildVars falls back to
+    // the SUM of every counter on the instance when no named key exists, and a
+    // purchase already leaves `pricePaid` behind (buy.ts writes it before the
+    // onBuy window), so an unseeded copy could read someone else's number.
     effects: [
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: 0 },
       {
-        op: 'choose',
-        options: [
+        op: 'conditional',
+        if: { expr: 'selfCounter >= 1' },
+        then: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: -1 },
           {
-            label: 'Discover a (4)-cost card',
-            effects: [
+            op: 'discover',
+            pool: { scope: 'knownUniverse', filter: { cost: { eq: 4 } } },
+            count: 3,
+            pick: 1,
+            prompt: 'Discover a (4)-cost card',
+            then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+          },
+        ],
+        else: [
+          {
+            op: 'choose',
+            options: [
               {
-                op: 'discover',
-                pool: { scope: 'knownUniverse', filter: { cost: { eq: 4 } } },
-                count: 3,
-                pick: 1,
-                prompt: 'Discover a (4)-cost card',
-                then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+                label: 'Discover a (4)-cost card',
+                effects: [
+                  {
+                    op: 'discover',
+                    pool: { scope: 'knownUniverse', filter: { cost: { eq: 4 } } },
+                    count: 3,
+                    pick: 1,
+                    prompt: 'Discover a (4)-cost card',
+                    then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+                  },
+                ],
+              },
+              {
+                label: 'Take a Gold instead',
+                effects: [{ op: 'createCard', defId: 'gold', to: 'gy' }],
               },
             ],
-          },
-          {
-            label: 'Take a Gold instead',
-            effects: [{ op: 'createCard', defId: 'gold', to: 'gy' }],
           },
         ],
       },
     ],
-    triggers: [],
-    text: 'Play on Buy, Flimsy. Choose one: Discover a (4)-cost card from your Known Universe to your GY, or take a Gold to your GY.',
+    // Keyed `counter` because that is the one instance counter buildVars
+    // surfaces to expressions by name; any other key would fold into the sum of
+    // every counter on the card.
+    triggers: [
+      {
+        on: 'onBuy',
+        effects: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+          // The Play-on-Buy resolution spends the stamp, but buy.ts skips that
+          // play when an onBuy/onGain trigger trashed the instance first or
+          // stripped PlayOnBuy, and the body can also be cut off by the node
+          // budget before the -1 node runs. A stamp left standing would make a
+          // LATER hand play of this same instance — recurred out of the trash —
+          // take the bought branch and silently drop the Gold option, so the
+          // stamp expires at end of turn: it only has to outlive the purchase.
+          // A spent stamp reads 0 here and the cleanup is a no-op, so the
+          // counter never runs negative and a re-bought copy re-stamps cleanly.
+          {
+            op: 'delayed',
+            when: 'endOfTurn',
+            effects: [
+              {
+                op: 'conditional',
+                if: { expr: 'selfCounter >= 1' },
+                then: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: -1 }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    text: 'Play on Buy, Flimsy. Discover a (4)-cost card from your Known Universe and add it to your GY. When played, a Gold is added to the options.',
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     shop: 'draft',
@@ -953,23 +1111,64 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: ['PlayOnBuy', 'Flimsy'],
     stats: {},
+    // Same buy-versus-play discriminator as Golden Scarab: the onBuy trigger
+    // stamps the instance before buy.ts hands it to playCard, the Play-on-Buy
+    // resolution spends the stamp and Discovers a (5), and a play that is not a
+    // purchase Discovers a (6) instead. Same 0-amount seed as Golden Scarab so
+    // `selfCounter` names the stamp rather than falling back to the sum of
+    // whatever else is on the instance.
     effects: [
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: 0 },
       {
-        op: 'discover',
-        pool: { scope: 'knownUniverse', filter: { cost: { gte: 5, lte: 6 } } },
-        count: 3,
-        pick: 1,
-        prompt: 'Discover a (5)- or (6)-cost card',
-        then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+        op: 'conditional',
+        if: { expr: 'selfCounter >= 1' },
+        then: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: -1 },
+          {
+            op: 'discover',
+            pool: { scope: 'knownUniverse', filter: { cost: { eq: 5 } } },
+            count: 3,
+            pick: 1,
+            prompt: 'Discover a (5)-cost card',
+            then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+          },
+        ],
+        else: [
+          {
+            op: 'discover',
+            pool: { scope: 'knownUniverse', filter: { cost: { eq: 6 } } },
+            count: 3,
+            pick: 1,
+            prompt: 'Discover a (6)-cost card',
+            then: [{ op: 'createCard', defId: '$discovered', to: 'gy' }],
+          },
+        ],
       },
     ],
-    triggers: [],
-    // The (5)-on-buy / (6)-when-played split needs a "this resolution came from
-    // Play on Buy" signal the engine does not expose — buy.ts plays the card
-    // through the same playCard path, and selfPlayCount counts plays of the
-    // DEFINITION, so a second bought copy already reads 2 on its own on-buy
-    // resolution. One (5)-or-(6) pool is what the card actually does.
-    text: 'Play on Buy, Flimsy. Discover a (5)- or (6)-cost card from your Known Universe and add it to your GY.',
+    triggers: [
+      {
+        on: 'onBuy',
+        effects: [
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+          // Same expiry as Golden Scarab: a stamp the Play-on-Buy resolution
+          // never got to spend would make a later hand play of this instance
+          // Discover a (5) instead of the printed (6), so it is cleared at the
+          // end of the turn it was written in.
+          {
+            op: 'delayed',
+            when: 'endOfTurn',
+            effects: [
+              {
+                op: 'conditional',
+                if: { expr: 'selfCounter >= 1' },
+                then: [{ op: 'addCounter', target: { self: true }, key: 'counter', amount: -1 }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    text: 'Play on Buy, Flimsy. Discover a (5)-cost card from your Known Universe and add it to your GY. When played, Discover a (6)-cost card instead.',
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     shop: 'draft',

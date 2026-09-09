@@ -571,24 +571,12 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 2, cards: 2 },
     effects: [],
-    triggers: [
-      {
-        on: 'startOfTurn',
-        zones: ['shop'],
-        condition: { not: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 1 } } },
-        effects: [
-          {
-            op: 'modifyCost',
-            scope: 'pile',
-            target: { shop: 'draft', filter: { defId: 'pure_of_heart' } },
-            setTo: 0,
-            floor: 0,
-            duration: 'turn',
-          },
-        ],
-      },
-    ],
-    text: 'This costs (0) while your hand is empty. +2 Actions, +2 Cards.',
+    // The (0) price is a live reading of the hand, not a modifier: a
+    // start-of-turn snapshot samples the hand at the one moment it is
+    // guaranteed to hold five cards. It is priced in `shop/dynamic.ts`, which
+    // `costOf` consults at purchase time, so nothing is authored here.
+    triggers: [],
+    text: 'Costs (0) if your hand is empty. +2 Actions, +2 Cards.',
     flavor: 'Nothing to declare.',
     complexity: 'T2',
     subsystems: ['S-COSTMOD'],
@@ -875,7 +863,11 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 1 },
     effects: [
-      { op: 'gain', stat: 'money', amount: { expr: 'max(0, deckSize - madOfOpponentDeck)' } },
+      // `largestOpponentDeck` is the biggest opponent deck, so the subtraction
+      // is simultaneously the gate ("if you have the largest deck") and the
+      // payout ("X = size lead"). It used to read `madOfOpponentDeck`, a cost
+      // dispersion, which paid ~9 Money off a (1) card on turn one.
+      { op: 'gain', stat: 'money', amount: { expr: 'max(0, deckSize - largestOpponentDeck)' } },
       { op: 'trash', target: { who: 'self', zone: 'gy' } },
     ],
     triggers: [],
@@ -946,10 +938,30 @@ export const cards: CardDefinition[] = [
     effects: [],
     triggers: [
       {
+        // `zones:['play']` is what makes this a rider: `firePlayTriggers` sweeps
+        // the buyer's play area on every purchase, so a Rebate already played
+        // watches the buys that follow it.
         on: 'onBuy',
         zones: ['play'],
         maxPerTurn: 1,
-        effects: [{ op: 'gain', stat: 'money', amount: { expr: 'ceil(selfCost * 0.6)' } }],
+        effects: [
+          {
+            // The trigger's own source is the Rebate, so `selfCost` there is
+            // Rebate's (3) — a flat 2 refund for a (10) buy and a (0) buy
+            // alike. `forEach` rebinds the source to the card it selected, and
+            // the card just bought is the newest entry in the buyer's GY
+            // (`buyCard` moves it there before it fires onBuy), so the body
+            // reads the bought card's cost instead.
+            //
+            // `max(0, ...)` is load-bearing: costs are signed and the Series
+            // Funding pile runs (-1)…(-7), where a bare `ceil(selfCost * 0.6)`
+            // is negative and `opGain` does not clamp Money — a refund would
+            // CHARGE the buyer. A refund of a negative price is 0.
+            op: 'forEach',
+            over: { who: 'self', zone: 'gy', count: 1, pick: 'bottom' },
+            effects: [{ op: 'gain', stat: 'money', amount: { expr: 'max(0, ceil(selfCost * 0.6))' } }],
+          },
+        ],
       },
     ],
     text: '+1 Buy. Your first purchase this turn refunds 60% of its cost, rounded up.',
@@ -1003,11 +1015,70 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
+    // Paid back rather than never charged. `scope:'nextBuy'` drops `setTo`
+    // entirely (opModifyCost pushes a bare `{costDelta, costFloor}`), so the
+    // old node discounted nothing AND clamped a negative-cost buy up to (0),
+    // eating the credit from a Series Funding. A `delta` of −X instead would
+    // discount whatever you bought next, not the (X)-cost card the row names,
+    // because a NextCardMod carries no cost filter. The refund below is the
+    // one shape that stays gated to the printed price: net money is identical
+    // to free, at the cost of having to afford the card for one instant.
+    //
+    // The refund is the PRINTED cost. `instanceCost` consults `costOf` only for
+    // an instance still sitting in a pile, and `buyCard` has already moved the
+    // bought card to the GY, so nothing on the card side can see the price a
+    // cost modifier actually charged. That is why the text below says "refunds"
+    // and not "is free": with a discount live on the pile the two are different
+    // numbers, and the card would otherwise promise something it cannot pay.
+    //
+    // `curvatureUsed` is a per-PURCHASE mark. A player counter is shared by
+    // every copy, and `firePlayTriggers` resolves each Professor in play in
+    // sequence, so on one qualifying buy two Professors both saw a charge, both
+    // paid, and a single purchase ate both. `buysUsedThisTurn` is incremented
+    // inside `buyCard` before any trigger fires and the refund bumps
+    // `curvatureUsed` to match, so `buysUsedThisTurn > curvatureUsed` holds
+    // exactly once per purchase however many copies are watching. The 0-amount
+    // seed in front creates the key: the expression grammar throws on an
+    // identifier that is in neither EXPR_VARS nor the player's counters, and
+    // `evalCondition` swallows that throw as `false`.
     effects: [
-      { op: 'modifyCost', scope: 'nextBuy', setTo: 0, floor: 0, duration: 'turn' },
+      { op: 'addCounter', scope: 'player', key: 'turn:curvatureFree', amount: 1 },
+      { op: 'addCounter', scope: 'player', key: 'turn:curvatureUsed', amount: 0 },
     ],
-    triggers: [],
-    text: 'On turn X, the next card you buy costing exactly (X) is free.',
+    triggers: [
+      {
+        // A rider: `firePlayTriggers` sweeps the buyer's play area on each
+        // purchase. The counter is written by the body above, so an unplayed
+        // Professor leaves the name undefined and the condition reads false.
+        on: 'onBuy',
+        zones: ['play'],
+        condition: {
+          all: [{ expr: 'curvatureFree >= 1' }, { expr: 'buysUsedThisTurn > curvatureUsed' }],
+        },
+        effects: [
+          {
+            // The card just bought is the newest entry in the GY; `forEach`
+            // rebinds the source to it so `selfCost` is ITS price and not the
+            // Professor's (1). Filtering the selector instead would match an
+            // older (X)-cost card still sitting in the GY.
+            op: 'forEach',
+            over: { who: 'self', zone: 'gy', count: 1, pick: 'bottom' },
+            effects: [
+              {
+                op: 'conditional',
+                if: { expr: 'selfCost == currentTurn' },
+                then: [
+                  { op: 'gain', stat: 'money', amount: { expr: 'selfCost' } },
+                  { op: 'addCounter', scope: 'player', key: 'turn:curvatureFree', amount: -1 },
+                  { op: 'addCounter', scope: 'player', key: 'turn:curvatureUsed', amount: 1 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    text: 'On turn X, the next card you buy with a printed cost of exactly (X) refunds that cost.',
     flavor: 'The curve bends toward the bursar.',
     complexity: 'T3',
     subsystems: ['S-COSTMOD'],
@@ -1024,39 +1095,72 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: {},
-    effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCost' } }],
+    // The reroll is a price, not a modifier: no dispatcher fires triggers on a
+    // card sitting in a shop pile, so the `{on:'startOfTurn', zones:['shop']}`
+    // node that used to sit here was dead on arrival. `shop/dynamic.ts` derives
+    // the (−2)…(10) price from (seed, turn) at cost time instead, which rerolls
+    // every turn and still replays exactly.
+    //
+    // The payout is the price PAID, and a Lead in hand cannot read it:
+    // `selfCost` off a non-shop instance is the printed (4), the midpoint of
+    // the range, so a bare `{expr:'selfCost'}` here paid a flat 4 whatever the
+    // reroll charged. Nothing in the frozen var list carries the price a
+    // purchase charged either, so the price is banked onto the card at the
+    // moment of purchase instead — the Biblical Greed pattern: `counter` is the
+    // reserved key `selfCounter` reads on its own, and counters survive every
+    // zone move, so the payout below is the number THIS copy was bought for.
+    effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCounter' } }],
     triggers: [
       {
-        on: 'startOfTurn',
-        zones: ['shop'],
-        effects: [
-          {
-            op: 'random',
-            branches: [
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: -2, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: -1, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 0, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 1, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 2, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 3, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 4, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 5, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 6, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 7, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 8, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 9, floor: -2, duration: 'turn' }] },
-              { weight: 1, effects: [{ op: 'modifyCost', scope: 'pile', target: { shop: 'draft', filter: { defId: 'lead' } }, setTo: 10, floor: -2, duration: 'turn' }] },
-            ],
-          },
-        ],
-      },
-      {
+        // SB-27, and live: buy.ts fires onBuy on the bought instance itself.
         on: 'onBuy',
         effects: [
           {
             op: 'lockPile',
             target: { shop: 'draft', filter: { defId: 'lead' } },
             duration: 'turn',
+          },
+          {
+            // `buyCard` has already moved this copy to the GY, where its cost
+            // reads as the printed (4), so the turn's reroll has to come off a
+            // Lead still in the pile: `forEach` rebinds the source to it and
+            // `selfCost` there is `costOf` — the price this buy was charged.
+            // The bought copy is the newest GY entry (`buyCard` appends it) and
+            // the pile self-locks above, so no second Lead can land behind it
+            // this turn. The `has` guard is load-bearing: `addCounter` falls
+            // back to its OWN source when the target selector is empty, which
+            // would bank the price onto the shop copy instead.
+            op: 'forEach',
+            over: { zone: 'shop', filter: { defId: 'lead' }, count: 1 },
+            effects: [
+              {
+                op: 'conditional',
+                if: {
+                  has: {
+                    target: { who: 'self', zone: 'gy', filter: { defId: 'lead' }, count: 1, pick: 'bottom' },
+                  },
+                },
+                then: [
+                  {
+                    op: 'addCounter',
+                    target: { who: 'self', zone: 'gy', filter: { defId: 'lead' }, count: 1, pick: 'bottom' },
+                    key: 'counter',
+                    amount: { expr: 'selfCost' },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            // Bought the last copy in the pile: there is nothing left to price
+            // off, so fall back to the printed (4) rather than banking nothing
+            // and paying 0 later. This node sits outside the forEach, so `self`
+            // is still the card just bought.
+            op: 'conditional',
+            if: { not: { has: { target: { zone: 'shop', filter: { defId: 'lead' }, count: 1 } } } },
+            then: [
+              { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: 'selfCost' } },
+            ],
           },
         ],
       },
@@ -1112,23 +1216,12 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 2, buys: 2, cards: 2 },
     effects: [],
-    triggers: [
-      {
-        on: 'onPlay',
-        zones: ['shop'],
-        effects: [
-          {
-            op: 'modifyCost',
-            scope: 'pile',
-            target: { shop: 'draft', filter: { defId: 'giants_aid' } },
-            delta: -1,
-            floor: 0,
-            duration: 'turn',
-          },
-        ],
-      },
-    ],
-    text: 'This costs (1) less for each card you have played this turn. +2 Actions, +2 Buys, +2 Cards.',
+    // A running discount, so it is a price rather than a modifier: `onPlay`
+    // reaches only the card being played, never a card in a pile, and one
+    // firing would have subtracted (1) once instead of once per card. Priced in
+    // `shop/dynamic.ts` as `max(0, 11 - cards played this turn)`.
+    triggers: [],
+    text: 'Costs (1) less per card played this turn. +2 Actions, +2 Buys, +2 Cards.',
     flavor: 'He helps those who have already helped themselves.',
     complexity: 'T3',
     subsystems: ['S-COSTMOD'],

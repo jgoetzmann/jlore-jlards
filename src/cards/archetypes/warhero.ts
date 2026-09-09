@@ -83,9 +83,65 @@ export const cards: CardDefinition[] = [
         keywords: ['Flimsy'],
         counters: { auraGambit: 1 },
       },
+      // The stamp on the token records that *a* Gambit gave it away; it cannot
+      // record WHICH seat did, because `counters` on createCard is a fixed
+      // literal. This player-scoped tally is the other half of that pair: one
+      // claim per token handed out, spent when a token is collected. Only a
+      // seat that actually PLAYED the card holds claims.
+      {
+        op: 'addCounter',
+        scope: 'player',
+        key: 'auraGambitOwed',
+        amount: { expr: 'playerCount - 1' },
+        who: 'self',
+      },
     ],
-    triggers: [],
-    text: '+1 Action. Give each opponent a Flimsy Warhero Token. When one of those Tokens is trashed, it goes to your GY instead.',
+    triggers: [
+      // The return leg. `warhero_token` is a shared definition with no triggers
+      // of its own and an instance cannot carry one, so the gift is stamped with
+      // a counter and this card collects from wherever it sits in your deck.
+      // `zones` only NARROWS the declaration — a trigger with no `zones` fires
+      // from any zone, and fireOwnedTriggers already sweeps play/hand/gy/library
+      // — but naming them keeps the rider honest about where it watches from.
+      // `who:'self'` on the moveTo is the whole trick: it names the DESTINATION
+      // owner, and without it the token drops straight back into the GY of the
+      // player who just trashed it. `who:'owner'` would be wrong here — inside
+      // the forEach the source is the TOKEN, and its owner is the victim. The
+      // stamp is cleared before the move, or the token would walk home again
+      // every time you played and trashed it.
+      //
+      // Settled at the end of your turn — the trash happens on their turn, and a
+      // card cannot watch another player's trash. The `auraGambitOwed` gate is
+      // what stops the victim keeping the gift: endOfTurn fires for the active
+      // player only, so the victim's end of turn always settles first, and
+      // ungated, any seat holding ANY Gambit copy — this pile is `draft`, so a
+      // copy bought and left in a library is a normal state — swept the stamped
+      // token into its own GY before the granter's turn came round. One claim is
+      // spent per collection, so no seat can take more tokens than it gave away.
+      // Two seats that have both PLAYED a Gambit still share one stamp pool, and
+      // there the first to settle takes the token.
+      {
+        on: 'endOfTurn',
+        zones: ['play', 'gy', 'hand', 'library'],
+        condition: { expr: 'auraGambitOwed > 0' },
+        effects: [
+          {
+            op: 'forEach',
+            over: {
+              zone: 'trash',
+              filter: { defId: 'warhero_token', counter: { key: 'auraGambit', gte: 1 } },
+              count: { expr: 'auraGambitOwed' },
+            },
+            effects: [
+              { op: 'addCounter', target: { self: true }, key: 'auraGambit', amount: -1 },
+              { op: 'moveTo', target: { self: true }, zone: 'gy', who: 'self' },
+              { op: 'addCounter', scope: 'player', key: 'auraGambitOwed', amount: -1, who: 'self' },
+            ],
+          },
+        ],
+      },
+    ],
+    text: '+1 Action. Give each opponent a Flimsy Warhero Token with “when trashed, give it to you”.',
     flavor: 'A gift with a return address.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PVP'],

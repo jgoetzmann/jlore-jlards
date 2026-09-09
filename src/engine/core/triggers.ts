@@ -64,6 +64,14 @@ export function fireInstanceTriggers(
   player: PlayerId,
   iid: InstanceId,
   depth = 0,
+  /**
+   * Extra expression variables for this event. `onBuy` carries `paid` — the
+   * price the purchase actually charged — because a rider watching your buys
+   * has no other way to learn it: the bought card has already left the shop, so
+   * `selfCost` reads its printed cost, and the trigger's own source instance is
+   * the rider rather than the purchase.
+   */
+  vars?: Record<string, number>,
 ): GameState {
   const inst = state.instances[iid];
   if (!inst) return state;
@@ -81,7 +89,7 @@ export function fireInstanceTriggers(
       if (used >= trig.maxPerTurn) continue;
       live.counters[key] = used + 1;
     }
-    const ctx = makeContext(player, iid, depth);
+    const ctx = makeContext(player, iid, depth, 1, vars ? { ...vars } : {});
     if (!conditionHolds(s, trig.condition, ctx)) continue;
     if (!budgetLeft(s)) {
       appendLog(s, 'fizzle', player, { reason: 'nodeBudget', event, iid });
@@ -204,6 +212,7 @@ export function firePlayTriggers(
   player: PlayerId,
   exceptIid: InstanceId | null,
   depth = 0,
+  vars?: Record<string, number>,
 ): GameState {
   const p = state.players[player];
   if (!p) return state;
@@ -216,7 +225,7 @@ export function firePlayTriggers(
     // Only a trigger that declares where it watches from counts as a rider;
     // an undeclared `onBuy` still means "when I am bought".
     if (!list.some((t) => t.on === event && t.zones && t.zones.includes('play'))) continue;
-    s = fireInstanceTriggers(s, event, player, iid, depth);
+    s = fireInstanceTriggers(s, event, player, iid, depth, vars);
     if (s.pending) break;
   }
   return s;

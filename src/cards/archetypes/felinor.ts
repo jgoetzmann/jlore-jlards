@@ -19,7 +19,13 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 2 },
     effects: [],
-    triggers: [{ on: 'onTrash', effects: [{ op: 'moveTo', target: { self: true }, zone: 'gy' }] }],
+    // `who` on a moveTo names the owner the card ends up with, and
+    // `activePlayer` is the seat taking the turn — inside a trigger `self` is
+    // the instance's OWNER, which is exactly the player this card is printed
+    // NOT to return to when somebody else trashes it.
+    triggers: [
+      { on: 'onTrash', effects: [{ op: 'moveTo', target: { self: true }, zone: 'gy', who: 'activePlayer' }] },
+    ],
     text: '+2 Cards. When this is trashed, it goes to the current player’s GY instead.',
     flavor: 'It keeps coming back and it keeps not being yours.',
     complexity: 'T3',
@@ -172,18 +178,20 @@ export const cards: CardDefinition[] = [
         prompt: 'Discover an Action to send to your GY with a Felinor.',
         then: [
           // '$discovered' resolves to the defId the player actually picked.
-          // The old `then` re-rolled the pool and dropped a second, unrelated
-          // Action into the GY, so the pick did nothing. The printed rider — a
-          // Felinor that plays that Action when trashed — needs a trigger on an
-          // instance, which only a definition can carry, so the two cards go to
-          // the GY side by side instead.
-          { op: 'createCard', defId: 'felinor', to: 'gy' },
-          { op: 'createCard', defId: '$discovered', to: 'gy' },
+          // The printed rider — a Felinor that plays that Action when trashed —
+          // needs a trigger, and a trigger can only be read off a definition,
+          // so the escort is its own token (`mewing_felinor`, below). The
+          // discovered Action is stamped with a `mewed` counter on the way into
+          // the GY and the token's onTrash plays the card carrying it: a static
+          // definition cannot hold a defId chosen at the table, but it can look
+          // for the mark this card left.
+          { op: 'createCard', defId: '$discovered', to: 'gy', counters: { mewed: 1 } },
+          { op: 'createCard', defId: 'mewing_felinor', to: 'gy' },
         ],
       },
     ],
     triggers: [],
-    text: 'Discover an Action from your Known Universe and add it to your GY, along with a Felinor.',
+    text: 'Discover an Action from your Known Universe and add it to your GY, along with a Felinor that plays it when trashed.',
     flavor: 'Jaw sharp, plan sharper.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
@@ -265,8 +273,17 @@ export const cards: CardDefinition[] = [
     effects: [
       { op: 'createCard', defId: 'felinor', to: 'hand' },
       {
+        // Not a trash-zone read: the trash is global and permanent, so
+        // {zone:'trash', subtype:'Felinor'} was true forever from the first
+        // Flimsy Felinor anyone played. `trashInstance` (core/zones.ts) stamps
+        // `turn:trashedFelinor` on the trashed card's OWNER, not on whoever
+        // performed the trash, and an expression reads the key without the
+        // `turn:` prefix. So this pays for trashing your own Felinor — the
+        // common case, and the only one a Flimsy token can produce — but not
+        // for trashing an opponent's. The key clears at the start of each
+        // player's own turn, so nobody banks phantom credit from your turn.
         op: 'conditional',
-        if: { has: { target: { zone: 'trash', filter: { subtype: 'Felinor' } }, atLeast: 1 } },
+        if: { expr: 'trashedFelinor >= 1' },
         then: [
           { op: 'gain', stat: 'money', amount: 2 },
           { op: 'draw', amount: 1 },
@@ -294,8 +311,20 @@ export const cards: CardDefinition[] = [
     effects: [
       { op: 'createCard', defId: 'felinor', to: 'hand', count: 2 },
       {
+        // Same owner-stamped per-turn tally as Felinor Factory, with the same
+        // caveat noted there, replacing the global trash read that was
+        // permanently true. The printed clause is forward-looking and this one
+        // is not, and that gap is not closable from card data: `onTrash` is a
+        // SELF_EVENT (effects/triggers.ts), so a card sitting in play can never
+        // see another card being trashed, there is no table-wide trash event to
+        // subscribe to, and a Buy handed out at end of turn is a Buy nobody can
+        // spend. Giving the tokens an onTrash of their own would mean a bespoke
+        // token in place of the `felinor` the doc's token table names for this
+        // card, and would pay twice over if both were trashed. So it pays for a
+        // Felinor trashed earlier in the turn — the half of the clause that is
+        // real.
         op: 'conditional',
-        if: { has: { target: { zone: 'trash', filter: { subtype: 'Felinor' } }, atLeast: 1 } },
+        if: { expr: 'trashedFelinor >= 1' },
         then: [{ op: 'gain', stat: 'buys', amount: 1 }],
       },
     ],
@@ -525,11 +554,11 @@ export const cards: CardDefinition[] = [
     // token: a Flimsy Felinor whose onTrash is the raid. The top 2 of each
     // Library are staged in `aside` first so the (6)+ filter reads those two
     // cards rather than the whole Library. Notes on the three nodes:
-    //   - `recruit` and not a moveTo selector: a Selector's `count` is a total
-    //     across every matched player, so {who:'eachOpponent', count:2} would
-    //     mill 2 cards off ONE opponent and never touch the rest. `recruit`
-    //     applies `count` per resolved player, which is what “each opponent”
-    //     means. Its trailing library shuffle is the price of that.
+    //   - `perPlayer:true` on the staging selector: a Selector's `count` is a
+    //     total across every matched player, so {who:'eachOpponent', count:2}
+    //     milled 2 cards off ONE opponent and never touched the rest. This card
+    //     used `recruit` to get a per-player count, and paid for it with
+    //     `recruit`'s trailing library shuffle, which the card does not print.
     //   - `moveTo ... who:'self'` is the steal: `who` names the owner the card
     //     ends up with, so the (6)+ cards land in the raider's GY instead of
     //     going home. They leave `aside` before the trash node, so they survive.
@@ -550,7 +579,11 @@ export const cards: CardDefinition[] = [
       {
         on: 'onTrash',
         effects: [
-          { op: 'recruit', who: 'eachOpponent', zone: 'library', count: 2, to: 'aside' },
+          {
+            op: 'moveTo',
+            target: { who: 'eachOpponent', zone: 'library', count: 2, perPlayer: true, pick: 'top' },
+            zone: 'aside',
+          },
           {
             op: 'moveTo',
             target: {
@@ -578,6 +611,49 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-TOKEN', 'S-PVP'],
     notPurchasable: true,
     art: { key: 'jo_felinor', status: 'placeholder', anim: 'trash' },
+  },
+  {
+    // Mewing's escort, on the same footing as `jo_felinor`: a trigger can only
+    // be read off a definition, so the Felinor that "plays it when trashed" has
+    // to be a token of its own. The card it plays is chosen at the table and no
+    // static definition can name it, so Mewing marks the discovered Action with
+    // a `mewed` counter as it lands in the GY and this token goes looking for
+    // the mark. `selectCards` binds the picked instance as the source, so
+    // `{self:true}` in the `then` is the marked card — the mark is spent first
+    // so a second Mewing Felinor cannot replay a card this one already played.
+    id: 'mewing_felinor',
+    name: 'Mewing Felinor',
+    cost: { money: 0 },
+    types: ['Action', 'Token'],
+    subtypes: ['Felinor'],
+    tags: [],
+    rarity: 'token',
+    keywords: ['Flimsy'],
+    stats: { cards: 2 },
+    effects: [],
+    triggers: [
+      {
+        on: 'onTrash',
+        effects: [
+          {
+            op: 'selectCards',
+            from: { zone: 'gy', filter: { type: 'Action', counter: { key: 'mewed', gte: 1 } } },
+            min: 1,
+            max: 1,
+            then: [
+              { op: 'addCounter', target: { self: true }, key: 'mewed', amount: -1 },
+              { op: 'playCard', target: { self: true } },
+            ],
+          },
+        ],
+      },
+    ],
+    text: 'Flimsy. +2 Cards. When this is trashed, play the Action Mewing sent to your GY with it.',
+    flavor: 'He held the note until something happened.',
+    complexity: 'T3',
+    subsystems: ['S-TOKEN', 'S-CODEX'],
+    notPurchasable: true,
+    art: { key: 'mewing_felinor', status: 'placeholder', anim: 'trash' },
   },
 ];
 

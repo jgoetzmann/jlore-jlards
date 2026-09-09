@@ -53,16 +53,21 @@ export const cards: CardDefinition[] = [
     effects: [
       {
         op: 'conditional',
+        // Approximate, and the only reading available. `lockedPiles` walks
+        // EVERY pile in the shop and counts `locks.length > 0` without asking
+        // `lockIsActive`, so inert locks and other shops' locks feed the gate
+        // while the draft shop's own live count is never isolated; the literal
+        // 5 is half of the default draft pile count. Neither a live draft-lock
+        // count nor the configured pile count is exposed to expressions.
         if: { expr: 'lockedPiles < 5' },
         then: [
           {
             op: 'lockPile',
-            // `pick:'choose'` with no `count` returns EVERY draft pile and never
-            // prompts (resolvePiles short-circuits on `want >= all.length`), so
-            // this locked the whole Draft Shop. A pile prompt cannot be answered
-            // yet — a suspended 'selectPile' node is dropped on resume — so the
-            // one pile is picked deterministically instead of by hand.
-            target: { shop: 'draft', pick: 'mostExpensive', count: 1, excludeJlore: true },
+            // A real prompt: `count: 1` is what makes `pick:'choose'` suspend
+            // (an uncounted pile selector short-circuits on `want >= all.length`
+            // and silently returns the whole Draft Shop), and a suspended
+            // 'selectPile' node is now re-dispatched with the answer on resume.
+            target: { shop: 'draft', pick: 'choose', count: 1, excludeJlore: true },
             duration: 'untilEndOfYourNextTurn',
           },
         ],
@@ -83,7 +88,7 @@ export const cards: CardDefinition[] = [
         effects: [{ op: 'gain', stat: 'prophet', amount: -2, who: 'chosenOpponent' }],
       },
     ],
-    text: 'Play on Buy, Flimsy. Lock the most expensive Draft Shop pile. Unlocking it costs an opponent (-2) Prophet. Fails if half or more of the Draft piles are already Locked.',
+    text: 'Play on Buy, Flimsy. Lock a Draft Shop pile. Unlocking it costs an opponent (-2) Prophet. Fails if half or more of the Draft piles are already Locked.',
     flavor: 'The market kneels.',
     complexity: 'T3',
     subsystems: ['S-LOCK', 'S-PROPHET'],
@@ -385,6 +390,10 @@ export const cards: CardDefinition[] = [
           who: 'eachOpponent',
           zone: ['library', 'hand', 'gy'],
           count: 1,
+          // Without this, `count` is a total across the whole table: the blade
+          // took ONE card at three seats, and both could come from the same
+          // player. `perPlayer` runs the count-and-pick once per opponent.
+          perPlayer: true,
           pick: 'mostExpensive',
         },
       },
@@ -506,21 +515,30 @@ export const cards: CardDefinition[] = [
       {
         op: 'modifyCost',
         scope: 'pile',
-        // An uncounted pile selector returns every draft pile without ever
-        // prompting, which discounted the whole shop. Pile prompts cannot be
-        // answered yet, so the one pile is picked deterministically.
-        target: { shop: 'draft', pick: 'mostExpensive', count: 1 },
+        // "Choose a Draft Shop pile" is now a real prompt: `count: 1` is what
+        // makes `pick:'choose'` suspend (an uncounted pile selector returns
+        // every draft pile without ever asking, which discounted the whole
+        // shop), and the suspended node is re-dispatched with the chosen pile.
+        target: { shop: 'draft', pick: 'choose', count: 1 },
         delta: -3,
         floor: 0,
         duration: 'turn',
       },
       {
+        // Still dormant, and kept as the correct authoring shape. `peekBuyMods`
+        // and `consumeBuyMods` read only costDelta/costFloor/buyTo off an
+        // `appliesTo:'buy'` mod, and `consumePlayMods` — the one place
+        // grantKeyword IS honoured — skips buy-scoped mods, so no bought card
+        // ever gains PlayOnBuy. The card-side alternative would be `setKeyword`
+        // over the pile's cards, but a Selector has no pile axis (only
+        // `zone:'shop'`, which is every pile in every shop) and setKeyword has
+        // no duration, so it would grant the keyword shop-wide and forever.
         op: 'nextCardModifier',
         mod: { appliesTo: 'buy', grantKeyword: 'PlayOnBuy', uses: 9 },
       },
     ],
     triggers: [],
-    text: 'Play on Buy, Flimsy. The most expensive Draft Shop pile costs (3) less this turn, and its cards gain Play on Buy.',
+    text: 'Play on Buy, Flimsy. Choose a Draft Shop pile: this turn its cards cost (3) less and gain Play on Buy.',
     flavor: 'The verse on discounts.',
     complexity: 'T3',
     subsystems: ['S-COSTMOD', 'S-PROPHET'],

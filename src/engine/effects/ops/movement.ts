@@ -28,6 +28,7 @@ import { matchesDefFilter } from '../select';
 import { downgradedDefId, upgradedDefId } from '@engine/systems/upgrade.js';
 import { fusedDefinition } from '@engine/systems/fuse.js';
 import { registerCards } from '@engine/registry';
+import resolveEffects from '../index';
 
 const OWNED: Zone[] = ['library', 'hand', 'gy', 'play'];
 
@@ -392,7 +393,23 @@ export function opFuse(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?
     const i = s.instances[iid];
     if (i) zoneBefore.set(iid, i.zone);
   }
-  for (const iid of targets) fireEvent(s, q, item, 'onFuse', iid, item.player);
+  // `onFuse` is a VETO, so it has to resolve before the merge is decided.
+  // `fireEvent` only enqueues, and the queue drains long after this op returns —
+  // a refusal would have landed after the composite was already built, and if
+  // the refuser happened to be component 0 it would have destroyed the finished
+  // fusion instead of excusing itself. Resolved inline here instead.
+  for (const iid of targets) {
+    const inst = s.instances[iid];
+    if (!inst) continue;
+    const def = tryGetCard(inst.defId);
+    if (!def) continue;
+    for (const trig of def.triggers) {
+      if (trig.on !== 'onFuse') continue;
+      const ctx = { ...ctxFor(item), sourceIid: iid };
+      const after = resolveEffects(s, trig.effects, ctx);
+      Object.assign(s, after);
+    }
+  }
 
   // Anything that moved (Chopped Chuzz trashing itself) is out of the merge.
   const live = targets.filter((iid) => {

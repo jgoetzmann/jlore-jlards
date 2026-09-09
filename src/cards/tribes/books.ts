@@ -247,12 +247,11 @@ export const cards: CardDefinition[] = [
     keywords: ['Temporary'],
     stats: { actions: 1 },
     effects: [
-      // `count` is applied to the pooled candidate list rather than per player,
-      // so one `eachPlayer` node discards 2 cards in total. Split in two, you
-      // always lose 2 yourself and the opponents lose 2 between them; exactly 2
-      // each needs a per-player count in the selector.
-      { op: 'discard', target: { who: 'self', zone: 'hand', count: 2, pick: 'random' } },
-      { op: 'discard', target: { who: 'eachOpponent', zone: 'hand', count: 2, pick: 'random' } },
+      // `count` is a TOTAL across everyone the selector reached, so a bare
+      // `eachPlayer` node took 2 cards between the whole table. `perPlayer`
+      // runs the count-and-pick once per resolved player, which is what "each
+      // player discards 2" prints.
+      { op: 'discard', target: { who: 'eachPlayer', zone: 'hand', count: 2, pick: 'random', perPlayer: true } },
       { op: 'createCard', defId: 'felinor', to: 'hand', who: 'eachPlayer', count: 2 },
     ],
     triggers: [],
@@ -274,26 +273,52 @@ export const cards: CardDefinition[] = [
     keywords: ['Temporary'],
     stats: { actions: 1 },
     effects: [
-      // A.14 also prints ‘when trashed, add an original copy to their hand’ on
-      // the marked cards. A keyword is the only rider an instance can carry —
-      // triggers are read off the definition — so that half is unimplemented,
-      // and `text` says only what the card actually does rather than promising
-      // it.
+      // A.14 marks each card twice: Flimsy, plus a `bookOfBlood` counter the
+      // rider below reads. `forEach` binds each picked card as the source so
+      // both marks land on the SAME three cards — re-resolving a `pick:'random'`
+      // selector for a second op would have drawn three different ones.
       {
-        op: 'setKeyword',
-        target: {
+        op: 'forEach',
+        over: {
           who: 'eachOpponent',
           zone: ['library', 'hand', 'gy'],
           filter: { type: 'Action' },
           count: 3,
           pick: 'random',
         },
-        keyword: 'Flimsy',
-        on: true,
+        effects: [
+          { op: 'setKeyword', target: { self: true }, keyword: 'Flimsy', on: true },
+          { op: 'addCounter', target: { self: true }, key: 'bookOfBlood', amount: 1 },
+        ],
       },
     ],
-    triggers: [],
-    text: '+1 Action. Give 3 Action cards in opponents’ decks Flimsy.',
+    triggers: [
+      // The rider half of the row. A marked card cannot carry a trigger of its
+      // own — triggers are read off the definition — so the Book keeps watch
+      // from the trash its own Temporary put it in: `zones:['trash']` is the
+      // declaration fireOwnedTriggers sweeps the trash for. It settles at the
+      // end of each of your turns, the closest standing hook card data has to
+      // "the moment it was trashed".
+      {
+        on: 'endOfTurn',
+        zones: ['trash'],
+        effects: [
+          {
+            op: 'forEach',
+            over: { zone: 'trash', filter: { counter: { key: 'bookOfBlood', gte: 1 } } },
+            effects: [
+              // Strip the mark off the corpse first: copyCard carries the
+              // source's granted keywords over, and the row promises an
+              // ORIGINAL copy, not another Flimsy one.
+              { op: 'setKeyword', target: { self: true }, keyword: 'Flimsy', on: false },
+              { op: 'copyCard', target: { self: true }, to: 'hand', who: 'owner' },
+              { op: 'addCounter', target: { self: true }, key: 'bookOfBlood', amount: -1 },
+            ],
+          },
+        ],
+      },
+    ],
+    text: '+1 Action. Give 3 Action cards in opponents’ decks Flimsy and “when trashed, add an original copy to their hand”.',
     flavor: 'Signed in a hurry.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],

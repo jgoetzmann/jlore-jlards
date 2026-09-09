@@ -13,6 +13,7 @@
 
 import { makeRng } from '@engine/rng';
 import { applyBuff } from '@engine/systems/buff.js';
+import { matchesFilter } from '@engine/effects';
 import type {
   EffectNode,
   GameState,
@@ -168,7 +169,11 @@ function emptyMods(): ResolvedMods {
  * Consume every pending modifier that applies to a play. B41/B74: multiplyNext
  * routes through here, once, and then the modifier is gone.
  */
-export function consumePlayMods(state: GameState, player: PlayerId): ResolvedMods {
+export function consumePlayMods(
+  state: GameState,
+  player: PlayerId,
+  iid?: InstanceId,
+): ResolvedMods {
   const p = state.players[player];
   const out = emptyMods();
   if (!p) return out;
@@ -176,6 +181,13 @@ export function consumePlayMods(state: GameState, player: PlayerId): ResolvedMod
   for (const mod of p.nextCardMods) {
     const applies = mod.appliesTo === undefined || mod.appliesTo === 'play' || mod.appliesTo === 'action';
     if (!applies) {
+      keep.push(mod);
+      continue;
+    }
+    // A filtered modifier waits for a card it actually names. Without this,
+    // "the next Resource you play" is spent by whatever you play first, so
+    // Shining Kit's buff went to a card the doc row does not cover.
+    if (mod.filter && iid && !matchesFilter(state, iid, mod.filter)) {
       keep.push(mod);
       continue;
     }
@@ -281,7 +293,7 @@ export function playCard(
   });
 
   // 3. Consume pending next-card modifiers (B41, B74).
-  const mods = consumePlayMods(s, player);
+  const mods = consumePlayMods(s, player, iid);
   for (const kw of mods.grantKeywords) {
     if (!inst.addedKeywords.includes(kw)) inst.addedKeywords.push(kw);
   }

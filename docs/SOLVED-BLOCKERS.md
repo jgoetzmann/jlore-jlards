@@ -747,6 +747,119 @@ could not catch it: the definition was fine, the id list was wrong.
 
 ---
 
+## From the deferred-card pass
+
+The audit fixed what card data could express and left ~110 cards whose printed
+behaviour the engine had no way to say. This pass built those capabilities and
+finished the cards. The decisions worth recording:
+
+### SB-54. A Selector's `count` is a table total, not a quota each
+
+**Resolved:** `Selector.perPlayer` applies `count` and `pick` once per resolved
+player. The default stays a total, because "trash 2 cards from the table" is
+also a real clause — but "each opponent discards 2" needs the other reading and
+was silently taking 2 between them. `{op:'recruit'}` was already per-player,
+which is why some cards had been contorted into using it as a discard.
+
+### SB-55. `self` is not "the current player"
+
+**Resolved:** `Who` gained `activePlayer`, `nextPlayer` and `owner`.
+
+Inside a trigger the effect frame belongs to the instance's OWNER, so `self`
+resolves to whoever owns the card, not to whoever is taking the turn. Recurring
+Felinor prints "it goes to the current player's GY instead" and there was no way
+to name that player. `owner` is its mirror, for a trigger that must pay the
+card's owner rather than the actor.
+
+### SB-56. Prices that are a reading of the board
+
+**Resolved:** `src/engine/shop/dynamic.ts` — a small table of definitions whose
+price is a pure function of state, consulted by `costOf` before the modifier
+stack. Pure of Heart ("costs (0) if your hand is empty"), Giant's Aid ("(1) less
+per card played this turn"), Lead's per-turn reroll and Craft a Card's
+"highest price you can still afford" all live there.
+
+Every previous attempt at these was a trigger declared on the shop-pile
+instance, and no dispatcher fires triggers on a card sitting in a pile — so all
+four were dead. A start-of-turn snapshot could not work either: Pure of Heart's
+condition is sampled at the one moment in the turn cycle when the hand is
+guaranteed full.
+
+**REVISIT** if a card ever needs a price that depends on a choice the buyer has
+not made yet. Blood Diamond Cutter is that shape — it discounts itself by
+trashing cards as part of the purchase — and is deliberately not in the table.
+
+### SB-57. Per-turn state that belongs to the seat, not to a card
+
+**Resolved:** `{op:'addCounter', scope:'player'}` writes `PlayerState.counters`,
+and a key prefixed `turn:` is cleared in `resetTurnStats`. Expressions read the
+key by name with the prefix stripped.
+
+An instance counter cannot express "one Ricochet per turn": a *second* Ricochet
+is a different instance and would not see the first one's mark. Trashing also
+stamps `turn:trashed` and `turn:trashed<Subtype>` on the player doing the
+trashing — not the card's owner, because "if you trashed a Felinor this turn" is
+about your action and taking an opponent's Felinor has to count for you.
+
+### SB-58. Locks and cost mods disagreed about what `expiresOnTurn` means
+
+**Resolved:** a lock's `expiresOnTurn` is the first turn it is already GONE
+(`lockIsActive` tests `turn < expiresOnTurn`); a CostMod's is the LAST turn it
+still bites. One helper was serving both, so it was right for cost mods and one
+turn short for locks — which made **every `duration:'turn'` lock in the catalog
+inert the instant it was applied.** `expiryTurnFor` and `costModExpiryFor` now
+each serve their own convention and the shared helper is deprecated.
+
+### SB-59. Fusion
+
+**Resolved:** `{op:'fuse'}`, wiring up the `fusedDefinition` builder that had
+been written, tested against SB-13's arithmetic, and never called. The first
+component becomes the composite in place — so Matchmaker can fuse cards inside a
+Library — and the rest are consumed.
+
+Each component gets an `onFuse` trigger **resolved inline, before the merge is
+committed**. That is Chopped Chuzz's "when this attempts to Fuse, trash it
+instead": enqueuing the trigger instead would have run the refusal after the
+composite already existed, and if the refuser happened to be the first component
+it would have destroyed the finished card rather than excusing itself.
+
+### SB-60. A modifier that waits for the card it names
+
+**Resolved:** `NextCardMod.filter`. A modifier that names a filter is neither
+applied to nor consumed by a card that does not match, so "the next Resource you
+play" stops meaning "the next card you play, if it happens to be a Resource".
+
+### SB-61. What a purchase actually cost
+
+**Resolved:** the price paid is stamped on the bought instance as
+`counters.pricePaid` (read as `selfPricePaid`) and passed into the `onBuy`
+trigger frame as `paid`.
+
+A rider watching your purchases had no way to learn the price: the bought card
+has already left the shop by the time the event fires, so `selfCost` reads its
+printed cost, and the trigger's own source instance is the rider rather than the
+purchase. Rebate's "refunds 60% of its cost" and Professor of Curvature's "that
+purchase is free" both depend on it.
+
+### SB-62. What is still not expressible
+
+Recorded so it is not re-litigated. Each of these is a *clause*, not a whole
+card; the cards ship faithful to their doc row with the clause absent rather
+than approximated, and each carries a comment naming what it needs.
+
+| Clause | Needs |
+|---|---|
+| Safety Net / The Fall Guy — redirect a trash | A pre-move "would be trashed" window carrying the subject. `onTrash` fires after the card is already in the trash. |
+| Freeze Tag — "if the two piles cost the same" | A pile binding that survives between nodes. A second selector rolls a fresh pile. |
+| Pointer, Hivemind, Infini Scepter, Homebrew | `NextCardMod.bind` / `absorbInto` are collected and not yet consumed on every path. |
+| Brownie, Loaf of Bread — hand adjacency | Hand position captured before `playCard` moves the card out of hand. |
+| Synchro Summon — "two cards of the same cost" | A filter axis for "has a same-cost partner in this zone". |
+| Cult Leader — affordability on the OFFER | `resolveFilter` in the pool and pile-selector paths, not only the selector path. |
+| Zephrys, Second Time Around, Infinite Realities | S-SIM, cut on purpose (DESIGN-CHOICES §11). |
+| The Eternal Show | The deliberate paradox loop, capped by SB-24 rather than resolved. |
+
+---
+
 ## Balance findings from the first harness runs
 
 Not blockers — measurements, recorded here because they are the first real

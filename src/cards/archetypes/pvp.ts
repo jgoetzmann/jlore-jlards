@@ -14,22 +14,31 @@
  *    so each one was read individually.
  *  - `count` on a `who:'eachOpponent'` / `who:'eachPlayer'` selector is a
  *    table-wide total over the merged candidate list, not a per-player count.
- *    `recruit` is the one op that loops the players itself, so "each opponent
- *    loses one card" is spelled with recruit and a staging pass through
- *    `aside`. Recruit shuffles its source zone afterwards (SB-2 / B42) — that
- *    is the rule for reaching into a hidden Library, not a rider these cards
- *    print.
+ *    `perPlayer: true` runs the whole count-and-pick once per resolved player,
+ *    which is the fix wherever the quota is per seat.
+ *  - A per-seat EFFECT FRAME is a different thing again, and card data has
+ *    exactly one: `forEach` over a `perPlayer` selector that takes one card
+ *    from each player, whose body is then bound to that card, so `who:'owner'`
+ *    inside it names the seat it belongs to. That is how Siphon Squad reads a
+ *    hand-size ladder per opponent and how Mother Witch asks each opponent
+ *    about their own hand. `recruit` also loops the players, but it shuffles
+ *    its source zone afterwards (SB-2 / B42) — the rule for reaching into a
+ *    hidden Library, and wrong for a hand (B13) — so it is kept for Library
+ *    reads only.
  *  - `aside` is ONE staging pile per player, and a Hand Box parks its stored
  *    cards there across turns carrying the `boxed` counter. Every read of
  *    `aside` below is staging for the length of a single effect, so each one
  *    excludes stored cards with `filter:{not:{counter:{key:'boxed',gte:1}}}`.
- *    Without it War! antes somebody's stored card and Mother Witch turns one
- *    into a Cursed Pig.
+ *    Without it War! antes somebody's stored card and Corpo Espionage reveals
+ *    one.
  *  - A Discover `pool` ignores its own `who` (zoneDefIds walks every opponent),
  *    so an 'opponentLibrary' / 'opponentHand' pool offers cards from the whole
  *    table and whatever acts on the pick has to span the whole table too.
- *  - Hired Shrimp's `wordCount` is a frozen build-time constant. Its rules text
- *    length is never measured at runtime.
+ *  - Hired Shrimp's `wordCount` is a frozen build-time constant (SB-30). The
+ *    `wordCountLt` filter reads that field off the cards it is matching against
+ *    and falls back to counting the tokens of their text; nothing ever measures
+ *    Hired Shrimp's own rendered length at runtime, which is what keeps a card
+ *    whose rules text describes its own length from moving under itself.
  */
 import type { CardDefinition } from '@engine/types';
 
@@ -45,18 +54,31 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { money: 2 },
     effects: [
+      // The ladder is read once per opponent. A `who:'eachOpponent'` condition
+      // counts every hand merged into one pile, so three opponents holding 2
+      // cards each all scored as "4 or more" and then discarded 2 BETWEEN them.
+      // `forEach` over one card per opponent (`perPlayer`) is the per-seat effect
+      // frame: `who:'owner'` inside the body names the seat that card belongs to,
+      // and an opponent with an empty hand contributes no pass at all — which is
+      // the 0-or-1 rung.
       {
-        op: 'conditional',
-        if: { has: { target: { who: 'eachOpponent', zone: 'hand' }, atLeast: 4 } },
-        then: [
-          { op: 'discard', target: { who: 'eachOpponent', zone: 'hand', count: 2, pick: 'choose', chooser: 'owner' } },
-        ],
-        else: [
+        op: 'forEach',
+        over: { who: 'eachOpponent', zone: 'hand', perPlayer: true, count: 1, pick: 'top' },
+        effects: [
           {
             op: 'conditional',
-            if: { has: { target: { who: 'eachOpponent', zone: 'hand' }, atLeast: 2 } },
+            if: { has: { target: { who: 'owner', zone: 'hand' }, atLeast: 4 } },
             then: [
-              { op: 'discard', target: { who: 'eachOpponent', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' } },
+              { op: 'discard', target: { who: 'owner', zone: 'hand', count: 2, pick: 'choose', chooser: 'owner' } },
+            ],
+            else: [
+              {
+                op: 'conditional',
+                if: { has: { target: { who: 'owner', zone: 'hand' }, atLeast: 2 } },
+                then: [
+                  { op: 'discard', target: { who: 'owner', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' } },
+                ],
+              },
             ],
           },
         ],
@@ -395,17 +417,92 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       { op: 'reveal', target: { zone: 'hand' } },
+      // The floor is a reading of the CURATOR's hand, but each branch below runs
+      // in the opponent's own effect frame — that is what makes them the chooser —
+      // where `cheapestInHand` would read THEIR hand instead. So the number is
+      // taken here, in the Curator's frame, and posted onto every opponent as a
+      // player counter they read back as `curatorFloor`. The `turn:` prefix wipes
+      // it at the start of their next turn. `addCounter` adds rather than sets, so
+      // two Curators in one turn stack their floors — rare, and it only ever makes
+      // the tax stricter, never looser.
+      {
+        op: 'addCounter',
+        scope: 'player',
+        key: 'turn:curatorFloor',
+        amount: { expr: 'cheapestInHand' },
+        who: 'eachOpponent',
+      },
       {
         op: 'choose',
         who: 'eachOpponent',
         options: [
           {
-            label: 'Give a Draft Shop card costing at least the Curator’s cheapest revealed card',
-            effects: [{ op: 'gainCard', from: { shop: 'draft', pick: 'choose', excludeJlore: true }, to: 'gy', who: 'self', free: true }],
+            label: 'Give the Curator a card from the Draft Shop',
+            // `count:1` is what makes this a real prompt: a pile selector with no
+            // count returns every pile and `gainCard` then silently takes the top
+            // of the first one. The floor cannot ride here — `selectPilesWith`
+            // matches the raw filter, so an expression bound reads as no bound at
+            // all — and the cheapest Draft pile already outprices a typical hand's
+            // cheapest card. `who:'owner'` is the Curator's controller, so the
+            // card crosses the table instead of landing in the giver's own GY.
+            effects: [
+              {
+                op: 'gainCard',
+                from: { shop: 'draft', count: 1, pick: 'choose', excludeJlore: true },
+                to: 'gy',
+                who: 'owner',
+                free: true,
+              },
+            ],
           },
           {
-            label: 'Give a card from your hand',
-            effects: [{ op: 'moveTo', target: { zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' }, zone: 'gy' }],
+            label: 'Give the Curator a card from your hand costing at least that much',
+            effects: [
+              // The row says MUST, so this branch has to cost something. A hand
+              // holding nothing at or above the floor leaves the selector with an
+              // empty candidate set, `resolveTargets` returns [] rather than
+              // prompting, and the moveTo hands over nothing — picking this option
+              // was a free dodge. Tested first: a hand that cannot pay pays out of
+              // the Draft Shop instead, which is the row's other half rather than a
+              // way out of it.
+              {
+                op: 'conditional',
+                if: {
+                  has: {
+                    target: {
+                      who: 'self',
+                      zone: 'hand',
+                      filter: { cost: { gte: { expr: 'curatorFloor' } } },
+                    },
+                    atLeast: 1,
+                  },
+                },
+                then: [
+                  {
+                    op: 'moveTo',
+                    target: {
+                      who: 'self',
+                      zone: 'hand',
+                      count: 1,
+                      pick: 'choose',
+                      chooser: 'owner',
+                      filter: { cost: { gte: { expr: 'curatorFloor' } } },
+                    },
+                    zone: 'gy',
+                    who: 'owner',
+                  },
+                ],
+                else: [
+                  {
+                    op: 'gainCard',
+                    from: { shop: 'draft', count: 1, pick: 'choose', excludeJlore: true },
+                    to: 'gy',
+                    who: 'owner',
+                    free: true,
+                  },
+                ],
+              },
+            ],
           },
         ],
       },
@@ -548,6 +645,16 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // STILL NOT EXPRESSIBLE. There is no cancel channel: `consumePlayMods`
+      // reads multiply / multiplyStats / grantKeyword / grantSubtype /
+      // appendEffects / buffTimes / nerfTimes / absorbInto / bind and nothing
+      // else, `appendEffects` run AFTER the stat line and the printed body, and
+      // `absorbInto` copies a card's effects without stopping them. `buyTo` is a
+      // buy-mod field, so on this play-scoped mod it is read by nobody. The mod
+      // is left in place because it is inert — it documents the hook a
+      // `cancelTo` / `onlyTypes` pair would plug into — and because every
+      // authorable substitute (denying the Action, trashing the card) is a
+      // different card from the one the row prints.
       { op: 'nextCardModifier', mod: { who: 'eachOpponent', appliesTo: 'play', buyTo: 'gy', uses: 1 } },
     ],
     triggers: [],
@@ -569,17 +676,20 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      {
-        op: 'nextCardModifier',
-        mod: {
-          who: 'eachOpponent',
-          appliesTo: 'play',
-          uses: 1,
-          appendEffects: [
-            { op: 'delayed', when: 'startOfNextTurn', effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCost' } }] },
-          ],
-        },
-      },
+      // STILL NOT EXPRESSIBLE, and the previous shape was worse than nothing:
+      // `appendEffects` resolve in the OPPONENT's frame, so the delayed `gain`
+      // queued on the opponent and paid THEM the cost of the card they played at
+      // the start of their own next turn. A (5) Epic attack was a gift.
+      //
+      // The payee half is authorable now — an `onOpponentPlay` trigger runs in
+      // the owner's frame, `pick:'lastPlayed'` reaches the card the opponent just
+      // played, and a `delayed` queued there lands on the taxer's own next turn.
+      // The AMOUNT is not: nothing reads a card's Money output. `selfCost` is not
+      // it (Copper costs 0 and pays 1, Gold costs 6 and pays 3), and no
+      // expression variable, filter or op exposes `stats.money` of an instance.
+      // Redirecting the wrong number is a different card, so the mod is left
+      // inert — the hook is here, the reading is not.
+      { op: 'nextCardModifier', mod: { who: 'eachOpponent', appliesTo: 'play', uses: 1 } },
     ],
     triggers: [],
     text: 'The Money from the next Resource each opponent plays is paid to you at the start of your next turn instead.',
@@ -600,10 +710,40 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 2 },
     effects: [
-      { op: 'moveTo', target: { who: 'eachPlayer', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' }, zone: 'hand' },
+      // NARROWED AGAINST THE ROW, AND THE PRINTED TEXT SAYS SO. A.11 line 962
+      // reads “Each player passes a card from hand to the next player”; this card
+      // passes only YOUR card, and its `text` promises only that. The gap is on
+      // the card rather than hidden behind it, which is the whole point of the
+      // audit — a row the engine cannot reach must not be printed as if it could.
+      //
+      // Why the other seats cannot pass: a pass needs the seat AFTER each passer.
+      // The only thing that names a destination seat is `moveTo`'s `who`, and it
+      // is resolved once, against the frame the node runs in. No op reframes onto
+      // another player: `forEach` rebinds the source card but keeps the caster as
+      // `player`, `perPlayer` widens a selector without splitting the frame, and
+      // `recruit` — the one per-player mover — hands every card back to the seat
+      // it took it from. `who:'owner'` names a card's owner; nothing names the
+      // seat after that owner. `{op:'choose', who:'eachOpponent'}` does open a
+      // per-opponent frame, but only for two or more options, so reaching it
+      // means inventing a choice the row does not print — a different card, which
+      // is worse than a smaller one. Engine fix: a Who resolved from a bound
+      // card's owner ('nextAfterOwner'), or a real per-player effect frame.
+      //
+      // The old node was actively wrong rather than merely inert: `pick:'choose'`
+      // now suspends and resumes, and a `who:'eachPlayer'` hand selector pools
+      // every hand at the table into one prompt, so it offered whoever owned the
+      // first candidate a look at everybody's cards and then handed the pick back
+      // to its own owner. Passing only your own card under-delivers; it does not
+      // leak and it does not misfire.
+      {
+        op: 'moveTo',
+        target: { who: 'self', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' },
+        zone: 'hand',
+        who: 'nextPlayer',
+      },
     ],
     triggers: [],
-    text: '+2 Cards. Each player passes a card from their hand to the next player.',
+    text: '+2 Cards. Pass a card from your hand to the next player.',
     flavor: 'The tier list rotates.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -621,23 +761,52 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
+      // "Until your next turn" is a player counter with the `turn:` prefix: it is
+      // written on your turn and wiped at the start of your next one, which is
+      // exactly the window the row prints. `uses:99` was standing in for a
+      // duration a NextCardMod does not have.
+      { op: 'addCounter', scope: 'player', key: 'turn:clippedWings', amount: 1 },
+    ],
+    triggers: [
+      // The rider is a trigger, not a buy mod: `buyCard` reads costDelta,
+      // costFloor and buyTo off a buy-scoped mod and nothing else, so the old
+      // `appendEffects` were unreachable and the card was +1 Action.
+      //
+      // A bought card is appended to the BUYER's graveyard, so `pick:'bottom'` is
+      // the card they just gained. Binding it through `forEach` is what lets its
+      // cost be read: `selfCost` is then the bought card's, where a `filter` on
+      // the selector would have matched the dearest (6)+ card anywhere in that
+      // graveyard and fired on a (2) purchase.
+      //
+      // Only purchases are observable — there is no onOpponentGain — so a card
+      // an opponent gains without buying it slips the net.
+      //
+      // The counter arms the SEAT, not the copy, so every armed Clipped Wings in
+      // play or in the graveyard fires on the same purchase. That does NOT stack
+      // into a second Pig: each copy re-reads the bottom of the buyer's
+      // graveyard, and the first copy has already appended a Cursed Pig there, so
+      // the second binds a (0) token, fails `selfCost >= 6` and creates nothing.
+      // One Pig per (6)+ purchase however many copies are armed, which is what
+      // the row prints.
       {
-        op: 'nextCardModifier',
-        mod: {
-          who: 'eachOpponent',
-          appliesTo: 'buy',
-          uses: 99,
-          appendEffects: [
-            {
-              op: 'conditional',
-              if: { expr: 'max(0, selfCost - 5)' },
-              then: [{ op: 'createCard', defId: 'cursed_pig', to: 'gy' }],
-            },
-          ],
-        },
+        on: 'onOpponentBuy',
+        zones: ['play', 'gy'],
+        condition: { expr: 'clippedWings >= 1' },
+        effects: [
+          {
+            op: 'forEach',
+            over: { who: 'activePlayer', zone: 'gy', count: 1, pick: 'bottom' },
+            effects: [
+              {
+                op: 'conditional',
+                if: { expr: 'selfCost >= 6' },
+                then: [{ op: 'createCard', defId: 'cursed_pig', to: 'gy', who: 'activePlayer' }],
+              },
+            ],
+          },
+        ],
       },
     ],
-    triggers: [],
     text: '+1 Action. Until your next turn, an opponent who gains a card costing (6) or more also gains a Cursed Pig.',
     flavor: 'Fly lower. It is safer down here.',
     complexity: 'T3',
@@ -675,27 +844,34 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      // A Discover pool ignores `who` and its prompt always goes to the player
-      // resolving the card, so the printed Discover offered *your* hand to
-      // *you*. recruit is the one op that loops the players itself, so each
-      // opponent loses a card of their own rather than one between them. Its
-      // shuffle-after (SB-2) lands on a hand here, whose order zones.ts calls
-      // meaningful (B13) — no other op takes one card per player, so that is
-      // the price of the loop until one exists.
-      { op: 'recruit', zone: 'hand', count: 1, who: 'eachOpponent', to: 'aside' },
+      // `recruit` used to carry this because it was the only op that looped the
+      // players itself, and it pays for that with an unconditional shuffle of its
+      // source zone (B42 / SB-2) — right for a hidden Library, wrong for a hand,
+      // whose order zones.ts calls meaningful (B13). `forEach` over one card per
+      // opponent (`perPlayer`) is a per-seat effect frame with no zone churn at
+      // all: `who:'owner'` names that seat, and `transform` replaces the card in
+      // place, so the hand keeps its order and its size.
+      //
+      // A Discover pool still ignores its own `who` and always prompts the player
+      // resolving the card, so the printed "Discovers" — three offered, one
+      // picked — is not authorable; the opponent chooses from their whole hand
+      // instead. That is more generous to them than a Discover and strictly
+      // closer to the row than the old version, which took the top card of their
+      // hand with no choice at all.
       {
-        op: 'transform',
-        target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-        into: 'cursed_pig',
-      },
-      {
-        op: 'moveTo',
-        target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-        zone: 'hand',
+        op: 'forEach',
+        over: { who: 'eachOpponent', zone: 'hand', perPlayer: true, count: 1, pick: 'top' },
+        effects: [
+          {
+            op: 'transform',
+            target: { who: 'owner', zone: 'hand', count: 1, pick: 'choose', chooser: 'owner' },
+            into: 'cursed_pig',
+          },
+        ],
       },
     ],
     triggers: [],
-    text: 'Each opponent turns a card in their hand into a Cursed Pig.',
+    text: 'Each opponent chooses a card in their hand and turns it into a Cursed Pig.',
     flavor: 'She taught the baby everything.',
     complexity: 'T3',
     subsystems: ['S-PVP', 'S-TOKEN'],
@@ -776,7 +952,15 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'trash', target: { who: 'eachOpponent', zone: 'hand', filter: { name: '/[moseMOSE]/' } } },
+      // `filter.name` is an exact, case-sensitive comparison against def.name, so
+      // the regex-shaped string it used to hold matched nothing and the (5)
+      // Legendary was a blank. `nameContainsAny` is the substring axis, matched
+      // case-insensitively, and the row's letters go in one at a time: M, O, O,
+      // S, E collapses to four distinct letters.
+      {
+        op: 'trash',
+        target: { who: 'eachOpponent', zone: 'hand', filter: { nameContainsAny: ['m', 'o', 's', 'e'] } },
+      },
     ],
     triggers: [],
     text: 'Trash every card in every opponent’s hand whose name contains any letter of M, O, O, S, E.',
@@ -797,7 +981,12 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      { op: 'trash', target: { who: 'eachOpponent', zone: 'hand', filter: { name: 'wordsFewerThan:16' } } },
+      // `wordCountLt` reads the target definition's frozen `wordCount`, falling
+      // back to counting whitespace-separated tokens of its text. The bound is
+      // this card's own frozen count (SB-30 / doc 10.4), written out rather than
+      // read from itself: a card whose rules text is a function of its own
+      // rendered length only stays stable because the number never moves.
+      { op: 'trash', target: { who: 'eachOpponent', zone: 'hand', filter: { wordCountLt: 16 } } },
     ],
     triggers: [],
     text: 'Trash every card in each opponent’s hand that has fewer words in its text than this.',
@@ -824,12 +1013,19 @@ export const cards: CardDefinition[] = [
         when: 'startOfNextTurn',
         who: 'eachOpponent',
         effects: [
+          // The whole branch runs in the OPPONENT's frame — a delayed entry is
+          // queued per player and resolved with that player as the actor — so
+          // `chosenOpponent` was their highest-VP opponent, which in a 3+ player
+          // game is a third seat. A delayed entry carries the instance that
+          // queued it, so `who:'owner'` is the Pickle's controller from inside
+          // anybody's frame. Everything else here is meant to land on the
+          // chooser, so it stays unqualified.
           {
             op: 'choose',
             options: [
               { label: '-2 Money', effects: [{ op: 'gain', stat: 'money', amount: -2 }] },
               { label: 'Discard a random card', effects: [{ op: 'discard', target: { zone: 'hand', count: 1, pick: 'random' } }] },
-              { label: 'Give the Pickle player a Gold', effects: [{ op: 'createCard', defId: 'gold', to: 'gy', who: 'chosenOpponent' }] },
+              { label: 'Give the Pickle player a Gold', effects: [{ op: 'createCard', defId: 'gold', to: 'gy', who: 'owner' }] },
             ],
           },
         ],
@@ -855,8 +1051,26 @@ export const cards: CardDefinition[] = [
     stats: {},
     effects: [
       // One opponent's graveyard, not every graveyard merged into one pile.
-      { op: 'reveal', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' } },
-      { op: 'copyCard', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'mostExpensive' }, to: 'gy', who: 'self' },
+      //
+      // "The last card an opponent discarded" is the last entry in that
+      // graveyard: every route into a GY appends (`moveInstance` defaults to
+      // 'bottom'), and end-of-turn cleanup empties the play area BEFORE it
+      // discards the hand (turn.ts step 2), so the newest entry after a turn is
+      // genuinely the last card discarded and not the last card played.
+      // `pick:'bottom'` reads that entry; `pick:'mostExpensive'` was reaching the
+      // dearest card anywhere in the pile, which is a much bigger card.
+      //
+      // The row's "most expensive if several" tie-break is not implemented, and
+      // is unreachable from card data. Several cards can be discarded at once —
+      // end-of-turn cleanup empties a whole hand (turn.ts step 2) — but the engine
+      // applies them one at a time and records nothing about where one batch ends
+      // and the next begins, so no selector can range over "the cards discarded
+      // together" to find the dearest of them. "The last card discarded" stays
+      // exact under that ordering, which is why `pick:'bottom'` is the reading
+      // taken. Engine fix: a discard-batch (or discard-sequence) marker written by
+      // discardWithTrigger, plus a filter that reads it.
+      { op: 'reveal', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'bottom' } },
+      { op: 'copyCard', target: { who: 'chosenOpponent', zone: 'gy', count: 1, pick: 'bottom' }, to: 'gy', who: 'self' },
     ],
     triggers: [],
     text: 'Add a copy of the last card an opponent discarded to your GY. If several, take the most expensive. You see it first.',
@@ -961,71 +1175,70 @@ export const cards: CardDefinition[] = [
       // total, which is what left every other player's bet out of the pot.
       { op: 'recruit', zone: 'library', count: 1, who: 'eachPlayer', to: 'aside' },
       { op: 'reveal', target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } } },
+      // A tie is two bets sharing the dearest cost. Binding the dearest through
+      // `forEach` makes its cost readable as `selfCost`, and a filter bound may
+      // now be an expression, so "how many bets cost exactly that" is a real
+      // count. Two or more and everybody antes 3 more cards, which is what the
+      // row prints; a second tie after that falls to seat order rather than
+      // escalating again, because a `forEach` cannot re-enter itself.
       {
-        op: 'conditional',
-        if: {
-          has: {
-            target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-            atLeast: 1,
-          },
+        op: 'forEach',
+        over: {
+          who: 'eachPlayer',
+          zone: 'aside',
+          filter: { not: { counter: { key: 'boxed', gte: 1 } } },
+          count: 1,
+          pick: 'mostExpensive',
         },
-        then: [
-          // Nothing reads a revealed card's cost, so the dearest bet is sent to
-          // its owner's GY and the pot is awarded by who is left holding one:
-          // an empty aside pile of your own means yours was the dearest.
-          {
-            op: 'forEach',
-            over: {
-              who: 'eachPlayer',
-              zone: 'aside',
-              filter: { not: { counter: { key: 'boxed', gte: 1 } } },
-              count: 1,
-              pick: 'mostExpensive',
-            },
-            effects: [{ op: 'moveTo', target: { self: true }, zone: 'gy' }],
-          },
+        effects: [
           {
             op: 'conditional',
             if: {
-              not: {
-                has: {
-                  target: { who: 'self', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-                  atLeast: 1,
+              has: {
+                target: {
+                  who: 'eachPlayer',
+                  zone: 'aside',
+                  filter: { cost: { eq: { expr: 'selfCost' } }, not: { counter: { key: 'boxed', gte: 1 } } },
                 },
+                atLeast: 2,
               },
             },
-            // You won the pot, so it really changes hands: `who:'self'` on the
-            // moveTo is the owner the bets end up with.
             then: [
+              { op: 'recruit', zone: 'library', count: 3, who: 'eachPlayer', to: 'aside' },
               {
-                op: 'moveTo',
-                target: { who: 'eachOpponent', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-                zone: 'gy',
-                who: 'self',
-              },
-            ],
-            // Somebody else won it. Every bet goes home rather than sitting in
-            // `aside` for the rest of the match.
-            else: [
-              {
-                op: 'moveTo',
+                op: 'reveal',
                 target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
-                zone: 'gy',
               },
             ],
           },
         ],
-        else: [
+      },
+      // The pot goes to whoever bet the dearest card, whether that is you or not.
+      // `forEach` binds that card, and `who:'owner'` on the `moveTo` is the owner
+      // it belongs to — the only way card data can name the owner of a selected
+      // card, and the reason this used to be written as "the dearest bet goes
+      // home, and an empty aside pile of your own means you won".
+      {
+        op: 'forEach',
+        over: {
+          who: 'eachPlayer',
+          zone: 'aside',
+          filter: { not: { counter: { key: 'boxed', gte: 1 } } },
+          count: 1,
+          pick: 'mostExpensive',
+        },
+        effects: [
           {
             op: 'moveTo',
             target: { who: 'eachPlayer', zone: 'aside', filter: { not: { counter: { key: 'boxed', gte: 1 } } } },
             zone: 'gy',
+            who: 'owner',
           },
         ],
       },
     ],
     triggers: [],
-    text: 'Every player antes the top card of their Library. The dearest card wins: if it is yours, the whole pot joins your GY. Otherwise every card goes to its owner’s GY.',
+    text: 'Every player antes the top card of their Library. The dearest card takes the whole pot into its owner’s GY. If two or more tie for dearest, every player antes 3 more cards first.',
     flavor: 'War. War never changes the shuffle.',
     complexity: 'T3',
     subsystems: ['S-PVP'],
@@ -1065,6 +1278,15 @@ export const cards: CardDefinition[] = [
       // The row prints a three-turn fuse and nothing about the shared Doomsday
       // Counter; Project: Doomsday and Doomsday Button are the cards that move
       // it. Advancing it 3 here was 30% of an unrelated instant end.
+      //
+      // "Any player replaying this resets the timer" is STILL NOT EXPRESSIBLE.
+      // The fuse has no single rewritable home: `opDelayed` only ever pushes a
+      // new entry onto the player's list, no op clears or reschedules one, and
+      // nothing in card data can write `state.hardEndTurn` — so a second Clock
+      // adds a second, LATER entry while the first one still fires on time,
+      // which is the opposite of a reset. The counter-and-trigger shapes that
+      // could fake it all need a way to SET a counter rather than add to one,
+      // and every one of them risks the clause that does work.
       { op: 'delayed', when: { inTurns: 3 }, effects: [{ op: 'endGame', reason: 'doomsdayClock' }] },
     ],
     triggers: [],

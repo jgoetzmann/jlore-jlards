@@ -198,21 +198,44 @@ export const cards: CardDefinition[] = [
         prompt: 'Take the last one',
         then: [
           {
-            op: 'gainCard',
-            from: { shop: 'all', filter: { defId: '$discovered' } },
-            to: 'gy',
-            free: true,
-          },
-          {
-            // "If that emptied the pile" — no copy of it is left in any Shop.
+            // "A card you can currently afford": a NumericFilter bound may be an
+            // expression, and a condition's `has` is one of the paths that
+            // resolves one (selectFor -> resolveFilter). A pile selector's
+            // filter is not, so the gate cannot ride on the gainCard itself —
+            // and neither can it ride on the OFFER: `poolCandidates` matches
+            // through `matchesDefFilter`, which never calls `resolveFilter` and
+            // compares printed cost, so an expression bound in the Discover
+            // pool would be silently ignored. The gate therefore sits after the
+            // pick, and picking one you cannot afford resolves to nothing.
             op: 'conditional',
-            if: { not: { has: { target: { zone: 'shop', filter: { defId: '$discovered' } }, atLeast: 1 } } },
+            if: {
+              has: {
+                target: {
+                  zone: 'shop',
+                  filter: { defId: '$discovered', cost: { lte: { expr: 'moneyUnspent' } } },
+                },
+                atLeast: 1,
+              },
+            },
             then: [
               {
-                op: 'moveTo',
-                target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], filter: { defId: '$discovered' } },
-                zone: 'gy',
-                who: 'self',
+                op: 'gainCard',
+                from: { shop: 'all', filter: { defId: '$discovered' } },
+                to: 'gy',
+                free: true,
+              },
+              {
+                // "If that emptied the pile" — no copy of it is left in any Shop.
+                op: 'conditional',
+                if: { not: { has: { target: { zone: 'shop', filter: { defId: '$discovered' } }, atLeast: 1 } } },
+                then: [
+                  {
+                    op: 'moveTo',
+                    target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], filter: { defId: '$discovered' } },
+                    zone: 'gy',
+                    who: 'self',
+                  },
+                ],
               },
             ],
           },
@@ -220,7 +243,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Discover 3 Draft Shop cards and add one to your GY. If that emptied its pile, steal every copy of it from your opponents.',
+    text: 'Discover 3 Draft Shop cards and add one you can currently afford to your GY. If that emptied its pile, steal every copy of it from your opponents.',
     flavor: 'He takes the last one, then all the others.',
     complexity: 'T3',
     subsystems: ['S-STEAL', 'S-DISCOVER'],
@@ -238,9 +261,10 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { buys: 2, money: 2 },
     effects: [
-      // `duration: 'turn'` expires on the turn it is applied, i.e. instantly;
-      // `{turns: 1}` is the one that actually binds for the rest of this turn.
-      { op: 'lockPile', target: { shop: 'all', excludeJlore: false }, duration: { turns: 1 } },
+      // `duration:'turn'` is the whole of this turn: a lock's `expiresOnTurn`
+      // names the first turn it is already gone (`expiryTurnFor` -> turn + 1,
+      // `lockIsActive` tests `turn < expiresOnTurn`).
+      { op: 'lockPile', target: { shop: 'all', excludeJlore: false }, duration: 'turn' },
       { op: 'unlockPile', target: { shop: 'all', pick: 'choose', count: 1 } },
     ],
     triggers: [],
@@ -464,13 +488,17 @@ export const cards: CardDefinition[] = [
         duration: 'untilEndOfYourNextTurn',
       },
       { op: 'unlockPile', target: { shop: 'draft', pick: 'random', count: 1 } },
-      {
-        op: 'conditional',
-        if: { ifPrevious: true },
-        then: [
-          { op: 'gainCard', from: { shop: 'draft', pick: 'random', count: 1 }, to: 'gy', free: true },
-        ],
-      },
+      // The printed third clause — "if they cost the same, add the UNLOCKED
+      // pile's top card to your GY" — has no expressible form, and the
+      // `{ifPrevious: true}` shape that stood here is now actively wrong rather
+      // than merely dead: `ifPrevious` went live (index.ts writes
+      // `__previousDidSomething` from whether the previous node logged), so it
+      // read "the unlock actually freed a pile" and then gained a FRESHLY
+      // rolled random Draft pile's top card — neither the printed condition nor
+      // the printed pile. Both halves want a pile-scoped binding: a cost
+      // comparison between two named piles, and a gain that can name the pile
+      // the previous node unlocked (a `pick:'random'` PileSelector re-rolls on
+      // every node). Left out rather than left wrong.
     ],
     triggers: [],
     text: 'Lock one Draft pile and unlock a random other one. If they cost the same, add the unlocked pile’s top card to your GY. +1 Action.',
@@ -496,10 +524,12 @@ export const cards: CardDefinition[] = [
         target: { shop: 'draft', pick: 'random', count: 3 },
         duration: 'untilYourNextTurn',
       },
-      // "for each you could have afforded" cannot live in a filter —
-      // NumericFilter takes literal numbers only and cannot read the wallet —
-      // so the draw is an expression over unspent Money instead, capped at the
-      // three piles that were locked.
+      // "for each you could have afforded" is a count of PILES, and only the
+      // three the line above locked. A filter bound can read the wallet now
+      // (`cost: {lte: {expr:'moneyUnspent'}}`), but it selects cards, not piles,
+      // and `pick:'random'` cannot be re-derived by a second node — so the three
+      // locked piles are unnameable once the lock op returns. The draw stays an
+      // expression over unspent Money, capped at the three piles.
       { op: 'draw', amount: { expr: 'min(3, moneyUnspent)' } },
     ],
     triggers: [],
@@ -546,14 +576,16 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1, buys: 1, cards: 1 },
     effects: [
-      // The "remove all cost changes" half needs a clearing op the DSL does not
-      // have: a delta-0 modifier cannot undo the modifiers already on a pile,
-      // and a permanent floor-0 entry would quietly clamp every negative price
-      // in the game for the rest of the match. Only the unlock ships.
+      // A modifyCost carrying neither `delta` nor `setTo` is the clear: it
+      // empties every pile's costMods, drops every costOverride and empties
+      // shop.globalCostMods. A delta-0 modifier could only ever add another
+      // entry to the stack it is meant to empty, which is why this half of the
+      // card could not ship before.
+      { op: 'modifyCost', scope: 'allShops', duration: 'permanent' },
       { op: 'unlockPile', target: { shop: 'all' } },
     ],
     triggers: [],
-    text: 'Remove all Locks from the Shop. +1 Action, +1 Buy, +1 Card.',
+    text: 'Remove all cost changes and Locks from the Shop. +1 Action, +1 Buy, +1 Card.',
     flavor: 'Everything back to list price.',
     complexity: 'T2',
     subsystems: ['S-LOCK'],
@@ -592,45 +624,32 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // One pile for both halves, named the same way twice rather than chosen
+      // twice: two `pick:'choose'` prompts can name different piles, and the
+      // Discover this used to run could never name an EMPTY one — a
+      // `pool:{scope:'shop'}` samples defIds off instances sitting in a pile,
+      // and `selectPilesWith` drops zero-card piles inside its `filter` branch.
+      // An empty pile is the case the card exists for, and `replenishPile` now
+      // reaches one (it resolves the id through `pileDefId`), so the pile is
+      // picked by depletion instead.
+      //
+      // The discount is ordered first because it does not change pile heights:
+      // `shortest` therefore re-derives the identical pile for the replenish.
       {
-        // One pile for both halves. Two `pick:'choose'` selectors would raise
-        // two independent prompts that can name different piles.
-        //
-        // Known gap: a *fully empty* pile is unreachable and no card-data shape
-        // fixes it. A `pool:{scope:'shop'}` Discover samples defIds off
-        // instances sitting in a pile, so an empty pile offers none;
-        // selectPilesWith drops zero-card piles inside its `filter` branch; and
-        // opReplenishPile's own empty-pile fallback resolves the pile id as a
-        // defId (`tryGetCard(pileId)`) when pile ids are `<shop>:<defId>`, so it
-        // finds nothing either. Partially-depleted piles refill correctly.
-        op: 'discover',
-        // Draft Shop piles only — not the basics, not the Prophet Shop, which
-        // is gated on banked Prophet rather than on money.
-        pool: {
-          scope: 'shop',
-          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
-        },
-        count: 3,
-        pick: 1,
-        prompt: 'Fill it to the brim',
-        then: [
-          { op: 'replenishPile', target: { shop: 'all', filter: { defId: '$discovered' } } },
-          {
-            op: 'modifyCost',
-            scope: 'pile',
-            target: { shop: 'all', filter: { defId: '$discovered' } },
-            delta: -1,
-            floor: 1,
-            duration: 'permanent',
-          },
-        ],
+        op: 'modifyCost',
+        scope: 'pile',
+        target: { shop: 'draft', pick: 'shortest', count: 1 },
+        delta: -1,
+        floor: 1,
+        duration: 'permanent',
       },
+      { op: 'replenishPile', target: { shop: 'draft', pick: 'shortest', count: 1 } },
     ],
     triggers: [],
-    text: 'Flimsy. Discover 3 Draft Shop cards and fully replenish the pile of the one you pick. Its cards now cost (1) less, to a minimum of (1).',
+    text: 'Flimsy. Fully replenish the most depleted Draft pile. Its cards now cost (1) less, to a minimum of (1).',
     flavor: 'And then some.',
     complexity: 'T3',
-    subsystems: ['S-COSTMOD', 'S-DISCOVER'],
+    subsystems: ['S-COSTMOD'],
     shop: 'draft',
     art: { key: 'cup_runneth_over', status: 'placeholder' },
   },
@@ -705,9 +724,9 @@ export const cards: CardDefinition[] = [
         op: 'modifyCost',
         scope: 'pile',
         target: { shop: 'draft', pick: 'choose', count: 1 },
-        // There is no expression variable for the average Draft pile cost, so
-        // the average deck cost stands in for it until one exists.
-        setTo: { expr: 'floor(avgCostOfDeck)' },
+        // `avgDraftPileCost` is the mean top-card cost across the Draft Shop,
+        // which is the number the card names.
+        setTo: { expr: 'floor(avgDraftPileCost)' },
         floor: 0,
         duration: 'untilEndOfYourNextTurn',
       },
@@ -830,6 +849,12 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
+      // `scope:'nextBuyOpponent'` has no selector — opModifyCost pushes the mod
+      // onto every opponent — while the Silver below is a one-shot. At a 4-player
+      // table three opponents each eat the +1 and only the first to buy pays out.
+      // Deliberate: the tax is what the engine can express and the payout is what
+      // the doc row prints, so the text names both arities rather than implying
+      // a Silver per opponent.
       {
         op: 'modifyCost',
         scope: 'nextBuyOpponent',
@@ -840,12 +865,23 @@ export const cards: CardDefinition[] = [
     ],
     triggers: [
       {
+        // Flimsy puts this card in the trash the moment it is played, and
+        // `fireOwnedTriggers` sweeps trashed instances only for triggers that
+        // name the trash — without the declaration the payout could never fire.
+        // The trash is forever, so `maxPerTurn` alone would pay out once a turn
+        // for the rest of the game; the counter makes it the one-shot the card
+        // prints.
         on: 'onOpponentBuy',
+        zones: ['trash'],
         maxPerTurn: 1,
-        effects: [{ op: 'createCard', defId: 'silver', to: 'gy' }],
+        condition: { expr: 'selfCounter < 1' },
+        effects: [
+          { op: 'createCard', defId: 'silver', to: 'gy' },
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: 1 },
+        ],
       },
     ],
-    text: 'Flimsy. The next card an opponent buys costs (1) more. When they buy it, you gain a Silver.',
+    text: 'Flimsy. The next card each opponent buys costs (1) more. The first one to buy it gives you a Silver.',
     flavor: 'A toll booth on their turn.',
     complexity: 'T3',
     subsystems: ['S-COSTMOD', 'S-STEAL'],
@@ -867,6 +903,13 @@ export const cards: CardDefinition[] = [
         // The Discover names the pile, which is the only way to scope the
         // transform to one pile — a Selector has no pile axis. The Lock has to
         // run first, while the pile's top card still matches the pick.
+        //
+        // The doc's second pick — one Discovered Known Universe card replacing
+        // every copy — needs a nested prompt carrying its own defId, and
+        // `substituteDefId` swaps '$discovered' and '$selected' for the SAME id,
+        // so the inner pick is overwritten by the outer one before it is asked.
+        // Until each sentinel belongs to its own prompt, the replacement is
+        // rolled per card instead.
         op: 'discover',
         // Draft Shop piles only — not the basics, not the Prophet Shop, which
         // is gated on banked Prophet rather than on money.
@@ -913,7 +956,9 @@ export const cards: CardDefinition[] = [
       {
         // `costOverride` reprices the whole pile, permanently, not the card
         // being inserted — there is no per-instance price, so the Diamond goes
-        // in at its printed cost.
+        // in at its printed cost rather than the printed (0). The doc's "replace
+        // the 2nd card" also needs an insert-at-index affordance addToPileTop
+        // does not have; the top is the closest reachable slot.
         op: 'addToPileTop',
         target: { shop: 'draft', pick: 'random', count: 1 },
         defId: 'diamond',
@@ -986,22 +1031,27 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { buys: 1, money: 1 },
+    // The printed mechanic is "2 copies of the FIRST CARD YOU BUY THIS TURN, on
+    // top of THAT pile", and the bought card is unreachable from card data.
+    // `zones:['play']` does turn an onBuy trigger into a rider on your own
+    // purchases (firePlayTriggers), but the rider runs under
+    // `makeContext(player, riderIid)` — the source instance is this card, not
+    // the purchase — the event carries no payload, and nothing binds a bought
+    // card's defId to the '$discovered'/'$selected' sentinel: only `discover`
+    // and `selectCards` substitute, and both ask the player a question rather
+    // than naming the purchase. `addToPileTop` is the only op that writes into
+    // a pile and its `defId` is a literal or a pool, never a context card.
+    //
+    // The stand-in that shipped here — Discover 3 arbitrary shop cards, 2
+    // copies of the pick onto its pile — was a different card and an unsafe
+    // one: an unfiltered `pool:{scope:'shop'}` reaches the basics and the
+    // Points Shop, so it routinely stuffed the Jlore pile (the end-game clock)
+    // or a Copper pile, and the pile target carried no `count`, so
+    // `selectPilesWith` returned `want = ids.length` and fed every pile whose
+    // top card matched. Faithful text, no body, until a purchase-scoped
+    // binding exists.
     effects: [],
-    triggers: [
-      {
-        on: 'onBuy',
-        zones: ['play'],
-        maxPerTurn: 1,
-        effects: [
-          {
-            op: 'addToPileTop',
-            target: { shop: 'all', pick: 'choose' },
-            defId: { pool: { scope: 'shop' } },
-            count: 2,
-          },
-        ],
-      },
-    ],
+    triggers: [],
     text: 'Add 2 copies of the first card you buy this turn to the top of that pile. +1 Buy, +1 Money.',
     flavor: 'It comes back bigger.',
     complexity: 'T3',
@@ -1027,6 +1077,15 @@ export const cards: CardDefinition[] = [
         pick: 1,
         prompt: 'Set the banner',
         then: [
+          // The printed rider needs three things at once: the discovered pile
+          // remembered past this node, that pile's cost remembered as a number,
+          // and a later buy compared against it. A player counter can carry a
+          // number but the Discover's `then` cannot read the pick's cost
+          // (`selfCost` is this card), a pile-selector filter does not resolve
+          // expression bounds, and a buy-side `appendEffects` is never read
+          // (`peekBuyMods` takes costDelta, costFloor and buyTo only). This mod
+          // is inert — `gy` is already the buy destination — and is kept only
+          // so the node the rider will hang from stays in place.
           {
             op: 'nextCardModifier',
             mod: { appliesTo: 'buy', buyTo: 'gy', uses: 1 },

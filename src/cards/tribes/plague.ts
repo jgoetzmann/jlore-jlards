@@ -19,12 +19,20 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
+      // "+2 Money if any had none" is a question about pile TOPS, and a
+      // `{zone:'shop'}` Selector reaches every card in every pile — including the
+      // buried ones opPlague never touches, so the old `has` gate was true every
+      // single play. A PileSelector's filter matches the top card, so splitting
+      // the token by whether that top already carried one turns the answer into
+      // "did the second node do anything", which is exactly `{ifPrevious:true}`.
+      // Every top still ends up with exactly one new token.
+      { op: 'plague', target: { shop: 'all', filter: { plagued: true } }, amount: 1 },
+      { op: 'plague', target: { shop: 'all', filter: { plagued: false } }, amount: 1 },
       {
         op: 'conditional',
-        if: { has: { target: { zone: 'shop', filter: { plagued: false } }, atLeast: 1 } },
+        if: { ifPrevious: true },
         then: [{ op: 'gain', stat: 'money', amount: 2 }],
       },
-      { op: 'plague', target: { shop: 'all' }, amount: 1 },
     ],
     triggers: [],
     text: 'Put 1 Plague Token on the top card of every Shop pile. +2 Money if any of them had none.',
@@ -48,7 +56,11 @@ export const cards: CardDefinition[] = [
     triggers: [
       {
         on: 'onPlagueAdded',
-        effects: [{ op: 'gain', stat: 'cards', amount: 2 }],
+        // A trigger resolves for the instance's OWNER, so the Crawler's owner was
+        // drawing the 2 Cards even when an opponent placed the token — the doc
+        // and the printed line both say the placer. `activePlayer` is the seat
+        // actually taking the turn, which is who is placing tokens.
+        effects: [{ op: 'gain', stat: 'cards', amount: 2, who: 'activePlayer' }],
       },
     ],
     text: '+1 Action. Put 1 Plague Token on a random card in your GY. Whenever a token is placed on this, the placer draws 2 Cards. ({plague} on this.)',
@@ -134,16 +146,63 @@ export const cards: CardDefinition[] = [
     stats: { actions: 1 },
     effects: [
       { op: 'plague', target: { shop: 'all', count: 2, pick: 'random' }, amount: 1 },
+      // "tokens exceed its cost" compares two of the CANDIDATE's own fields, and
+      // no CardFilter can hold both sides of that — `filter:{plagued:true}` alone
+      // handed over the most expensive plagued pile in the Shop, free, every
+      // play. Inside a forEach the candidate *is* the source, so
+      // `selfCounter > selfCost` reads the comparison straight off it. The mark
+      // carries the verdict out to a real `gainCard`, which is what keeps this a
+      // gain (codex, cardsGainedThisTurn, onGain) rather than a bare move.
+      // Marks are cleared at both ends: the sweep below the gain retires every
+      // mark this play made — including the one riding the gained card into the
+      // GY, which is why it looks in `gy` as well as `shop` — and this leading
+      // one retires anything an abandoned prompt stranded before that sweep
+      // could run, so a stale mark is never gainable on a later play.
+      {
+        op: 'forEach',
+        over: { zone: ['shop', 'gy'], filter: { counter: { key: 'outbreakMark', gte: 1 } } },
+        effects: [{ op: 'addCounter', target: { self: true }, key: 'outbreakMark', amount: -1 }],
+      },
+      // Prophet cards are priced in banked Prophet and carry no `cost.money`,
+      // which `selfCost` reads as 0 — one token would put all 24 Prophet piles
+      // over their "cost" at once. "Tokens exceed its cost" only means anything
+      // against a money price, so the Prophet shop is out, and the printed line
+      // says so. The (0)-cost Draft piles — Feather, Coal, Garlic and the rest —
+      // stay in: they really do cost (0), so one token really does exceed it.
+      {
+        op: 'forEach',
+        over: { zone: 'shop', filter: { plagued: true, not: { subtype: 'Prophet' } } },
+        effects: [
+          {
+            op: 'conditional',
+            if: { expr: 'selfCounter > selfCost' },
+            then: [{ op: 'addCounter', target: { self: true }, key: 'outbreakMark', amount: 1 }],
+          },
+        ],
+      },
       {
         op: 'gainCard',
-        from: { shop: 'all', filter: { plagued: true }, pick: 'mostExpensive', count: 1 },
+        from: {
+          shop: 'all',
+          filter: { counter: { key: 'outbreakMark', gte: 1 } },
+          pick: 'choose',
+          count: 1,
+        },
         to: 'gy',
         count: 1,
         free: true,
       },
+      // Retire every mark this play made, wherever it ended up: the piles that
+      // qualified and were passed over, and the gained card, which carries its
+      // mark out of the Shop and into the GY.
+      {
+        op: 'forEach',
+        over: { zone: ['shop', 'gy'], filter: { counter: { key: 'outbreakMark', gte: 1 } } },
+        effects: [{ op: 'addCounter', target: { self: true }, key: 'outbreakMark', amount: -1 }],
+      },
     ],
     triggers: [],
-    text: '+1 Action. Put a Plague Token on the top card of two random piles, then gain any Shop card whose tokens exceed its cost.',
+    text: '+1 Action. Put a Plague Token on the top card of two random piles, then gain any non-Prophet Shop card whose tokens exceed its cost.',
     flavor: 'It got out.',
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
@@ -202,7 +261,14 @@ export const cards: CardDefinition[] = [
       // the whole stack, so one plagued top wiped a 10-card Common pile. Trash the
       // plagued instances instead; the nested `not` replaces `excludeJlore`.
       { op: 'trash', target: { zone: 'shop', filter: { plagued: true, not: { defId: 'jlore' } } } },
-      { op: 'plague', target: { who: 'eachOpponent', zone: 'gy', count: 1, pick: 'random' }, amount: 1 },
+      // `count` is a TOTAL across everyone the selector reached, so a single
+      // token used to be shared out between all the opponents. The doc says one
+      // each.
+      {
+        op: 'plague',
+        target: { who: 'eachOpponent', zone: 'gy', count: 1, pick: 'random', perPlayer: true },
+        amount: 1,
+      },
     ],
     triggers: [],
     text: '+1 Action. Trash every plagued card in the Shop and in every GY, then put 1 Plague Token on a random card in each opponent’s GY.',
@@ -223,13 +289,95 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { actions: 1 },
     effects: [
-      { op: 'plague', target: { who: 'eachPlayer', zone: 'gy', filter: { plagued: true } }, amount: 1 },
-      { op: 'plague', target: { shop: 'all', filter: { plagued: true } }, amount: 1 },
-      { op: 'plague', target: { who: 'eachPlayer', zone: 'gy', count: 1, pick: 'random' }, amount: 1 },
+      // The tally of what the copy clause actually copied, so the printed
+      // "minimum 1" is a real fallback rather than a side effect of an
+      // unfiltered pick. It is a per-play tally, not a once-per-turn gate: a
+      // player counter is shared by every copy of this card, so the reset in
+      // front of the passes is what stops a second Plandemic in the same turn
+      // from reading the first one's total. The reset also *creates* the key,
+      // which is what makes the first read of it legal — an expression naming
+      // a key that does not exist throws, and a condition that throws is false.
       {
-        op: 'copyCard',
-        target: { who: 'eachPlayer', zone: 'gy', filter: { plagued: true }, count: 1, pick: 'mostExpensive' },
-        to: 'hand',
+        op: 'addCounter',
+        scope: 'player',
+        key: 'turn:plandemicCopies',
+        amount: { expr: '0 - plandemicCopies' },
+      },
+      // Doubling and the copy gate ride in ONE pass per zone. "Double" is not
+      // what `{op:'plague', amount:1}` does — a 3-token card went to 4 — but
+      // inside a forEach the iterated card is the source, so `selfCounter` is
+      // its own token count and adding it again is the doubling the doc prints.
+      // "Tokens equal their cost" compares two of the CANDIDATE's own fields,
+      // which no CardFilter can hold, so it is the same forEach binding that
+      // expresses it; tested BEFORE the doubling as `t * 2 == cost`, which is
+      // the same question as `2t == cost` asked after. Two passes instead of
+      // four cost the same 2 nodes per plagued card (89 for a 40-pile board),
+      // but the copies now land as each card doubles instead of in a second
+      // sweep behind them, so a turn that runs out of the 200-node budget
+      // mid-Plandemic keeps the copies it reached rather than losing the whole
+      // clause, which was the last thing in the array.
+      {
+        op: 'forEach',
+        over: { who: 'eachPlayer', zone: 'gy', filter: { plagued: true } },
+        effects: [
+          {
+            op: 'conditional',
+            if: { expr: 'selfCounter * 2 == selfCost' },
+            then: [
+              { op: 'plague', target: { self: true }, amount: { expr: 'selfCounter' } },
+              { op: 'copyCard', target: { self: true }, to: 'hand', who: 'self' },
+              { op: 'addCounter', scope: 'player', key: 'turn:plandemicCopies', amount: 1 },
+            ],
+            else: [{ op: 'plague', target: { self: true }, amount: { expr: 'selfCounter' } }],
+          },
+        ],
+      },
+      {
+        op: 'forEach',
+        over: { zone: 'shop', filter: { plagued: true } },
+        effects: [
+          {
+            op: 'conditional',
+            if: { expr: 'selfCounter * 2 == selfCost' },
+            then: [
+              { op: 'plague', target: { self: true }, amount: { expr: 'selfCounter' } },
+              { op: 'copyCard', target: { self: true }, to: 'hand', who: 'self' },
+              { op: 'addCounter', scope: 'player', key: 'turn:plandemicCopies', amount: 1 },
+            ],
+            else: [{ op: 'plague', target: { self: true }, amount: { expr: 'selfCounter' } }],
+          },
+        ],
+      },
+      // The respread: one token, into one graveyard at the table. Neither the
+      // printed line nor the doc row says "each" — unlike Living Bomb, which
+      // does — so this stays a single token rather than one per player.
+      {
+        op: 'plague',
+        target: { who: 'eachPlayer', zone: 'gy', count: 1, pick: 'random' },
+        amount: 1,
+      },
+      // "minimum 1". The gate above can match nothing at all, and the fallback
+      // has to look everywhere the clause above it looked, or a lone plagued
+      // Shop card leaves it empty-handed: one selector over both zones, so the
+      // card it hands over is the most expensive plagued card anywhere, not the
+      // most expensive one in a graveyard.
+      {
+        op: 'conditional',
+        if: { expr: 'plandemicCopies < 1' },
+        then: [
+          {
+            op: 'copyCard',
+            target: {
+              who: 'eachPlayer',
+              zone: ['gy', 'shop'],
+              filter: { plagued: true },
+              count: 1,
+              pick: 'mostExpensive',
+            },
+            to: 'hand',
+            who: 'self',
+          },
+        ],
       },
     ],
     triggers: [],
@@ -261,7 +409,17 @@ export const cards: CardDefinition[] = [
           {
             label: 'Remove every Plague Token from your hand for +X Money',
             effects: [
-              { op: 'gain', stat: 'money', amount: { expr: 'countIn(hand, plagued)' } },
+              // X is tokens removed, not cards cured. `countIn(hand, plagued)`
+              // counts matching instances, so a card carrying 3 tokens was
+              // stripped for 1 Money. A forEach binds each plagued card as the
+              // source, and `selfCounter` is then that card's own token count.
+              // The body runs before the cure, so it reads the tokens while they
+              // are still there.
+              {
+                op: 'forEach',
+                over: { zone: 'hand', filter: { plagued: true } },
+                effects: [{ op: 'gain', stat: 'money', amount: { expr: 'selfCounter' } }],
+              },
               { op: 'removePlague', target: { zone: 'hand' } },
             ],
           },
