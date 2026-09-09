@@ -161,7 +161,11 @@ h3 {
 .table {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  /* Fixed to the viewport so the regions inside scroll independently. Left to
+     grow, the Prophet Shop's 23 piles stretched the page past 3700px and pushed
+     the player's own hand thousands of pixels below the fold. */
+  height: 100vh;
+  overflow: hidden;
 }
 
 .table-head {
@@ -206,13 +210,19 @@ h3 {
   display: flex;
   gap: 14px;
   padding: 14px;
-  align-items: flex-start;
-  flex: 1;
+  align-items: stretch;
+  flex: 1 1 auto;
+  /* min-height:0 is what lets a flex child actually scroll instead of growing. */
+  min-height: 0;
+  overflow: hidden;
 }
 
 .table-main {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .table-side {
@@ -220,6 +230,8 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .connecting,
@@ -358,6 +370,9 @@ h3 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+  /* The board takes the space left over once the hand has its own. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .shop {
@@ -366,6 +381,17 @@ h3 {
   border-radius: var(--radius);
   padding: 8px;
   min-width: 0;
+  /* A flex column that clips: the title stays put and `.shop-piles` takes the
+     remaining height and scrolls inside it. Without `overflow: hidden` the
+     piles spill out of the board and render behind the hand. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shop-title {
+  flex: 0 0 auto;
 }
 
 .shop-title {
@@ -381,6 +407,11 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  /* Each shop column scrolls on its own, so all four stay visible side by side
+     however many piles one of them holds. The Prophet Shop always has 23. */
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .shop-none {
@@ -630,7 +661,12 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px;
+  /* Your hand is the most-read thing on screen and must never scroll away. */
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 5;
 }
+
 
 .hand-head {
   display: flex;

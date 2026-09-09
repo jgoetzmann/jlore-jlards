@@ -30,7 +30,11 @@ export interface Snapshot {
   savedTurn: number;
 }
 
-const DEFAULT_SETTINGS: Settings = { playerName: 'Player', showLog: true, animate: true };
+// 'Player 1' rather than 'Player': seat 0 takes this name and later seats are
+// named `Player ${i + 1}`, so the bare default made seat 0 "Player" sitting next
+// to "Player 2" — asymmetric, and in hotseat the two seat buttons read almost
+// identically. Numbering seat 0 too makes the table unambiguous at a glance.
+const DEFAULT_SETTINGS: Settings = { playerName: 'Player 1', showLog: true, animate: true };
 
 // ---------------------------------------------------------------------------
 // Tier 1 — cookie. Identity only.

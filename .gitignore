@@ -10,3 +10,4 @@ telemetry/
 .claude/
 test-results/
 playwright-report/
+shots/
