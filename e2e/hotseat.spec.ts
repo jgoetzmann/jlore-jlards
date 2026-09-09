@@ -139,16 +139,24 @@ test.describe('hotseat — a game you can actually play', () => {
 
     // Pin the pile by id. `[data-buyable="true"]` is a live set that re-orders
     // as money changes, so `.first()` would point somewhere else after the buy.
-    const pileId = await page
-      .locator('[data-testid="pile"][data-buyable="true"]')
-      .first()
-      .getAttribute('data-pile-id');
+    //
+    // Prefer the Copper pile: it costs 0 so it is always buyable, and it sits at
+    // the top of the Resource Shop. Taking whatever happened to be first could
+    // land deep inside the Prophet Shop's 23-pile scroll column, where the Buy
+    // button is intermittently unreachable and the click waits out the timeout.
+    const copperPile = page.locator('[data-pile-id="resource:copper"][data-buyable="true"]');
+    const pileId =
+      (await copperPile.count()) > 0
+        ? 'resource:copper'
+        : await page.locator('[data-testid="pile"][data-buyable="true"]').first().getAttribute('data-pile-id');
     expect(pileId, 'something should be affordable').toBeTruthy();
     const pile = page.locator(`[data-pile-id="${pileId}"]`);
     const countBefore = Number(await pile.getAttribute('data-pile-count'));
 
     await clearPrompt(page);
-    await pile.getByTestId('buy').click();
+    const buyBtn = pile.getByTestId('buy');
+    await buyBtn.scrollIntoViewIfNeeded();
+    await buyBtn.click();
     // A Play-on-Buy card resolves as it is bought and can raise a prompt.
     await clearPrompt(page);
 
