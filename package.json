@@ -18,7 +18,8 @@
     "cards:validate": "tsx tools/validate-cards.ts",
     "cards:export": "tsx tools/export-cards.ts",
     "art:manifest": "tsx tools/art-manifest.ts",
-    "replay": "tsx tools/replay.ts"
+    "replay": "tsx tools/replay.ts",
+    "relay:check": "tsx tools/relay-check.ts"
   },
   "dependencies": {
     "@upstash/redis": "1.34.3",

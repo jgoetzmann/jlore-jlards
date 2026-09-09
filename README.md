@@ -31,6 +31,16 @@ Hotseat needs no network and no backend. For multiplayer, copy `.env.example` to
 `.env`, fill in Upstash credentials, and deploy to Vercel; the host shares the
 `#ROOMCODE` link and everyone clicks it.
 
+```bash
+npm run relay:check    # confirms the credentials and the live backend actually work
+```
+
+Worth running before you blame the game. The test suite exercises the relay
+against an in-memory store, so a green suite proves nothing about your database
+or network path — this drives the real handler against real Redis. Use the
+**REST** url from the Upstash console (`https://…`), not the `redis://`
+connection string.
+
 ## Everything else
 
 ```bash
@@ -41,6 +51,7 @@ npm run sim            # headless bot matches
 npm run balance        # balance telemetry report -> telemetry/
 npm run replay -- --seed=42 --players=3          # reproduce a match exactly
 npm run replay -- --seed=42 --players=3 --turn=14  # stop and print the board
+npm run relay:check    # verify Upstash credentials + the live relay backend
 npm run cards:export   # cards + auras as JSON, for art tooling
 npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
 ```
