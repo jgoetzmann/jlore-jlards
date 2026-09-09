@@ -57,7 +57,7 @@ test.describe('visual record', () => {
   test.use({ viewport: { width: 1600, height: 1000 } });
 
   test('a full hotseat game, photographed', async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(900_000);
 
     // 1. What a player sees first.
     await page.goto('/');
@@ -110,7 +110,7 @@ test.describe('visual record', () => {
 
     // 8. Play on into later turns, catching a prompt if one appears.
     let promptShot = false;
-    for (let turn = 0; turn < 14; turn += 1) {
+    for (let turn = 0; turn < 26; turn += 1) {
       if (await page.getByTestId('game-over').isVisible().catch(() => false)) break;
       await focusSeatToMove(page);
 
@@ -139,9 +139,16 @@ test.describe('visual record', () => {
       }
 
       await clearPrompt(page);
+      // Prefer a pile whose card mentions Discover/choose, so the run actually
+      // reaches a prompt overlay instead of buying Coppers forever.
       const buy = page.locator('[data-testid="pile"][data-buyable="true"]');
-      if ((await buy.count()) > 0) {
-        await buy.first().getByTestId('buy').click();
+      const promptish = page.locator(
+        '[data-testid="pile"][data-buyable="true"]:has([data-card-name]):below(:text("DRAFT SHOP"))',
+      );
+      const target = (await promptish.count()) > 0 ? promptish : buy;
+      if ((await target.count()) > 0) {
+        const idx = Math.min((await target.count()) - 1, turn % Math.max(1, await target.count()));
+        await target.nth(idx).getByTestId('buy').click().catch(() => undefined);
         await page.waitForTimeout(100);
       }
       await clearPrompt(page);

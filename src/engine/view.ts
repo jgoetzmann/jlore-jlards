@@ -41,6 +41,32 @@ import { getAura, hasAura } from './registry.js';
 const MAX_LOG_ENTRIES = 250;
 const INTERNAL_COUNTER_PREFIXES = ['trg:', 'podChain'];
 
+/**
+ * Bookkeeping counters that must not render as chips on a card face.
+ *
+ * Once the card pass made these actually move, cards started showing
+ * `playCount 2` and `pricePaid 3` beside their rules text — implementation
+ * detail on the most-read surface in the game.
+ *
+ * A denylist, not an allowlist, because B24 makes counters public by default:
+ * only `secret` is owner-only, and a test plants an arbitrary counter name and
+ * requires the opponent to see it. So new counters stay visible unless named
+ * here, and anything added for bookkeeping needs adding here too.
+ *
+ * `playCount` still reaches card *text* — the template resolver reads
+ * `inst.counters` directly, so "(3 left!)" on Lection is unaffected. This
+ * governs only the chips.
+ */
+const BOOKKEEPING_COUNTERS = new Set([
+  'playCount',
+  'pricePaid',
+  'questTrashSeen',
+  'trashedTotal',
+  'turnsTaken',
+  'promptsThisTurn',
+  'promptTurn',
+]);
+
 // ---------------------------------------------------------------------------
 // Card text
 // ---------------------------------------------------------------------------
@@ -49,6 +75,7 @@ function publicCounters(inst: CardInstance): Record<string, number> {
   const out: Record<string, number> = {};
   for (const key of Object.keys(inst.counters)) {
     if (INTERNAL_COUNTER_PREFIXES.some((p) => key.startsWith(p))) continue;
+    if (BOOKKEEPING_COUNTERS.has(key)) continue;
     out[key] = inst.counters[key] as number;
   }
   return out;

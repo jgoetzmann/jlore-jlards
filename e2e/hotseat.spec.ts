@@ -70,9 +70,30 @@ test.describe('hotseat — a game you can actually play', () => {
     await expect(page.getByTestId('table')).toBeVisible();
     await focusSeatToMove(page);
 
-    expect(await statValue(page, 'actions')).toBe(1);
-    expect(await statValue(page, 'buys')).toBe(1);
-    expect(await statValue(page, 'money')).toBe(0);
+    const actions = await statValue(page, 'actions');
+    const buys = await statValue(page, 'buys');
+    const money = await statValue(page, 'money');
+
+    // B3 is the baseline reset, but B85 says a stat anomaly applies its delta at
+    // every turn reset — and anomalies roll at 0.3, so roughly a third of games
+    // legitimately open somewhere other than 1/1/0. Asserting the bare baseline
+    // made this test fail ~30% of the time against a correct engine (caught as
+    // "Extra Gold!" opening on 1 Money, and Less Money! would open on -1).
+    // With no anomaly the baseline is exact; with one, every stat anomaly in the
+    // catalog is exactly +/-1 on a single stat, so the window is one.
+    const anomalous = (await page.getByTestId('anomaly-banner').count()) > 0;
+    if (!anomalous) {
+      expect(actions).toBe(1);
+      expect(buys).toBe(1);
+      expect(money).toBe(0);
+    } else {
+      expect(actions).toBeGreaterThanOrEqual(0);
+      expect(actions).toBeLessThanOrEqual(2);
+      expect(buys).toBeGreaterThanOrEqual(0);
+      expect(buys).toBeLessThanOrEqual(2);
+      expect(money).toBeGreaterThanOrEqual(-1);
+      expect(money).toBeLessThanOrEqual(1);
+    }
   });
 
   test('B4: playing a Copper raises Money without spending an Action', async ({ page }) => {
