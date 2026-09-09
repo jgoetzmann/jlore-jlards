@@ -7,6 +7,7 @@
  */
 
 import type { EffectNode, GameState, InstanceId, PlayerId, Prompt } from '@engine/types';
+import * as Effects from '@engine/effects';
 import { appendLog } from './log.js';
 import { makeContext, runEffects } from './triggers.js';
 import { createInstance } from './zones.js';
@@ -112,11 +113,9 @@ function localResume(state: GameState, prompt: Prompt, keys: string[]): GameStat
   if (prompt.then && prompt.then.length) {
     // The `then` of a choice runs ONCE PER CHOSEN CARD, with the sentinel
     // '$discovered' / '$selected' replaced by that card's defId. This mirrors
-    // `pushChosen` and `runThenPerInstance` in effects/ops/choices.ts, which is
-    // where the interpreter would have resumed if the effects slice exported a
-    // `resumePrompt`. It does not, so every prompt in the game lands here
-    // instead, and running `then` raw meant the sentinel was never substituted
-    // and the body never saw the player's choice.
+    // `pushChosen` and `runThenPerInstance` in effects/ops/choices.ts. Every
+    // prompt in the game lands here, and running `then` raw meant the sentinel
+    // was never substituted and the body never saw the player's choice.
     //
     // `selectCards` additionally rebinds `self` to the selected instance —
     // {self:true} inside its `then` means "the card I just picked", not the
@@ -207,13 +206,13 @@ export function resolvePrompt(
   s.pending = null;
   appendLog(s, 'resolve', player, { promptId, keys: picked, type: prompt.type });
 
-  // `localResume` is the resume path. There used to be a dynamic lookup for a
-  // `resumePrompt` export on the effects barrel here, taken when present — but
-  // no such export has ever existed, so the branch was unreachable and every
-  // `vite build` warned about the missing name. It was the same
-  // two-rival-implementations shape as SB-43, which is precisely how the
-  // `{op:'choose'}` bug hid for the whole build: one path live, one dead, and
-  // the dead one holding the logic people assumed was running.
+  // One resume path, deliberately. There used to be a dynamic lookup for a
+  // `resumePrompt` export that never existed, which made this the same
+  // two-rival-implementations shape as SB-43 — one path live, one dead, the dead
+  // one holding the logic everyone assumed was running. That is exactly how the
+  // `{op:'choose'}` bug survived the whole build. `localResume` delegates into
+  // the interpreter through `Effects.resumeNode` where an op needs to re-run,
+  // rather than branching on whether an export happens to be present.
   s = localResume(s, prompt, picked);
 
   return drainQueue(s);

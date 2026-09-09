@@ -29,7 +29,11 @@ export default defineConfig({
   webServer: {
     command: 'npx vite --port 5199 --strictPort',
     url: 'http://localhost:5199',
-    reuseExistingServer: !process.env['CI'],
+    // Always start our own. Reusing a stray dev server means testing whatever
+    // tree that server was launched from — which happened: a leftover server
+    // from another checkout served the SPA fallback for every /art/ request, so
+    // the suite passed 14/14 against the wrong code with no art on disk.
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',
