@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'chron_job', status: 'placeholder' },
+    art: { key: 'chron_job', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'chron_break',
@@ -45,7 +45,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'chron_break', status: 'placeholder', anim: 'explode' },
+    art: { key: 'chron_break', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'twenty_fifth_hour',
@@ -90,7 +90,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'twenty_fifth_hour', status: 'placeholder' },
+    art: { key: 'twenty_fifth_hour', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'outsourcing_rd',
@@ -114,7 +114,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'outsourcing_rd', status: 'placeholder' },
+    art: { key: 'outsourcing_rd', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'conjure_aura',
@@ -134,7 +134,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'conjure_aura', status: 'placeholder', anim: 'summon' },
+    art: { key: 'conjure_aura', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'heros_power',
@@ -152,7 +152,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'heros_power', status: 'placeholder', anim: 'summon' },
+    art: { key: 'heros_power', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'heros_recall',
@@ -188,7 +188,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA'],
     shop: 'draft',
-    art: { key: 'heros_recall', status: 'placeholder' },
+    art: { key: 'heros_recall', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'quest_accepted',
@@ -218,7 +218,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-QUEST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'quest_accepted', status: 'placeholder' },
+    art: { key: 'quest_accepted', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'a_duel_of_wits',
@@ -259,7 +259,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'a_duel_of_wits', status: 'placeholder' },
+    art: { key: 'a_duel_of_wits', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'paper_sculpture',
@@ -285,7 +285,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'paper_sculpture', status: 'placeholder', anim: 'trash' },
+    art: { key: 'paper_sculpture', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   // A.28 lists Mercenary 280 and Doomsday Clock as cross-references — "(see
   // A.10)" and "(see A.11)" — not as second cards. Their definitions live in

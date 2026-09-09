@@ -610,7 +610,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PVP'],
     notPurchasable: true,
-    art: { key: 'jo_felinor', status: 'placeholder', anim: 'trash' },
+    art: { key: 'jo_felinor', status: 'final', artist: 'LCM Dreamshaper v7 (Felinor treatment, reused)', anim: 'trash' },
   },
   {
     // Mewing's escort, on the same footing as `jo_felinor`: a trigger can only
@@ -653,7 +653,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
     notPurchasable: true,
-    art: { key: 'mewing_felinor', status: 'placeholder', anim: 'trash' },
+    art: { key: 'mewing_felinor', status: 'final', artist: 'LCM Dreamshaper v7 (Felinor treatment, reused)', anim: 'trash' },
   },
 ];
 
