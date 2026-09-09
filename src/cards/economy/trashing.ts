@@ -452,38 +452,72 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1 },
-    effects: [],
-    // STILL BLOCKED — a trash REDIRECT has no hook. `onTrash` is in SELF_EVENTS
-    // (effects/triggers.ts), so fireEvent only ever offers it to the card that
-    // was trashed, and trashWithTrigger calls trashInstance BEFORE fireEvent, so
-    // by the time any listener runs the subject is already in the trash and its
-    // zone no longer matches `zones` — this trigger is inert in every path, and
-    // inert is the right failure. It needs a table-wide pre-move event carrying
-    // the subject iid so a listener can divert it, plus an owner axis on trash
-    // selection: `zone:'trash'` ignores `who` (select.ts scans the whole pile),
-    // so an end-of-turn approximation would rescue an OPPONENT'S card into the
-    // opponent's GY, which is worse than doing nothing. When the hook lands, the
-    // condition and target below both need rewriting, not just re-pointing.
+    // One save, banked on the seat rather than on the card. A `turn:` counter is
+    // wiped at the start of every turn, so the charge expires exactly when "this
+    // turn" says it does — an instance counter would outlive the turn and lock
+    // the card out forever once it was replayed, and a trigger `maxPerTurn` is no
+    // help because `offerTrashWindow` resolves inline and never consults it.
+    // Banking it also lets two Nets in one turn catch two cards.
+    effects: [{ op: 'addCounter', scope: 'player', key: 'turn:safetyNetCharges', amount: 1 }],
+    // The pre-trash window is the hook this was waiting on: `onWouldTrash` fires
+    // while the card is still where it was, and marks it `wouldTrash` so a
+    // responder can NAME it — that counter is the only handle a trigger body has
+    // on the card the event is about. Stamping `trashSpared` on it diverts it to
+    // the GY instead of the trash.
     triggers: [
       {
-        on: 'onTrash',
+        on: 'onWouldTrash',
         zones: ['play'],
-        maxPerTurn: 1,
         condition: {
-          not: {
-            has: {
-              target: { who: 'self', zone: 'trash', filter: { keyword: 'Temporary' } },
-              atLeast: 1,
+          all: [
+            { expr: 'safetyNetCharges > 0' },
+            {
+              has: {
+                target: {
+                  who: 'self',
+                  zone: ['play', 'hand', 'gy', 'library'],
+                  filter: { counter: { key: 'wouldTrash', gte: 1 }, not: { keyword: 'Temporary' } },
+                },
+                atLeast: 1,
+              },
             },
-          },
+            // One save per trash. Every watcher is offered the same window and
+            // the subject stays marked for the whole of it, so a second Net in
+            // play would spend its charge on a card that is already safe unless
+            // it can see the `trashSpared` stamp the first one left. The stamp
+            // is consumed when the window closes, so it never leaks to the next
+            // trash.
+            {
+              not: {
+                has: {
+                  target: {
+                    who: 'self',
+                    zone: ['play', 'hand', 'gy', 'library'],
+                    filter: { counter: { key: 'trashSpared', gte: 1 } },
+                  },
+                  atLeast: 1,
+                },
+              },
+            },
+          ],
         },
         effects: [
-          { op: 'moveTo', target: { who: 'self', zone: 'trash', count: 1, pick: 'lastPlayed' }, zone: 'gy' },
+          { op: 'addCounter', scope: 'player', key: 'turn:safetyNetCharges', amount: -1 },
+          {
+            op: 'addCounter',
+            target: {
+              who: 'self',
+              zone: ['play', 'hand', 'gy', 'library'],
+              filter: { counter: { key: 'wouldTrash', gte: 1 }, not: { keyword: 'Temporary' } },
+            },
+            key: 'trashSpared',
+            amount: 1,
+          },
           { op: 'draw', amount: 1 },
         ],
       },
     ],
-    text: 'The next non-Temporary card of yours that would be trashed this turn goes to your GY instead. If that happens, +1 Card. +1 Action.',
+    text: 'The next non-Temporary card of yours trashed this turn goes to your GY instead; if so, +1 Card. +1 Action.',
     flavor: 'Caught. Bruised, but caught.',
     complexity: 'T3',
     subsystems: ['S-CORE'],
@@ -501,24 +535,105 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { cards: 1 },
     effects: [],
-    // STILL BLOCKED, same hook as Safety Net. A bystander sitting in the Library
-    // can never see another card's trash: `onTrash` is a SELF_EVENT, so fireEvent
-    // pushes only the subject as a candidate, and the zone test runs after the
-    // move. Substituting one card for another additionally needs the pre-move
-    // event to carry the subject iid, and the printed 'non-Flimsy effect' guard
-    // needs the trash SOURCE in the trigger vars — neither exists. Left inert
-    // rather than approximated; the +1 Card stat line is all this does today.
+    // `onWouldTrash` fires on the owner's cards in play/hand/gy/library BEFORE
+    // the trash happens, which is how a bystander sitting in the Library finally
+    // sees another card's trash; `zones:['library']` is the printed "from your
+    // deck". The subject is marked `wouldTrash` — that counter is how the filter
+    // below names it — and stamping `trashSpared` on it sends it to the GY while
+    // this one goes to the trash in its place.
+    //
+    // "by a non-Flimsy effect" gates on the trash SOURCE, and the window carries
+    // no source, so the clause has to name the one situation the source is the
+    // Flimsy keyword. Every window comes from `trashWithTrigger`; core/play.ts's
+    // Flimsy cleanup calls `trashInstance` directly and opens none, so the only
+    // Flimsy-sourced trash that ever reaches here is opPlayCard's else-branch in
+    // effects/ops/replay.ts — and `resolveCardPlay` has just moved the card to
+    // PLAY, which is what `zone:['play'] + keyword:'Flimsy'` names. Both play
+    // paths kill a Flimsy card the instant it lands, so nothing else can hold one
+    // in play to be caught by that clause; the exception, Flimsy + Indestructible,
+    // is a card `trashInstance` refuses to trash at all, and taking the fall for
+    // it would spend this card on a trash that was never going to happen.
+    //
+    // What the old `not:{keyword:'Flimsy'}` on the SUBJECT tested was the victim's
+    // own keyword, which is a different question: a Flimsy card someone else's
+    // trasher points at is trashed by a non-Flimsy effect and is exactly what this
+    // is for. Under that test it was abandoned.
+    //
+    // The last two clauses are the guards. Trashing this card re-opens the window
+    // with THIS card as the subject, so without the defId clause it would spare
+    // and fall forever: a Fall Guy does not take the fall for a Fall Guy. And a
+    // card another responder already spared in this window needs no second
+    // saviour, so a Safety Net in play does not cost you the Fall Guy as well.
     triggers: [
       {
-        on: 'onTrash',
-        zones: ['library', 'hand', 'gy'],
+        on: 'onWouldTrash',
+        zones: ['library'],
+        condition: {
+          all: [
+            {
+              has: {
+                target: {
+                  who: 'self',
+                  zone: ['play', 'hand', 'gy', 'library'],
+                  filter: { counter: { key: 'wouldTrash', gte: 1 } },
+                },
+                atLeast: 1,
+              },
+            },
+            {
+              not: {
+                has: {
+                  target: {
+                    who: 'self',
+                    zone: ['play'],
+                    filter: { counter: { key: 'wouldTrash', gte: 1 }, keyword: 'Flimsy' },
+                  },
+                  atLeast: 1,
+                },
+              },
+            },
+            {
+              not: {
+                has: {
+                  target: {
+                    who: 'self',
+                    zone: ['play', 'hand', 'gy', 'library'],
+                    filter: { counter: { key: 'wouldTrash', gte: 1 }, defId: 'the_fall_guy' },
+                  },
+                  atLeast: 1,
+                },
+              },
+            },
+            {
+              not: {
+                has: {
+                  target: {
+                    who: 'self',
+                    zone: ['play', 'hand', 'gy', 'library'],
+                    filter: { counter: { key: 'trashSpared', gte: 1 } },
+                  },
+                  atLeast: 1,
+                },
+              },
+            },
+          ],
+        },
         effects: [
-          { op: 'moveTo', target: { who: 'self', zone: 'trash', count: 1, pick: 'lastPlayed' }, zone: 'gy' },
+          {
+            op: 'addCounter',
+            target: {
+              who: 'self',
+              zone: ['play', 'hand', 'gy', 'library'],
+              filter: { counter: { key: 'wouldTrash', gte: 1 } },
+            },
+            key: 'trashSpared',
+            amount: 1,
+          },
           { op: 'trash', target: { self: true } },
         ],
       },
     ],
-    text: 'Whenever one of your cards would be trashed by a non-Flimsy effect, this leaps out of your deck and is trashed instead. +1 Card.',
+    text: 'Whenever one of your cards would be trashed by a non-Flimsy effect, this leaps from your deck to take the fall. +1 Card.',
     flavor: 'Somebody has to.',
     complexity: 'T3',
     subsystems: ['S-CORE'],

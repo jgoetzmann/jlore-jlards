@@ -29,6 +29,7 @@ import type { OpResult, Pre } from './opkit';
 
 import { opDiscard, opDiscardDownTo, opDraw, opGain, opMill, opTrash } from './ops/cards';
 import {
+  opAbsorb,
   opCopyCard,
   opCreateCard,
   opGainCard,
@@ -133,6 +134,8 @@ function applyNode(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pr
       return opRecruit(s, item, q);
     case 'fuse':
       return opFuse(s, item, q, pre);
+    case 'absorb':
+      return opAbsorb(s, item, q, pre);
     case 'shuffle':
       return opShuffle(s, item, q);
     case 'sortLibraryByCost':

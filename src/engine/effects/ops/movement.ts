@@ -111,6 +111,49 @@ export function opCreateCard(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   return 'ok';
 }
 
+/**
+ * §A.24 Homebrew: "permanently add its effect to this card". The absorbed
+ * definition is never gained — only its printed effects are, and they land in
+ * `extraEffects`, which survives zone changes, shuffles and `transform`
+ * (SB-33), so "permanently" and "then upgrade it" hold in one breath.
+ *
+ * The deferred form of this is `NextCardMod.absorbInto`, which waits for the
+ * absorbed card to be played (Hivemind). A row with no play in the middle had
+ * no door at all before this op: nothing else in the effect DSL writes
+ * `extraEffects`.
+ */
+export function opAbsorb(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre): OpResult {
+  const node = item.node;
+  if (node.op !== 'absorb') return 'ok';
+
+  const targets = resolveTargets(s, item, q, node.target, pre, 'Absorb into');
+  if (targets === null) return 'suspend';
+  if (targets.length === 0) return 'ok';
+
+  const ctx = ctxFor(item);
+  const rng = takeRng(s);
+  const defId = resolveDefIdSpec(s, node.defId, ctx, rng);
+  commitRng(s, rng);
+  if (!defId) return 'ok';
+
+  const source: CardDefinition | null = tryGetCard(defId);
+  if (!source || source.effects.length === 0) {
+    // Absorbing a card whose whole output is a printed stat line would add
+    // nothing — say so in the log rather than silently doing nothing.
+    log(s, 'absorbEmpty', { defId }, item.player);
+    return 'ok';
+  }
+
+  for (const iid of targets) {
+    const inst = s.instances[iid];
+    if (!inst) continue;
+    inst.extraEffects.push(...source.effects);
+    noteCodex(s, inst.owner ?? item.player, defId);
+    log(s, 'absorb', { iid, defId, clauses: source.effects.length }, inst.owner ?? item.player);
+  }
+  return 'ok';
+}
+
 export function opGainCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre): OpResult {
   const node = item.node;
   if (node.op !== 'gainCard') return 'ok';

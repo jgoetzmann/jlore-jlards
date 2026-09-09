@@ -306,13 +306,22 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { actions: 1 },
     effects: [
-      // `bindTo:'nextPlayed'` only queues a `bind` mod nobody consumes, and the
-      // early return hides the auraId, so the aura was never manifested at all.
-      // Manifest it outright; binding it to the next Action needs the engine.
-      { op: 'manifestAura', tier: 'celestial', auraId: 'oathbound_memory', who: 'self' },
+      // `playCard` consumes `bind:'oathboundMemory'`: the Celestial Aura is
+      // manifested only when the bound card resolves, and it is manifested
+      // BOUND to that card's definition, which is what makes it "Oathbound
+      // Memory: [Card]" — each turn it mints a Temporary copy of the card it
+      // remembers. `filter` keeps the mod waiting for an Action rather than
+      // being spent by the next Resource: a card that does not match neither
+      // consumes the modifier nor receives it.
+      // (`{op:'manifestAura', bindTo:'nextPlayed'}` arms the same bind, but it
+      // cannot carry the filter, so it would bind to the next card of any type.)
+      {
+        op: 'nextCardModifier',
+        mod: { bind: 'oathboundMemory', filter: { type: 'Action' }, uses: 1, appliesTo: 'play' },
+      },
     ],
     triggers: [],
-    text: 'Flimsy. +1 Action. Manifest the Celestial Aura Oathbound Memory.',
+    text: 'Flimsy. +1 Action. The next Action you play is bound to the Celestial Aura Oathbound Memory.',
     complexity: 'T4',
     subsystems: ['S-AURA', 'S-PERSIST'],
     shop: 'draft',
@@ -426,16 +435,32 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 1 },
-    // `bind:'pointer'` is still the SB-7 hook and still nothing reads it, so the
-    // binding itself does not exist yet. What DOES read it is the autofill in
-    // effects/ops/timing.ts: any mod carrying a `bind` and no `absorbInto` has
-    // `absorbInto` filled in with the source instance, which was quietly making
-    // Pointer a permanent Hivemind — the next card you played had its effects
-    // grafted onto this instance forever. An empty instance id is not a real
-    // instance, so it stops the autofill and both consumers (`consumePlayMods`
-    // and play.ts step 6 test it for truthiness) skip the absorption. When the
-    // engine consumes the bind, this line comes out with it.
-    effects: [{ op: 'nextCardModifier', mod: { bind: 'pointer', absorbInto: '', uses: 1, appliesTo: 'play' } }],
+    // SB-7's Mutilate, now that `playCard` consumes the bind. The card names
+    // nothing: `opNextCardModifier` stamps the arming instance into
+    // `bindSource`, and when the next card resolves, play.ts marks both halves
+    // with one shared `pointerPair` id. `trashWithTrigger` reads that id —
+    // trash either half and the other goes with it, which is Mutilate.
+    // (The old `absorbInto:''` guard is gone with the autofill it blocked: a
+    // bind no longer fills `absorbInto`, so there is nothing left to stop.)
+    // Measured, with a partner that has a printed effect body — the 82% case
+    // that used to lose its stamp to a stale object: both halves come out of
+    // the play carrying pointerPair=341, and trashing the partner puts THIS
+    // card in the trash with it. Mutilated and Trashed together are real.
+    //
+    // PLAYED TOGETHER is the same ongoing property as the other two verbs, not
+    // just the formation moment: once the pair exists, playing either half from
+    // hand plays the other, free (play.ts step 7b). It lives in the engine and
+    // not on this card because triggers are per-DEFINITION and the partner is
+    // whatever the player played next — its definition has never heard of
+    // Pointer. The pairing was already engine state for exactly this reason:
+    // step 6b mints the id, `trashWithTrigger` reads it for Mutilate, and step
+    // 7b reads it for the play.
+    //
+    // Naming this card by `{defId:'pointer'}` from data would have been the
+    // other road, and it is a trap: it re-resolves this body, arming a SECOND
+    // binding that captures whatever is played next, chaining every later card
+    // onto one instance.
+    effects: [{ op: 'nextCardModifier', mod: { bind: 'pointer', uses: 1, appliesTo: 'play' } }],
     triggers: [],
     text: '+1 Action. The next card you play is Pointed to this one: they are Played, Mutilated and Trashed together.',
     flavor: 'Dereference at your own risk.',
@@ -454,16 +479,21 @@ export const cards: CardDefinition[] = [
     rarity: 'epic',
     keywords: [],
     stats: { actions: 1 },
-    // `absorbInto` is the engine's own name for this clause (see NextCardMod in
-    // types.ts) and it is typed InstanceId — an id minted at runtime, which card
-    // data has no way to write. 'self' is a sentinel nobody resolves, so
-    // play.ts's `s.instances[mods.absorbInto]` is undefined and the headline
-    // clause is silent while the Flimsy grant and the {absorbed} tally work.
-    // The one path that fills a real id is the autofill in ops/timing.ts, and it
-    // keys off `mod.bind` — whose three legal values each name a different
-    // mechanic (Oathbound Memory, Pointer's Mutilate, Right Hand Man), all of
-    // which SB-7 says will be consumed. Borrowing one to trip the autofill would
-    // hand Hivemind a second, wrong clause the day that bind is read.
+    // The headline clause is live. `absorbInto` is typed InstanceId — an id
+    // minted at runtime that card data can never write — so `'self'` is the
+    // sentinel for "the card arming this", and `opNextCardModifier`
+    // (effects/ops/timing.ts) swaps it for the arming `item.sourceIid` before
+    // the mod is queued. When the next card resolves, play.ts step 6 pushes
+    // that card's `def.effects` onto this instance's `extraEffects`, which is
+    // per-instance state and survives zone changes and shuffles (B63) — so the
+    // gain really is permanent, not until-end-of-turn.
+    // Measured: play Hivemind, then a card printing +3 Money. The mod resolves
+    // to Hivemind's own iid, the donor gets Flimsy and trashes on play, and
+    // Hivemind's `extraEffects` becomes [{op:'gain',stat:'money',amount:3}].
+    // Return Hivemind to hand and play it again and that +3 fires from step 5's
+    // `[...def.effects, ...inst.extraEffects]` — money 3 -> 6.
+    // A card with an empty printed body is absorbed as nothing, which is
+    // correct: it has no effects to give.
     effects: [
       { op: 'nextCardModifier', mod: { grantKeyword: 'Flimsy', absorbInto: 'self', uses: 1, appliesTo: 'play' } },
       { op: 'addCounter', target: { self: true }, key: 'absorbed', amount: 1 },
@@ -492,18 +522,33 @@ export const cards: CardDefinition[] = [
         count: 3,
         pick: 1,
         prompt: 'Discover a (1)-cost card to brew into this one',
-        // Nothing in the DSL appends a definition's effects to a live instance,
-        // so the brew is served by handing the picked card over instead. Inside
-        // a Discover's `then`, {self:true} is still Homebrew, not the pick.
+        // The row is "add its effect to this card, THEN upgrade it" — one
+        // breath, no play in the middle, and the discovered card is never
+        // gained. That is `{op:'absorb'}`: it grafts the picked definition's
+        // printed effects onto this instance's `extraEffects` immediately.
+        //
+        // The deferred cousin, `NextCardMod.absorbInto`, is Hivemind's shape —
+        // it waits for the absorbed card to be PLAYED. Homebrew was written
+        // that way once, which meant handing the player the card and hoping
+        // they played it; the row promises the effect outright, so the absorb
+        // has to land here.
+        //
+        // `pushChosen` (ops/choices.ts) carries the outer `sourceIid` into
+        // every node of `then`, so `{self:true}` is Homebrew's own instance,
+        // and `substituteDefId` walks the whole node, so `$discovered` is the
+        // card that was actually picked. `transform` replaces in place (same
+        // iid, counters and extraEffects intact), so the brew survives the
+        // upgrade on the last line — which is what lets one row say
+        // "permanently" and "then upgrade it" at the same time.
         then: [
-          { op: 'createCard', defId: '$discovered', to: 'hand' },
+          { op: 'absorb', defId: '$discovered', target: { self: true } },
           { op: 'addCounter', target: { self: true }, key: 'brewed', amount: 1 },
           { op: 'transform', target: { self: true }, into: 'upgrade' },
         ],
       },
     ],
     triggers: [],
-    text: 'Discover a (1)-cost Known Universe card and add it to your hand, then upgrade this card. ({brewed} brewed.)',
+    text: 'Discover a (1)-cost Known Universe card and permanently add its effect to this card. Then upgrade this card. ({brewed} brewed.)',
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-CODEX'],
     shop: 'draft',

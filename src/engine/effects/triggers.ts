@@ -18,6 +18,7 @@ import {
   type EffectContext,
 } from './runtime';
 import { evalCondition } from './evaluate';
+import resolveEffects from './index';
 import { getAura, hasAura } from '@engine/registry';
 import { discardInstance, shuffleZone, trashInstance } from '@engine/core/zones';
 
@@ -170,6 +171,76 @@ export function fireEvent(
 // Potato, Grapevine, Garlic, Chonker and the rest of the onTrash / onDiscard
 // cards alive on the effects path.
 
+/**
+ * The window before a trash, in which a card may intervene.
+ *
+ * `onTrash` fires after the card is already in the trash, which is too late for
+ * Safety Net ("the next card of yours trashed this turn goes to GY instead")
+ * and The Fall Guy ("this leaps from your deck to take the fall"). Both need to
+ * act while the card is still where it was.
+ *
+ * The subject is marked with `wouldTrash` so a trigger can NAME it — a trigger
+ * body has no other handle on the card the event is about, and
+ * `filter:{counter:{key:'wouldTrash',gte:1}}` is that handle. A responder
+ * spares it by stamping `trashSpared` on it. Resolved inline, because a queued
+ * response would run after the trash had already happened.
+ *
+ * Returns true when the trash should still go ahead.
+ */
+function offerTrashWindow(
+  s: GameState,
+  item: QueuedEffect,
+  iid: InstanceId,
+  owner: PlayerId,
+): boolean {
+  const subject = s.instances[iid];
+  if (!subject) return true;
+  const p = s.players[owner];
+  if (!p) return true;
+
+  const watchers: InstanceId[] = [...p.play, ...p.hand, ...p.gy, ...p.library].filter((other) => {
+    const oi = s.instances[other];
+    if (!oi) return false;
+    return (tryGetCard(oi.defId)?.triggers ?? []).some((t) => t.on === 'onWouldTrash');
+  });
+  if (watchers.length === 0) return true;
+
+  subject.counters['wouldTrash'] = 1;
+  for (const watcher of watchers) {
+    const wi = s.instances[watcher];
+    if (!wi) continue;
+    const def = tryGetCard(wi.defId);
+    if (!def) continue;
+    for (const trig of def.triggers) {
+      if (trig.on !== 'onWouldTrash') continue;
+      if (trig.zones && trig.zones.length && !trig.zones.includes(wi.zone)) continue;
+      const ctx: EffectContext = {
+        player: owner,
+        sourceIid: watcher,
+        depth: item.depth + 1,
+        multiplier: 1,
+        vars: {},
+      };
+      if (trig.condition && !evalCondition(s, trig.condition, ctx)) continue;
+      Object.assign(s, resolveEffects(s, trig.effects, ctx));
+    }
+  }
+
+  const after = s.instances[iid];
+  const spared = !!after && (after.counters['trashSpared'] ?? 0) > 0;
+  if (after) {
+    delete after.counters['wouldTrash'];
+    if (spared) delete after.counters['trashSpared'];
+  }
+  if (spared) {
+    log(s, 'trashSpared', { iid, defId: after?.defId ?? null }, owner);
+    // "Goes to GY instead" — the card survives, it just does not go to trash.
+    if (after && after.zone !== 'trash') discardInstance(s, iid);
+    return false;
+  }
+  return true;
+}
+
 /** Trash, then fire `onTrash` — only when the trash actually happened (B40). */
 export function trashWithTrigger(
   s: GameState,
@@ -180,8 +251,29 @@ export function trashWithTrigger(
 ): boolean {
   const before = s.instances[iid];
   const owner = actor ?? before?.owner ?? item.player;
+  if (!offerTrashWindow(s, item, iid, owner)) return false;
+  const pair = before?.counters['pointerPair'] ?? 0;
   const done = trashInstance(s, iid);
   if (done) fireEvent(s, q, item, 'onTrash', iid, owner);
+
+  // SB-7 Mutilate: a Pointer binding dies together. The partner carries the
+  // same pair id, and the id is cleared on both so a rescued half cannot drag
+  // its partner down twice.
+  if (done && pair > 0) {
+    for (const other of Object.keys(s.instances)) {
+      if (other === iid) continue;
+      const oi = s.instances[other];
+      if (!oi || (oi.counters['pointerPair'] ?? 0) !== pair) continue;
+      oi.counters['pointerPair'] = 0;
+      const partnerOwner = oi.owner ?? owner;
+      if (trashInstance(s, other)) {
+        log(s, 'mutilate', { iid: other, defId: oi.defId, pair }, partnerOwner);
+        fireEvent(s, q, item, 'onTrash', other, partnerOwner);
+      }
+    }
+    const self = s.instances[iid];
+    if (self) self.counters['pointerPair'] = 0;
+  }
   return done;
 }
 

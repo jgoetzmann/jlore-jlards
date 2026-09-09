@@ -21,7 +21,7 @@ import { allAuras, allCards } from '@engine/registry';
 import { rarityPullWeight } from '@engine/shop';
 import { entireUniverse, knownUniverse } from '@engine/meta';
 import { opponentsOf, tryGetCard, uniq, type EffectContext } from './runtime';
-import { matchesDefFilter, zoneIds } from './select';
+import { matchesDefFilter, resolveFilter, zoneIds } from './select';
 
 const CATALOGS: Record<string, (def: CardDefinition) => boolean> = {
   miracle: (d) => d.tags.indexOf('Miracle') >= 0,
@@ -155,7 +155,12 @@ export function poolCandidates(
     ids = zoneDefIds(state, ctx, scope);
   }
 
-  const filter = spec ? spec.filter : undefined;
+  // Expression bounds have to be evaluated here too, not only on the selector
+  // path — otherwise a pool filter like "costing at most your Money" is
+  // silently ignored and the offer is unfiltered, which is a worse failure than
+  // gating after the pick. Cult Leader's "add a card you can currently afford"
+  // is a constraint on what is OFFERED.
+  const filter = resolveFilter(state, spec ? spec.filter : undefined, ctx);
   const out: CardDefId[] = [];
   for (const id of uniq(ids)) {
     const def = tryGetCard(id);

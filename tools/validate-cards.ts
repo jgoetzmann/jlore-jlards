@@ -66,6 +66,7 @@ export const KNOWN_OPS: string[] = [
   'transform',
   'recruit',
   'fuse',
+  'absorb',
   'shuffle',
   'sortLibraryByCost',
   'reveal',
@@ -223,7 +224,7 @@ function main(): void {
         fail(id, 'uses unknown op "' + node.op + '"');
         continue;
       }
-      if (node.op === 'createCard' || node.op === 'addToPileTop') {
+      if (node.op === 'createCard' || node.op === 'addToPileTop' || node.op === 'absorb') {
         const ref = node.raw.defId;
         if (typeof ref === 'string' && !isSentinel(ref) && !known[ref]) {
           fail(id, node.op + ' references unknown defId "' + ref + '"');

@@ -237,6 +237,10 @@ export const EXPR_VARS = [
   'selfCost',
   /** What this copy was actually paid for at purchase, not its printed cost. */
   'selfPricePaid',
+  /** Hand position at the moment this card was played (section 2.1 adjacency). */
+  'selfHandIndex',
+  'selfHandSizeAtPlay',
+  'selfHandEdge',
   'x',
 ] as const;
 export type ExprVar = (typeof EXPR_VARS)[number];
@@ -284,6 +288,13 @@ export interface CardFilter {
   counter?: { key: string; eq?: number; lt?: number; lte?: number; gt?: number; gte?: number };
   /** Match cards already present in this match (CNcias inverts it). */
   inMatch?: boolean;
+  /**
+   * Match only a card that has at least one same-cost partner in this zone,
+   * itself excluded. Synchro Summon discards "2 same-cost cards", and without
+   * this the first pick can be a card nothing in hand matches, which strands
+   * the cost the second half has to pay.
+   */
+  hasSameCostPartnerIn?: Zone;
 }
 
 /**
@@ -400,6 +411,15 @@ export type EffectNode =
    * leaves play during that window is dropped from the merge.
    */
   | { op: 'fuse'; target: Selector; to?: Zone }
+  /**
+   * Permanently graft a definition's printed effects onto an instance
+   * (§A.24 Homebrew: "permanently add its effect to this card"). This is the
+   * immediate form of the absorption `NextCardMod.absorbInto` performs when the
+   * absorbed card is played — the row that reads "add its effect to this card"
+   * with no play in between has no other door, because `extraEffects` is not
+   * otherwise reachable from card data.
+   */
+  | { op: 'absorb'; defId: CardDefId | { pool: PoolSpec }; target: Selector }
   | { op: 'shuffle'; zone?: Zone; who?: Who }
   | { op: 'sortLibraryByCost'; who?: Who }
   | { op: 'reveal'; target: Selector }
@@ -482,10 +502,16 @@ export interface NextCardMod {
   /** Multiply the next card's output. */
   multiply?: number;
   multiplyStats?: StatKey[];
-  /** Absorb the next played card's effects into the source instance (Hivemind). */
+  /**
+   * Absorb the next played card's effects into this instance (Hivemind).
+   * An InstanceId is minted at runtime, so card data writes the sentinel
+   * `'self'` and `opNextCardModifier` resolves it to the arming instance.
+   */
   absorbInto?: InstanceId;
   /** Bind the next played card to an aura (Infini Scepter) or pointer (Pointer). */
   bind?: 'oathboundMemory' | 'pointer' | 'rightHandMan';
+  /** The instance arming the bind. `opNextCardModifier` fills it from the source. */
+  bindSource?: InstanceId;
   /** Applies to buys rather than plays. */
   appliesTo?: 'play' | 'buy' | 'action';
   /** Whose next card. */
@@ -528,6 +554,12 @@ export type TriggerEvent =
   | 'onOpponentBuy'
   | 'onOpponentPlay'
   | 'onPlagueAdded'
+  /**
+   * Fires before a card is trashed, while it is still where it was. The subject
+   * carries `counters.wouldTrash` so a responder can name it; stamping
+   * `counters.trashSpared` on it sends it to the GY instead.
+   */
+  | 'onWouldTrash'
   /** Fires on each component as a fusion is attempted, before it is merged. */
   | 'onFuse'
   | 'gameEnd';
