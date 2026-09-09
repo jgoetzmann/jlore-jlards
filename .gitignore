@@ -7,3 +7,4 @@ dist/
 telemetry/
 dist-cards/
 telemetry/
+.claude/
