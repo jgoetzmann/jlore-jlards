@@ -18,6 +18,8 @@
     "cards:validate": "tsx tools/validate-cards.ts",
     "cards:export": "tsx tools/export-cards.ts",
     "art:manifest": "tsx tools/art-manifest.ts",
+    "art:generate": "tsx tools/gen-art.ts",
+    "art:status": "tsx tools/art-status.ts",
     "replay": "tsx tools/replay.ts",
     "relay:check": "tsx tools/relay-check.ts",
     "e2e": "playwright test",

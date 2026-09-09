@@ -32,7 +32,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'universal_buff', status: 'placeholder' },
+    art: { key: 'universal_buff', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'universal_nerf',
@@ -58,7 +58,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'universal_nerf', status: 'placeholder' },
+    art: { key: 'universal_nerf', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'quick_patch',
@@ -85,7 +85,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'quick_patch', status: 'placeholder' },
+    art: { key: 'quick_patch', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'indirect_buffalo',
@@ -109,7 +109,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'indirect_buffalo', status: 'placeholder' },
+    art: { key: 'indirect_buffalo', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

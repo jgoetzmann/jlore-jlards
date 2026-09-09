@@ -33,7 +33,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'rct_cn', status: 'placeholder' },
+    art: { key: 'rct_cn', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_phobia',
@@ -68,7 +68,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PVP'],
     shop: 'draft',
-    art: { key: 'cn_phobia', status: 'placeholder', anim: 'trash' },
+    art: { key: 'cn_phobia', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'cncias',
@@ -96,7 +96,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CODEX', 'S-PLAGUE'],
     shop: 'draft',
-    art: { key: 'cncias', status: 'placeholder' },
+    art: { key: 'cncias', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_developer',
@@ -120,7 +120,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'cn_developer', status: 'placeholder' },
+    art: { key: 'cn_developer', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_century_of_humiliation',
@@ -142,7 +142,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'cn_century_of_humiliation', status: 'placeholder' },
+    art: { key: 'cn_century_of_humiliation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_tech',
@@ -169,7 +169,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-SHOP'],
     shop: 'draft',
-    art: { key: 'cn_tech', status: 'placeholder' },
+    art: { key: 'cn_tech', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_century_of_prosperity',
@@ -196,7 +196,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'cn_century_of_prosperity', status: 'placeholder', anim: 'coin' },
+    art: { key: 'cn_century_of_prosperity', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'cn_succulent_xiao',
@@ -215,7 +215,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'cn_succulent_xiao', status: 'placeholder' },
+    art: { key: 'cn_succulent_xiao', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'performativity',
@@ -259,7 +259,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-EFFECTS', 'S-CODEX'],
     shop: 'draft',
-    art: { key: 'performativity', status: 'placeholder' },
+    art: { key: 'performativity', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

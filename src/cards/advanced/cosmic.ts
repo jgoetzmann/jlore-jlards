@@ -38,7 +38,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'lunar_fragment', status: 'placeholder', anim: 'summon' },
+    art: { key: 'lunar_fragment', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'journey_to_the_moon',
@@ -65,7 +65,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'journey_to_the_moon', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'journey_to_the_moon', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
   {
     id: 'astrologist',
@@ -95,7 +95,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'astrologist', status: 'placeholder' },
+    art: { key: 'astrologist', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'moon_dance',
@@ -120,7 +120,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'moon_dance', status: 'placeholder' },
+    art: { key: 'moon_dance', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'space_race',
@@ -138,7 +138,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'space_race', status: 'placeholder' },
+    art: { key: 'space_race', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'wish_upon_the_stars',
@@ -162,7 +162,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-AURA'],
     shop: 'draft',
-    art: { key: 'wish_upon_the_stars', status: 'placeholder' },
+    art: { key: 'wish_upon_the_stars', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'runebinder_of_jlore',
@@ -201,7 +201,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'runebinder_of_jlore', status: 'placeholder' },
+    art: { key: 'runebinder_of_jlore', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'arc_of_the_universe',
@@ -229,7 +229,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'arc_of_the_universe', status: 'placeholder', anim: 'explode' },
+    art: { key: 'arc_of_the_universe', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'eastern_metaphysics',
@@ -273,7 +273,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'eastern_metaphysics', status: 'placeholder' },
+    art: { key: 'eastern_metaphysics', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'constellation',
@@ -302,7 +302,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-ENDGAME'],
     shop: 'draft',
-    art: { key: 'constellation', status: 'placeholder' },
+    art: { key: 'constellation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'star_aligner',
@@ -331,7 +331,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-ENDGAME'],
     shop: 'draft',
-    art: { key: 'star_aligner', status: 'placeholder' },
+    art: { key: 'star_aligner', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

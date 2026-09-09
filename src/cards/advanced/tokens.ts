@@ -26,7 +26,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     notPurchasable: true,
-    art: { key: 'permanent_hand_box', status: 'placeholder' },
+    art: { key: 'permanent_hand_box', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'temporary_hand_box',
@@ -52,7 +52,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     notPurchasable: true,
-    art: { key: 'temporary_hand_box', status: 'placeholder' },
+    art: { key: 'temporary_hand_box', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

@@ -25,7 +25,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_fortune', status: 'placeholder', anim: 'coin' },
+    art: { key: 'relic_of_fortune', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'relic_of_vigor',
@@ -44,7 +44,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_vigor', status: 'placeholder' },
+    art: { key: 'relic_of_vigor', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_insight',
@@ -63,7 +63,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_insight', status: 'placeholder' },
+    art: { key: 'relic_of_insight', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_desire',
@@ -82,7 +82,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_desire', status: 'placeholder' },
+    art: { key: 'relic_of_desire', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_glory',
@@ -101,7 +101,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_glory', status: 'placeholder' },
+    art: { key: 'relic_of_glory', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_furitiveness',
@@ -126,7 +126,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_furitiveness', status: 'placeholder' },
+    art: { key: 'relic_of_furitiveness', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_finesse',
@@ -147,7 +147,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-LOCK', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_finesse', status: 'placeholder' },
+    art: { key: 'relic_of_finesse', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_dominion',
@@ -166,7 +166,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_dominion', status: 'placeholder' },
+    art: { key: 'relic_of_dominion', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'relic_of_totality',
@@ -198,7 +198,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BIGACTION', 'S-COMBO', 'S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'relic_of_totality', status: 'placeholder', anim: 'explode' },
+    art: { key: 'relic_of_totality', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
     bigAction: 1,
   },
   {
@@ -218,7 +218,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'evercrown', status: 'placeholder', anim: 'summon' },
+    art: { key: 'evercrown', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'bag_of_relics',
@@ -237,7 +237,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-BUFF'],
     shop: 'draft',
-    art: { key: 'bag_of_relics', status: 'placeholder', anim: 'summon' },
+    art: { key: 'bag_of_relics', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

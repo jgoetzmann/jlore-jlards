@@ -154,7 +154,7 @@ export const auras: AuraDefinition[] = [
     text: 'Add a Book to your hand.',
     effects: [{ op: 'createCard', defId: { pool: { catalog: 'book' } }, to: 'hand' }],
     triggers: [],
-    art: { key: 'aura_learning_subscription', status: 'placeholder' },
+    art: { key: 'aura_learning_subscription', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'evolve',
@@ -167,7 +167,7 @@ export const auras: AuraDefinition[] = [
       { op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand' },
     ],
     triggers: [],
-    art: { key: 'aura_evolve', status: 'placeholder' },
+    art: { key: 'aura_evolve', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'mycology',
@@ -186,7 +186,7 @@ export const auras: AuraDefinition[] = [
       },
     ],
     triggers: [],
-    art: { key: 'aura_mycology', status: 'placeholder' },
+    art: { key: 'aura_mycology', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'power_play',
@@ -203,7 +203,7 @@ export const auras: AuraDefinition[] = [
       },
     ],
     triggers: [],
-    art: { key: 'aura_power_play', status: 'placeholder' },
+    art: { key: 'aura_power_play', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'imprison',
@@ -228,7 +228,7 @@ export const auras: AuraDefinition[] = [
       },
     ],
     triggers: [],
-    art: { key: 'aura_imprison', status: 'placeholder' },
+    art: { key: 'aura_imprison', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cloning_gallery',
@@ -238,7 +238,7 @@ export const auras: AuraDefinition[] = [
     text: 'Add a copy of the last card you bought to your GY.',
     effects: [{ op: 'copyCard', target: { who: 'self', zone: 'gy', count: 1, pick: 'lastPlayed' }, to: 'gy' }],
     triggers: [],
-    art: { key: 'aura_cloning_gallery', status: 'placeholder' },
+    art: { key: 'aura_cloning_gallery', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'ladder_to_heaven',
@@ -248,7 +248,7 @@ export const auras: AuraDefinition[] = [
     text: 'Add a Truss with +1 VP to your hand.',
     effects: [{ op: 'createCard', defId: 'truss', to: 'hand', statDelta: { vp: 1 } }],
     triggers: [],
-    art: { key: 'aura_ladder_to_heaven', status: 'placeholder' },
+    art: { key: 'aura_ladder_to_heaven', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'blessed_by_raza',
@@ -267,7 +267,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'activateAura' }],
       },
     ],
-    art: { key: 'aura_blessed_by_raza', status: 'placeholder' },
+    art: { key: 'aura_blessed_by_raza', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'smorc',
@@ -287,7 +287,7 @@ export const auras: AuraDefinition[] = [
       },
     ],
     triggers: [],
-    art: { key: 'aura_smorc', status: 'placeholder' },
+    art: { key: 'aura_smorc', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'dead_sea_scroll',
@@ -297,7 +297,7 @@ export const auras: AuraDefinition[] = [
     text: '+1 Prophet.',
     effects: [{ op: 'gain', stat: 'prophet', amount: 1 }],
     triggers: [],
-    art: { key: 'aura_dead_sea_scroll', status: 'placeholder' },
+    art: { key: 'aura_dead_sea_scroll', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'rugpull',
@@ -307,7 +307,7 @@ export const auras: AuraDefinition[] = [
     text: '+4 Money.',
     effects: [{ op: 'gain', stat: 'money', amount: 4 }],
     triggers: [],
-    art: { key: 'aura_rugpull', status: 'placeholder', anim: 'coin' },
+    art: { key: 'aura_rugpull', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
 
   // -------------------------------------------------------------------------
@@ -326,7 +326,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'copyCard', target: { who: 'self', zone: 'gy', count: 1, pick: 'lastPlayed' }, to: 'gy' }],
       },
     ],
-    art: { key: 'aura_double_header', status: 'placeholder' },
+    art: { key: 'aura_double_header', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_invisible_hand',
@@ -340,7 +340,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'modifyCost', scope: 'allShops', delta: -2, floor: 0, duration: 'turn' }],
       },
     ],
-    art: { key: 'aura_the_invisible_hand', status: 'placeholder' },
+    art: { key: 'aura_the_invisible_hand', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'kwzkis_stimulants',
@@ -357,7 +357,7 @@ export const auras: AuraDefinition[] = [
         ],
       },
     ],
-    art: { key: 'aura_kwzkis_stimulants', status: 'placeholder' },
+    art: { key: 'aura_kwzkis_stimulants', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'symphony_of_3',
@@ -372,7 +372,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'multiplyNext', factor: 2, count: 1 }],
       },
     ],
-    art: { key: 'aura_symphony_of_3', status: 'placeholder' },
+    art: { key: 'aura_symphony_of_3', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'march_of_progress',
@@ -386,7 +386,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse' } }, to: 'hand' }],
       },
     ],
-    art: { key: 'aura_march_of_progress', status: 'placeholder' },
+    art: { key: 'aura_march_of_progress', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'outstanding_debt',
@@ -400,7 +400,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'gain', stat: 'money', amount: { expr: '0 - ceil((20 - moneyUnspent) / 4)' } }],
       },
     ],
-    art: { key: 'aura_outstanding_debt', status: 'placeholder' },
+    art: { key: 'aura_outstanding_debt', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'in_too_deep',
@@ -443,7 +443,7 @@ export const auras: AuraDefinition[] = [
       },
       { on: 'gameEnd', effects: [{ op: 'questProgress', key: 'wins', amount: 1 }] },
     ],
-    art: { key: 'aura_in_too_deep', status: 'placeholder' },
+    art: { key: 'aura_in_too_deep', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'undead_army',
@@ -464,7 +464,7 @@ export const auras: AuraDefinition[] = [
         ],
       },
     ],
-    art: { key: 'aura_undead_army', status: 'placeholder' },
+    art: { key: 'aura_undead_army', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'market_manipulation',
@@ -481,7 +481,7 @@ export const auras: AuraDefinition[] = [
         ],
       },
     ],
-    art: { key: 'aura_market_manipulation', status: 'placeholder' },
+    art: { key: 'aura_market_manipulation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'yuyas_mythical_portal',
@@ -499,7 +499,7 @@ export const auras: AuraDefinition[] = [
         ],
       },
     ],
-    art: { key: 'aura_yuyas_mythical_portal', status: 'placeholder' },
+    art: { key: 'aura_yuyas_mythical_portal', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'aspect_of_ares',
@@ -513,7 +513,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'createCard', defId: 'war', to: 'hand' }],
       },
     ],
-    art: { key: 'aura_aspect_of_ares', status: 'placeholder' },
+    art: { key: 'aura_aspect_of_ares', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'oathbound_memory',
@@ -530,7 +530,7 @@ export const auras: AuraDefinition[] = [
         ],
       },
     ],
-    art: { key: 'aura_oathbound_memory', status: 'placeholder' },
+    art: { key: 'aura_oathbound_memory', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 
   // -------------------------------------------------------------------------
@@ -549,7 +549,7 @@ export const auras: AuraDefinition[] = [
         effects: [{ op: 'extraTurn', who: 'self' }],
       },
     ],
-    art: { key: 'aura_lotus_solutions', status: 'placeholder' },
+    art: { key: 'aura_lotus_solutions', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'shooting_star',
@@ -562,7 +562,7 @@ export const auras: AuraDefinition[] = [
       { op: 'manifestAura', tier: 'celestial', who: 'self' },
     ],
     triggers: [],
-    art: { key: 'aura_shooting_star', status: 'placeholder', anim: 'summon' },
+    art: { key: 'aura_shooting_star', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

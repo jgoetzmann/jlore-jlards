@@ -25,7 +25,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'grubbing_goblin', status: 'placeholder' },
+    art: { key: 'grubbing_goblin', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'goblin_gang_boss',
@@ -44,7 +44,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'goblin_gang_boss', status: 'placeholder' },
+    art: { key: 'goblin_gang_boss', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'nether_portal',
@@ -68,7 +68,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'nether_portal', status: 'placeholder', anim: 'summon' },
+    art: { key: 'nether_portal', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'jakkari_sacrifice',
@@ -92,7 +92,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'jakkari_sacrifice', status: 'placeholder' },
+    art: { key: 'jakkari_sacrifice', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'war_bonds',
@@ -111,7 +111,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'war_bonds', status: 'placeholder' },
+    art: { key: 'war_bonds', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cn_backed_war_bonds',
@@ -133,7 +133,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'cn_backed_war_bonds', status: 'placeholder' },
+    art: { key: 'cn_backed_war_bonds', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_mob',
@@ -161,7 +161,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'the_mob', status: 'placeholder' },
+    art: { key: 'the_mob', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'uncle_musabi',
@@ -186,7 +186,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'uncle_musabi', status: 'placeholder' },
+    art: { key: 'uncle_musabi', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'skull_of_juldan',
@@ -214,7 +214,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'skull_of_juldan', status: 'placeholder', anim: 'trash' },
+    art: { key: 'skull_of_juldan', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
 ];
 

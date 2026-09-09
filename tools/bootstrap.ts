@@ -22,6 +22,16 @@ export function bootstrap(): { cards: CardDefinition[]; auras: AuraDefinition[] 
   return { cards: allCards(), auras: allAuras() };
 }
 
+/**
+ * File extension for card art under `public/art/`, and the one `artUrl()` in
+ * `src/ui/Card.tsx` asks for. Lives here rather than in `gen-art.ts` because
+ * that module runs its generator on import, so nothing may import from it.
+ *
+ * JPEG, not PNG: the art is opaque — the client draws the card frame, so alpha
+ * is never used — and PNG would take the committed set from ~14 MB to ~250 MB.
+ */
+export const ART_EXT = 'jpg';
+
 /** `--games=200 --json` style argv parsing. Bare flags become "true". */
 export function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};

@@ -253,7 +253,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-CHAOS', 'S-HIDDEN'],
     shop: 'draft',
-    art: { key: 'call_to_chaos', status: 'placeholder', anim: 'explode' },
+    art: { key: 'call_to_chaos', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
 ];
 

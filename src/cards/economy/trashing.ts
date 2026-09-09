@@ -48,7 +48,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'pawn_shop', status: 'placeholder', anim: 'trash' },
+    art: { key: 'pawn_shop', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'daylight_salesman',
@@ -70,7 +70,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'daylight_salesman', status: 'placeholder', anim: 'trash' },
+    art: { key: 'daylight_salesman', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'moonlight_salesman',
@@ -92,7 +92,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'moonlight_salesman', status: 'placeholder', anim: 'trash' },
+    art: { key: 'moonlight_salesman', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'upcycle',
@@ -124,7 +124,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'upcycle', status: 'placeholder' },
+    art: { key: 'upcycle', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'upcycled_upcycle',
@@ -156,7 +156,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'upcycled_upcycle', status: 'placeholder' },
+    art: { key: 'upcycled_upcycle', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'trash_for_treasure',
@@ -185,7 +185,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-DISCOVER'],
     shop: 'draft',
-    art: { key: 'trash_for_treasure', status: 'placeholder' },
+    art: { key: 'trash_for_treasure', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'recession_indicator',
@@ -225,7 +225,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-STEAL'],
     shop: 'draft',
-    art: { key: 'recession_indicator', status: 'placeholder', anim: 'trash' },
+    art: { key: 'recession_indicator', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'pauper_no_longer',
@@ -254,7 +254,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'pauper_no_longer', status: 'placeholder', anim: 'trash' },
+    art: { key: 'pauper_no_longer', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'scorched_earth',
@@ -273,7 +273,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'scorched_earth', status: 'placeholder', anim: 'explode' },
+    art: { key: 'scorched_earth', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'restart_mission',
@@ -301,7 +301,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'restart_mission', status: 'placeholder', anim: 'trash' },
+    art: { key: 'restart_mission', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'the_ultimate_sacrifice',
@@ -336,7 +336,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'the_ultimate_sacrifice', status: 'placeholder', anim: 'trash' },
+    art: { key: 'the_ultimate_sacrifice', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'glitch_in_the_system',
@@ -364,7 +364,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-STEAL'],
     shop: 'draft',
-    art: { key: 'glitch_in_the_system', status: 'placeholder', anim: 'explode' },
+    art: { key: 'glitch_in_the_system', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'twisting_nether',
@@ -385,7 +385,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'twisting_nether', status: 'placeholder', anim: 'explode' },
+    art: { key: 'twisting_nether', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'safety_net',
@@ -422,7 +422,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'safety_net', status: 'placeholder' },
+    art: { key: 'safety_net', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_fall_guy',
@@ -450,7 +450,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'the_fall_guy', status: 'placeholder', anim: 'trash' },
+    art: { key: 'the_fall_guy', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'card_sleeve',
@@ -482,7 +482,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'card_sleeve', status: 'placeholder' },
+    art: { key: 'card_sleeve', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cookie_gruzzler',
@@ -518,7 +518,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST', 'S-STEAL'],
     shop: 'draft',
-    art: { key: 'cookie_gruzzler', status: 'placeholder' },
+    art: { key: 'cookie_gruzzler', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'corrosion',
@@ -549,7 +549,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-STEAL'],
     shop: 'draft',
-    art: { key: 'corrosion', status: 'placeholder' },
+    art: { key: 'corrosion', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'zzlurper',
@@ -570,7 +570,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'zzlurper', status: 'placeholder', anim: 'trash' },
+    art: { key: 'zzlurper', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'coal',
@@ -598,7 +598,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-TEXTGEN'],
     shop: 'draft',
-    art: { key: 'coal', status: 'placeholder' },
+    art: { key: 'coal', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

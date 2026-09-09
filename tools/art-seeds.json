@@ -1,0 +1,15 @@
+{
+  "note": "Per-art-key seed salts. Bumped by `npm run art:generate -- --reroll=<key>`.",
+  "salts": {
+    "cn_century_of_humiliation": 1,
+    "copper": 2,
+    "distilled_grape": 1,
+    "indirect_buffalo": 1,
+    "night_on_the_town": 1,
+    "nine_lives_loan": 1,
+    "oh_mr_lebon": 1,
+    "silver": 2,
+    "tix": 1,
+    "vault": 1
+  }
+}

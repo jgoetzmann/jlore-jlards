@@ -55,7 +55,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'gruel', status: 'placeholder' },
+    art: { key: 'gruel', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'crumb',
@@ -74,7 +74,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'crumb', status: 'placeholder' },
+    art: { key: 'crumb', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'brownie',
@@ -104,7 +104,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     notPurchasable: true,
-    art: { key: 'brownie', status: 'placeholder' },
+    art: { key: 'brownie', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'banana',
@@ -132,7 +132,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
     notPurchasable: true,
-    art: { key: 'banana', status: 'placeholder' },
+    art: { key: 'banana', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'rosemary_triscuit',
@@ -158,7 +158,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'rosemary_triscuit', status: 'placeholder' },
+    art: { key: 'rosemary_triscuit', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'fruit_gummy',
@@ -177,7 +177,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'fruit_gummy', status: 'placeholder' },
+    art: { key: 'fruit_gummy', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'matcha',
@@ -196,7 +196,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'matcha', status: 'placeholder' },
+    art: { key: 'matcha', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'boba',
@@ -215,7 +215,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'boba', status: 'placeholder' },
+    art: { key: 'boba', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'slop_bowl',
@@ -235,7 +235,7 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-TOKEN', 'S-BIGACTION'],
     notPurchasable: true,
     bigAction: 2,
-    art: { key: 'slop_bowl', status: 'placeholder' },
+    art: { key: 'slop_bowl', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'combo_meal',
@@ -254,7 +254,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-COMBO'],
     notPurchasable: true,
-    art: { key: 'combo_meal', status: 'placeholder' },
+    art: { key: 'combo_meal', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'huckleberry',
@@ -273,7 +273,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'huckleberry', status: 'placeholder' },
+    art: { key: 'huckleberry', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'milkshake',
@@ -298,7 +298,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'milkshake', status: 'placeholder' },
+    art: { key: 'milkshake', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'slice_of_bread',
@@ -320,7 +320,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'slice_of_bread', status: 'placeholder' },
+    art: { key: 'slice_of_bread', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 
   // -------------------------------------------------------------------------
@@ -352,7 +352,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'distilled_potato', status: 'placeholder', anim: 'trash' },
+    art: { key: 'distilled_potato', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'distilled_gluten',
@@ -371,7 +371,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'distilled_gluten', status: 'placeholder', anim: 'trash' },
+    art: { key: 'distilled_gluten', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'distilled_grape',
@@ -397,7 +397,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'distilled_grape', status: 'placeholder' },
+    art: { key: 'distilled_grape', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 
   // -------------------------------------------------------------------------
@@ -431,7 +431,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'grape', status: 'placeholder' },
+    art: { key: 'grape', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'big_grape',
@@ -456,7 +456,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'big_grape', status: 'placeholder' },
+    art: { key: 'big_grape', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'golden_grape',
@@ -493,7 +493,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'golden_grape', status: 'placeholder', anim: 'coin' },
+    art: { key: 'golden_grape', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
 
   // -------------------------------------------------------------------------
@@ -519,7 +519,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'loaf_of_bread', status: 'placeholder' },
+    art: { key: 'loaf_of_bread', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'potato',
@@ -543,7 +543,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'potato', status: 'placeholder' },
+    art: { key: 'potato', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'grapevine',
@@ -567,7 +567,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST', 'S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'grapevine', status: 'placeholder', anim: 'summon' },
+    art: { key: 'grapevine', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'fruit_basket',
@@ -586,7 +586,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'fruit_basket', status: 'placeholder' },
+    art: { key: 'fruit_basket', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'hearty_meal',
@@ -605,7 +605,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'hearty_meal', status: 'placeholder' },
+    art: { key: 'hearty_meal', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'house_party',
@@ -627,7 +627,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'house_party', status: 'placeholder' },
+    art: { key: 'house_party', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'cornucopia',
@@ -657,7 +657,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'cornucopia', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'cornucopia', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
   {
     id: 'miracle_fruit',
@@ -685,7 +685,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'miracle_fruit', status: 'placeholder', anim: 'summon' },
+    art: { key: 'miracle_fruit', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'blueberry_pie',
@@ -711,7 +711,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     shop: 'draft',
-    art: { key: 'blueberry_pie', status: 'placeholder' },
+    art: { key: 'blueberry_pie', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'jmart_banana_bunch',
@@ -738,7 +738,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF', 'S-TOKEN'],
     shop: 'draft',
-    art: { key: 'jmart_banana_bunch', status: 'placeholder' },
+    art: { key: 'jmart_banana_bunch', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'conjure_rosemary_triscuits',
@@ -757,7 +757,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'conjure_rosemary_triscuits', status: 'placeholder', anim: 'summon' },
+    art: { key: 'conjure_rosemary_triscuits', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'better_budder',
@@ -779,7 +779,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-EFFECTS'],
     shop: 'draft',
-    art: { key: 'better_budder', status: 'placeholder' },
+    art: { key: 'better_budder', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'goatman_family_genetics',
@@ -812,7 +812,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'goatman_family_genetics', status: 'placeholder' },
+    art: { key: 'goatman_family_genetics', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'performance_enhancing_cookie',
@@ -834,7 +834,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'performance_enhancing_cookie', status: 'placeholder' },
+    art: { key: 'performance_enhancing_cookie', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'performance_enhancing_crumb',
@@ -853,7 +853,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-BUFF'],
     shop: 'draft',
-    art: { key: 'performance_enhancing_crumb', status: 'placeholder' },
+    art: { key: 'performance_enhancing_crumb', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'boom_big_max',
@@ -888,7 +888,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PLAGUE', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'boom_big_max', status: 'placeholder', anim: 'explode' },
+    art: { key: 'boom_big_max', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
 ];
 

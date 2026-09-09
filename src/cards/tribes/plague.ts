@@ -32,7 +32,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'crop_dusting', status: 'placeholder' },
+    art: { key: 'crop_dusting', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'plague_crawler',
@@ -56,7 +56,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'plague_crawler', status: 'placeholder' },
+    art: { key: 'plague_crawler', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'plague_charger',
@@ -94,7 +94,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'plague_charger', status: 'placeholder' },
+    art: { key: 'plague_charger', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'patient_zero',
@@ -120,7 +120,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'patient_zero', status: 'placeholder' },
+    art: { key: 'patient_zero', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'outbreak',
@@ -148,7 +148,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'outbreak', status: 'placeholder' },
+    art: { key: 'outbreak', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'antibody_extraction',
@@ -184,7 +184,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE'],
     shop: 'draft',
-    art: { key: 'antibody_extraction', status: 'placeholder', anim: 'trash' },
+    art: { key: 'antibody_extraction', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'living_bomb',
@@ -207,7 +207,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'living_bomb', status: 'placeholder', anim: 'explode' },
+    art: { key: 'living_bomb', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'plandemic',
@@ -235,7 +235,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PLAGUE', 'S-SHOP'],
     shop: 'draft',
-    art: { key: 'plandemic', status: 'placeholder' },
+    art: { key: 'plandemic', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'jalshi',
@@ -271,7 +271,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE'],
     shop: 'draft',
-    art: { key: 'jalshi', status: 'placeholder' },
+    art: { key: 'jalshi', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'juhan_wet_market',
@@ -295,7 +295,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'juhan_wet_market', status: 'placeholder' },
+    art: { key: 'juhan_wet_market', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 
