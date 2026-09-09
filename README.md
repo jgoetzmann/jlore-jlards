@@ -51,6 +51,7 @@ npm run sim            # headless bot matches
 npm run balance        # balance telemetry report -> telemetry/
 npm run replay -- --seed=42 --players=3          # reproduce a match exactly
 npm run replay -- --seed=42 --players=3 --turn=14  # stop and print the board
+npm run e2e            # play the game in a real Chromium, incl. two-browser multiplayer
 npm run relay:check    # verify Upstash credentials + the live relay backend
 npm run cards:export   # cards + auras as JSON, for art tooling
 npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
@@ -118,6 +119,32 @@ plain stat lines (`+1 Action, +2 Money`); only non-stat behaviour goes in
 | [`docs/ART-MANIFEST.md`](docs/ART-MANIFEST.md) | Generated art worklist |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Original topology handoff |
 | [`jlore_jlards_gameplay.md`](jlore_jlards_gameplay.md) | Original rules and card catalog handoff |
+
+## Does it actually work?
+
+`npm test` proves the engine's rules. It does not prove the game is playable —
+that needs a browser.
+
+```bash
+npm run e2e            # 14 specs, real Chromium
+npm run e2e:headed     # watch it play
+```
+
+Two suites. `e2e/hotseat.spec.ts` plays a real two-player game by clicking:
+deals five cards, plays a Copper for money, buys from a pile, ends the turn,
+passes the seat, and runs twelve turns without falling over. `e2e/multiplayer.spec.ts`
+opens **two independent Chromium contexts** — separate cookies, separate
+localStorage, separate seats — has one host a room and the other join by URL,
+and checks that plays propagate, turns alternate, and a refresh puts you back
+in your own seat.
+
+The hidden-information spec is worth understanding precisely. It asserts that
+neither browser's DOM contains the other player's hand instance ids, which is
+what `viewFor` actually guarantees. It deliberately does **not** assert that the
+relay queue is unreadable: addressed views ride one shared list, and
+`ARCHITECTURE.md` §6 accepts that a determined player could fish another seat's
+view out of it with devtools. That is the stated privacy bar, and the test pins
+the real boundary rather than a flattering one.
 
 ## Reproducing a bug from a playtest
 

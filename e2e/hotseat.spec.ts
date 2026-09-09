@@ -99,28 +99,35 @@ test.describe('hotseat — a game you can actually play', () => {
     await expect(page.getByTestId('table')).toBeVisible();
     await focusSeatToMove(page);
 
-    // Play every Copper to bank money.
-    const coppers = page.getByTestId('hand').locator('[data-card-id="copper"]');
-    for (let i = await coppers.count(); i > 0; i -= 1) {
-      await coppers.first().click();
-      await page.waitForTimeout(60);
+    // Play every Copper to bank money. Wait for the hand to shrink each time
+    // rather than sleeping, so this does not race the re-render.
+    for (let i = 0; i < 5; i += 1) {
+      const copper = page.getByTestId('hand').locator('[data-card-id="copper"]').first();
+      if ((await copper.count()) === 0) break;
+      const before = await page.getByTestId('hand').getByTestId('card').count();
+      await copper.click();
+      await expect.poll(async () => page.getByTestId('hand').getByTestId('card').count()).toBeLessThan(before);
     }
 
-    const money = await statValue(page, 'money');
-    expect(money).toBeGreaterThan(0);
+    expect(await statValue(page, 'money')).toBeGreaterThan(0);
+    expect(await statValue(page, 'buys')).toBe(1);
 
-    // Copper costs 0, so its pile is always buyable.
-    const copperPile = page.locator('[data-testid="pile"][data-buyable="true"]').first();
-    await expect(copperPile).toBeVisible();
-    const countBefore = Number(await copperPile.getAttribute('data-pile-count'));
+    // Pin the pile by id. `[data-buyable="true"]` is a live set that re-orders
+    // as money changes, so `.first()` would point somewhere else after the buy.
+    const pileId = await page
+      .locator('[data-testid="pile"][data-buyable="true"]')
+      .first()
+      .getAttribute('data-pile-id');
+    expect(pileId, 'something should be affordable').toBeTruthy();
+    const pile = page.locator(`[data-pile-id="${pileId}"]`);
+    const countBefore = Number(await pile.getAttribute('data-pile-count'));
 
-    await copperPile.getByTestId('buy').click();
+    await pile.getByTestId('buy').click();
 
+    // The Buy is spent and that specific pile lost exactly one card.
+    await expect.poll(async () => statValue(page, 'buys'), { message: 'buys should drop' }).toBe(0);
     await expect
-      .poll(async () => statValue(page, 'buys'), { message: 'buys should drop' })
-      .toBe(0);
-    await expect
-      .poll(async () => Number(await copperPile.getAttribute('data-pile-count')))
+      .poll(async () => Number(await pile.getAttribute('data-pile-count')))
       .toBe(countBefore - 1);
   });
 
