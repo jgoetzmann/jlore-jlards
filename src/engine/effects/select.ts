@@ -7,6 +7,7 @@
  * a live rng, then write the cursor back.
  */
 import type {
+  CardDefId,
   CardDefinition,
   CardFilter,
   GameState,
@@ -130,6 +131,25 @@ export function resolveFilter(
   return out;
 }
 
+/**
+ * The price a definition is actually being sold at, if it is in a pile.
+ *
+ * Definition-level matching has no instance to read, so it used the printed
+ * cost — which meant a Discover pool and the PileSelector that followed it
+ * disagreed under any live cost modifier: the offer was gated at the printed
+ * price and the purchase at the modified one.
+ */
+function livePriceOfDef(state: GameState, defId: CardDefId): number {
+  for (const pileId of Object.keys(state.shop.piles)) {
+    const pile = state.shop.piles[pileId];
+    const top = pile?.cards[0];
+    if (!top) continue;
+    const inst = state.instances[top];
+    if (inst && inst.defId === defId) return instanceCost(state, top);
+  }
+  return defCost(state, defId);
+}
+
 /** The two name-shaped filter axes, shared by definition and instance matching. */
 function nameAxesOk(def: CardDefinition, filter: CardFilter): boolean {
   if (filter.nameContainsAny && filter.nameContainsAny.length > 0) {
@@ -191,7 +211,11 @@ export function matchesDefFilter(
   if (defIds.length > 0 && defIds.indexOf(def.id) < 0) return false;
 
   if (filter.cost) {
-    const cost = state ? defCost(state, def.id) : typeof def.cost.money === 'number' ? def.cost.money : 0;
+    // Prefer the LIVE price of the pile this definition sits in. A pool filter
+    // and a PileSelector filter must answer "can you afford it" the same way,
+    // or a card is offered at its printed cost and then refused at the modified
+    // one. `defCost` is the fallback for a definition with no pile.
+    const cost = state ? livePriceOfDef(state, def.id) : typeof def.cost.money === 'number' ? def.cost.money : 0;
     if (!matchesNumeric(cost, filter.cost)) return false;
   }
 
@@ -264,6 +288,12 @@ export function matchesFilter(state: GameState, iid: InstanceId, filter?: CardFi
   if (filter.counter) {
     const held = typeof i.counters[filter.counter.key] === 'number' ? i.counters[filter.counter.key] : 0;
     if (!matchesNumeric(held, filter.counter)) return false;
+  }
+
+  if (filter.hasSameCostPartnerIn) {
+    const mine = instanceCost(state, iid);
+    const pool = zoneIds(state, i.owner, filter.hasSameCostPartnerIn);
+    if (!pool.some((other) => other !== iid && instanceCost(state, other) === mine)) return false;
   }
 
   if (filter.not && matchesFilter(state, iid, filter.not)) return false;
@@ -457,11 +487,15 @@ export function selectPilesWith(
   }
 
   if (sel && sel.filter) {
+    // Same reason as the pool path: an expression bound left unresolved here
+    // reads as no bound at all, so a pile filter that names live state would
+    // quietly match every pile.
+    const live = resolveFilter(state, sel.filter, ctx);
     ids = ids.filter((id) => {
       const pile = state.shop.piles[id];
       if (!pile) return false;
       if (pile.cards.length === 0) return false;
-      return matchesFilter(state, pile.cards[0], sel.filter);
+      return matchesFilter(state, pile.cards[0], live);
     });
   }
 

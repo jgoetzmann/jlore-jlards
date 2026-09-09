@@ -189,53 +189,45 @@ export const cards: CardDefinition[] = [
         op: 'discover',
         // Draft Shop piles only — not the basics, not the Prophet Shop, which
         // is gated on banked Prophet rather than on money.
+        //
+        // "A card you can currently afford" is a constraint on what is OFFERED,
+        // and it can finally sit here: `poolCandidates` resolves a filter's
+        // expression bounds before it starts matching, so a `cost.lte` of
+        // `moneyUnspent` gates the three cards on the table instead of voiding
+        // the pick afterwards.
         pool: {
           scope: 'shop',
-          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+          filter: {
+            rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'],
+            not: { subtype: 'Prophet' },
+            cost: { lte: { expr: 'moneyUnspent' } },
+          },
         },
         count: 3,
         pick: 1,
         prompt: 'Take the last one',
         then: [
           {
-            // "A card you can currently afford": a NumericFilter bound may be an
-            // expression, and a condition's `has` is one of the paths that
-            // resolves one (selectFor -> resolveFilter). A pile selector's
-            // filter is not, so the gate cannot ride on the gainCard itself —
-            // and neither can it ride on the OFFER: `poolCandidates` matches
-            // through `matchesDefFilter`, which never calls `resolveFilter` and
-            // compares printed cost, so an expression bound in the Discover
-            // pool would be silently ignored. The gate therefore sits after the
-            // pick, and picking one you cannot afford resolves to nothing.
+            // The offer was gated at the PRINTED price — a pool matches
+            // definitions, and a definition has no pile to carry a cost mod.
+            // The add is gated again here, on the pile-selector path, where
+            // `instanceCost` reads the live cost-mod stack and answers with the
+            // price the table would actually charge.
+            op: 'gainCard',
+            from: { shop: 'all', filter: { defId: '$discovered', cost: { lte: { expr: 'moneyUnspent' } } } },
+            to: 'gy',
+            free: true,
+          },
+          {
+            // "If that emptied the pile" — no copy of it is left in any Shop.
             op: 'conditional',
-            if: {
-              has: {
-                target: {
-                  zone: 'shop',
-                  filter: { defId: '$discovered', cost: { lte: { expr: 'moneyUnspent' } } },
-                },
-                atLeast: 1,
-              },
-            },
+            if: { not: { has: { target: { zone: 'shop', filter: { defId: '$discovered' } }, atLeast: 1 } } },
             then: [
               {
-                op: 'gainCard',
-                from: { shop: 'all', filter: { defId: '$discovered' } },
-                to: 'gy',
-                free: true,
-              },
-              {
-                // "If that emptied the pile" — no copy of it is left in any Shop.
-                op: 'conditional',
-                if: { not: { has: { target: { zone: 'shop', filter: { defId: '$discovered' } }, atLeast: 1 } } },
-                then: [
-                  {
-                    op: 'moveTo',
-                    target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], filter: { defId: '$discovered' } },
-                    zone: 'gy',
-                    who: 'self',
-                  },
-                ],
+                op: 'moveTo',
+                target: { who: 'eachOpponent', zone: ['library', 'hand', 'gy'], filter: { defId: '$discovered' } },
+                zone: 'gy',
+                who: 'self',
               },
             ],
           },
@@ -243,7 +235,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Discover 3 Draft Shop cards and add one you can currently afford to your GY. If that emptied its pile, steal every copy of it from your opponents.',
+    text: 'Discover 3 Draft Shop cards you can currently afford and add one to your GY. If that emptied its pile, steal every copy of it from your opponents.',
     flavor: 'He takes the last one, then all the others.',
     complexity: 'T3',
     subsystems: ['S-STEAL', 'S-DISCOVER'],
@@ -481,30 +473,129 @@ export const cards: CardDefinition[] = [
     rarity: 'rare',
     keywords: [],
     stats: { actions: 1 },
+    // The third clause needs two piles to still have names several nodes after
+    // they were picked — a `pick:'choose'` or `pick:'random'` PileSelector hands
+    // out nothing, and a second one rolls a fresh pile. Two things give a pile a
+    // durable name: a Discover's `$discovered` (pile ids are one-per-definition,
+    // so a defId IS a pile), and a counter stamped on a card sitting in it,
+    // which a PileSelector's filter reads off the pile's top card. The frozen
+    // pile takes the first, the thawed pile the second, and its price crosses
+    // the gap as a `turn:` player counter — the same accumulator idiom Fusion
+    // Summon uses for "costing their sum".
     effects: [
+      // Seeded so the read at the bottom always has a variable to find; a bad
+      // expression is worth 0, and 0 is a real cost here.
+      { op: 'addCounter', scope: 'player', key: 'turn:freezeTagCost', amount: 0 },
       {
-        op: 'lockPile',
-        target: { shop: 'draft', pick: 'choose', count: 1 },
-        duration: 'untilEndOfYourNextTurn',
+        op: 'discover',
+        // Draft Shop piles only — not the basics, not the Prophet Shop. `count`
+        // is larger than any Draft Shop, so the offer is every Draft pile: the
+        // printed line is "Lock one Draft pile", not "one of three".
+        pool: {
+          scope: 'shop',
+          filter: { rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'], not: { subtype: 'Prophet' } },
+        },
+        count: 40,
+        pick: 1,
+        prompt: 'Freeze a pile',
+        then: [
+          {
+            op: 'lockPile',
+            target: { shop: 'draft', filter: { defId: '$discovered' } },
+            duration: 'untilEndOfYourNextTurn',
+          },
+          // Park the frozen pile's live price on the player. `forEach` rebinds
+          // `self` to the first card of that pile — its top — so `selfCost` is
+          // the price actually charged, cost mods included, and a `turn:`
+          // counter reads back by name minus the prefix. It is subtracted away
+          // at the end, and the prefix clears it next turn if a suspended
+          // resolution never reaches that line.
+          {
+            op: 'forEach',
+            over: { zone: 'shop', filter: { defId: '$discovered' }, count: 1 },
+            effects: [
+              { op: 'addCounter', scope: 'player', key: 'turn:freezeTagCost', amount: { expr: 'selfCost' } },
+            ],
+          },
+          // Mark the frozen pile so the thaw rolls over the OTHERS...
+          { op: 'addCounter', target: { zone: 'shop', filter: { defId: '$discovered' } }, key: 'freezeTagFrozen', amount: 1 },
+          {
+            // ...guarded, because an empty target list makes `addCounter` fall
+            // back to the card that asked and Freeze Tag would stamp itself.
+            op: 'conditional',
+            if: {
+              has: {
+                target: {
+                  zone: 'shop',
+                  filter: {
+                    rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'],
+                    not: { subtype: 'Prophet' },
+                    counter: { key: 'freezeTagFrozen', lt: 1 },
+                  },
+                },
+                atLeast: 1,
+              },
+            },
+            then: [
+              {
+                // Roll the thaw ONCE and mark what it hit. The roll is over the
+                // cards in those piles rather than over the piles themselves —
+                // the only random pick that leaves a mark behind — so a taller
+                // pile is likelier. Everything downstream then reads the mark
+                // instead of rolling again.
+                op: 'addCounter',
+                target: {
+                  zone: 'shop',
+                  filter: {
+                    rarity: ['common', 'rare', 'epic', 'legendary', 'mythic'],
+                    not: { subtype: 'Prophet' },
+                    counter: { key: 'freezeTagFrozen', lt: 1 },
+                  },
+                  count: 1,
+                  pick: 'random',
+                },
+                key: 'freezeTagThawed',
+                amount: 1,
+              },
+            ],
+          },
+          { op: 'addCounter', target: { zone: 'shop', filter: { counter: { key: 'freezeTagFrozen', gte: 1 } } }, key: 'freezeTagFrozen', amount: -1 },
+        ],
       },
-      { op: 'unlockPile', target: { shop: 'draft', pick: 'random', count: 1 } },
-      // The printed third clause — "if they cost the same, add the UNLOCKED
-      // pile's top card to your GY" — has no expressible form, and the
-      // `{ifPrevious: true}` shape that stood here is now actively wrong rather
-      // than merely dead: `ifPrevious` went live (index.ts writes
-      // `__previousDidSomething` from whether the previous node logged), so it
-      // read "the unlock actually freed a pile" and then gained a FRESHLY
-      // rolled random Draft pile's top card — neither the printed condition nor
-      // the printed pile. Both halves want a pile-scoped binding: a cost
-      // comparison between two named piles, and a gain that can name the pile
-      // the previous node unlocked (a `pick:'random'` PileSelector re-rolls on
-      // every node). Left out rather than left wrong.
+      {
+        // One Shop card carries the thaw mark, so this resolves without a
+        // prompt and binds `$selected` to its defId — the name of the pile the
+        // roll landed on. It has to sit OUTSIDE the Discover: a nested sentinel
+        // is substituted by the outer pick before it is ever read.
+        op: 'selectCards',
+        from: { zone: 'shop', filter: { counter: { key: 'freezeTagThawed', gte: 1 } } },
+        min: 1,
+        max: 1,
+        then: [
+          { op: 'unlockPile', target: { shop: 'draft', filter: { defId: '$selected' } } },
+          {
+            // "If they cost the same." An expression bound resolves on the
+            // pile-selector path now, so this matches only while the thawed
+            // pile's top card is charged exactly what the frozen pile is
+            // charged — and a mismatch gains nothing rather than gaining the
+            // wrong pile.
+            op: 'gainCard',
+            from: { shop: 'draft', filter: { defId: '$selected', cost: { eq: { expr: 'freezeTagCost' } } } },
+            to: 'gy',
+            free: true,
+          },
+          // Counters survive zone changes, so clear the mark on the instance
+          // itself — it may be the card that just moved to the GY.
+          { op: 'addCounter', target: { self: true }, key: 'freezeTagThawed', amount: -1 },
+        ],
+      },
+      { op: 'addCounter', scope: 'player', key: 'turn:freezeTagCost', amount: { expr: '0 - freezeTagCost' } },
     ],
     triggers: [],
     text: 'Lock one Draft pile and unlock a random other one. If they cost the same, add the unlocked pile’s top card to your GY. +1 Action.',
     flavor: 'Frozen. Unfrozen. Confused.',
     complexity: 'T3',
-    subsystems: ['S-LOCK'],
+    subsystems: ['S-LOCK', 'S-DISCOVER'],
     shop: 'draft',
     art: { key: 'freeze_tag', status: 'final', artist: 'LCM Dreamshaper v7' },
   },

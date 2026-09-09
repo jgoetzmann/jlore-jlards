@@ -5,6 +5,12 @@ import type { DelayedEffect, GameState, QueuedEffect } from '@engine/types';
 import { log, resolveWho } from '../runtime';
 import { commitRng, takeRng, type OpResult } from '../opkit';
 
+/**
+ * What card data writes in `absorbInto` to mean "this card". Instance ids are
+ * minted at runtime, so a definition can never name one.
+ */
+export const ABSORB_SELF = 'self';
+
 type When = 'startOfTurn' | 'endOfTurn' | 'gameEnd';
 
 function resolveWhen(
@@ -68,7 +74,20 @@ export function opNextCardModifier(s: GameState, item: QueuedEffect): OpResult {
     const copy = { ...mod };
     if (copy.uses === undefined) copy.uses = 1;
     if (copy.appliesTo === undefined) copy.appliesTo = 'play';
-    if (copy.absorbInto === undefined && item.sourceIid && mod.bind) copy.absorbInto = item.sourceIid;
+    // A bind records WHICH instance armed it. This used to fill `absorbInto`
+    // instead, which is Hivemind's "permanently gains its effects" — so Pointer,
+    // whose row only pairs two cards, was silently grafting the next card's
+    // effects onto itself forever.
+    if (copy.bindSource === undefined && item.sourceIid && mod.bind) {
+      copy.bindSource = item.sourceIid;
+    }
+    // `absorbInto` is an InstanceId, minted at runtime, so card data cannot
+    // write one. `'self'` is the sentinel for "the card arming this" — the only
+    // thing Hivemind and Homebrew ever mean by it.
+    if (copy.absorbInto === ABSORB_SELF) {
+      if (item.sourceIid) copy.absorbInto = item.sourceIid;
+      else delete copy.absorbInto;
+    }
     p.nextCardMods.push(copy);
     log(s, 'nextCardModifier', { mod: copy }, pid);
   }

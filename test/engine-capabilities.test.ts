@@ -10,7 +10,7 @@
 import { beforeAll, describe, expect, test } from 'vitest';
 import { createMatch, reduce } from '@engine/index';
 import { registerCards } from '@engine/registry';
-import { selectInstances, evalAmount } from '@engine/effects';
+import { selectInstances, evalAmount, resolveEffects } from '@engine/effects';
 import { makeContext } from '@engine/core/triggers';
 import { costOf } from '@engine/shop';
 import { expiryTurnFor } from '@engine/shop';
@@ -195,5 +195,141 @@ describe('opponent shape is readable', () => {
     // Both must exceed the untouched opponent, which is the whole point.
     const other = state.players[others[1]!]!;
     expect(tallest).toBeGreaterThan(other.library.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The capabilities the last unimplemented clauses were waiting on.
+// ---------------------------------------------------------------------------
+
+/** Watches for a trash and sends the card to the GY instead. */
+const SPARER: CardDefinition = {
+  id: 'test_sparer',
+  name: 'Test Sparer',
+  cost: { money: 0 },
+  types: ['Action'],
+  subtypes: [],
+  tags: [],
+  rarity: 'common',
+  keywords: [],
+  stats: {},
+  effects: [],
+  triggers: [
+    {
+      on: 'onWouldTrash',
+      zones: ['play'],
+      effects: [
+        {
+          op: 'addCounter',
+          target: {
+            who: 'self',
+            zone: ['hand', 'play', 'gy', 'library'],
+            filter: { counter: { key: 'wouldTrash', gte: 1 } },
+          },
+          key: 'trashSpared',
+          amount: 1,
+        },
+      ],
+    },
+  ],
+  text: 'The next card of yours trashed goes to your GY instead.',
+  complexity: 'T3',
+  subsystems: ['S-CORE'],
+  notPurchasable: true,
+  excludeFromPools: true,
+  art: { key: 'test_sparer', status: 'placeholder' },
+};
+
+describe('hand adjacency is captured before the card leaves the hand', () => {
+  test('handEdge is 1 at either end of the hand and 0 in the middle', () => {
+    const { state, me } = start();
+    const p = state.players[me]!;
+    p.hand.length = 0;
+    const a = mint(state, me, 'hand');
+    const b = mint(state, me, 'hand');
+    const c = mint(state, me, 'hand');
+    p.actions = 5;
+
+    const mid = reduce(state, { type: 'play', player: me, iid: b });
+    expect(mid.instances[b]!.counters['handEdge']).toBe(0);
+    expect(mid.instances[b]!.counters['handIndex']).toBe(1);
+    // The two cards it sat between are marked, so a selector can reach them.
+    expect(mid.instances[a]!.counters['sandwich']).toBe(1);
+    expect(mid.instances[c]!.counters['sandwich']).toBe(1);
+
+    const edge = reduce(mid, { type: 'play', player: me, iid: a });
+    expect(edge.instances[a]!.counters['handEdge']).toBe(1);
+  });
+});
+
+describe('a card can intervene before another is trashed', () => {
+  test('onWouldTrash can send the card to the GY instead of the trash', () => {
+    registerCards([SPARER]);
+    const { state, me } = start();
+    const p = state.players[me]!;
+
+    const guard = mint(state, me, 'hand');
+    state.instances[guard]!.defId = SPARER.id;
+    p.hand = p.hand.filter((x) => x !== guard);
+    state.instances[guard]!.zone = 'play';
+    p.play.push(guard);
+
+    const victim = mint(state, me, 'hand');
+    const gyBefore = p.gy.length;
+
+    const after = resolveEffects(
+      state,
+      [{ op: 'trash', target: { who: 'self', zone: 'hand', filter: { defId: INERT.id }, count: 1 } }],
+      makeContext(me, null),
+    );
+
+    expect(after.instances[victim]!.zone).toBe('gy');
+    expect(after.players[me]!.gy.length).toBe(gyBefore + 1);
+    // The marks are cleaned up either way.
+    expect(after.instances[victim]!.counters['wouldTrash'] ?? 0).toBe(0);
+    expect(after.instances[victim]!.counters['trashSpared'] ?? 0).toBe(0);
+  });
+});
+
+describe('SB-7 Mutilate: a Pointer binding dies together', () => {
+  test('trashing one half trashes the other', () => {
+    const { state, me } = start();
+    const a = mint(state, me, 'hand');
+    const b = mint(state, me, 'hand');
+    state.instances[a]!.counters['pointerPair'] = 42;
+    state.instances[b]!.counters['pointerPair'] = 42;
+
+    const after = resolveEffects(
+      state,
+      [{ op: 'trash', target: { who: 'self', zone: 'hand', filter: { counter: { key: 'pointerPair', gte: 1 } }, count: 1 } }],
+      makeContext(me, null),
+    );
+
+    expect(after.instances[a]!.zone).toBe('trash');
+    expect(after.instances[b]!.zone).toBe('trash');
+  });
+});
+
+describe('a filter can require a same-cost partner', () => {
+  test('hasSameCostPartnerIn excludes a card nothing in hand matches', () => {
+    const { state, me } = start();
+    const p = state.players[me]!;
+    p.hand.length = 0;
+    // Two Coppers (cost 0) and one Gold (cost 6) — only the Coppers pair.
+    const c1 = mint(state, me, 'hand');
+    const c2 = mint(state, me, 'hand');
+    const lone = mint(state, me, 'hand');
+    state.instances[c1]!.defId = 'copper';
+    state.instances[c2]!.defId = 'copper';
+    state.instances[lone]!.defId = 'gold';
+
+    const paired = selectInstances(
+      state,
+      { who: 'self', zone: 'hand', filter: { hasSameCostPartnerIn: 'hand' } },
+      makeContext(me, null),
+    );
+    expect(paired).toContain(c1);
+    expect(paired).toContain(c2);
+    expect(paired).not.toContain(lone);
   });
 });

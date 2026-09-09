@@ -704,62 +704,48 @@ export const cards: CardDefinition[] = [
     // "Same cost" needs a card to name the cost, so the first of the two
     // discards is chosen first and `forEach` binds it as the source — inside
     // that body `selfCost` IS its cost, and a NumericFilter bound may now be an
-    // expression. The `has` gate counts the anchor itself, so `atLeast: 2` is
-    // "there is a partner at this cost"; the second discard then picks from
-    // that cost band only.
+    // expression, so the second discard and the fetch both read that number.
+    //
+    // The anchor pool is narrowed by `hasSameCostPartnerIn: 'hand'`, which
+    // matches only a card that already has a same-cost partner in hand (itself
+    // excluded). That is what makes the pair safe to pick one at a time: the
+    // anchor can never be a card nothing matches, so the second discard always
+    // has something to take and the cost is never half-paid. With the pool
+    // pre-gated there is nothing left for a `has` check to catch — an
+    // unpairable hand selects no anchor at all and the body never runs.
     //
     // The fetch is a `moveTo` + explicit shuffle rather than `{op:'recruit'}`
     // because opRecruit matches through `matchesDefFilter` WITHOUT calling
     // resolveFilter, so an expression bound in a recruit filter is not a
     // number, is skipped, and silently matches every Action.
-    //
-    // KNOWN DIVERGENCE: the anchor is picked before the gate can see it, so a
-    // player holding a valid pair who picks an unpairable card as the anchor
-    // gets nothing — no discard, no Recruit. It is inert rather than wrong (the
-    // gate is what stops a half-paid cost), and it cannot be closed from card
-    // data: CardFilter has no "has a same-cost partner in this zone" axis to
-    // narrow the anchor pool with, and Selector carries no prompt string, so
-    // the pick cannot even be labelled — opForEach passes a fixed
-    // 'Choose cards'.
     effects: [
       {
-        op: 'conditional',
-        if: { has: { target: { who: 'self', zone: 'hand' }, atLeast: 2 } },
-        then: [
+        op: 'forEach',
+        over: {
+          who: 'self',
+          zone: 'hand',
+          filter: { hasSameCostPartnerIn: 'hand' },
+          count: 1,
+          pick: 'choose',
+        },
+        effects: [
+          { op: 'discard', target: { self: true } },
           {
-            op: 'forEach',
-            over: { who: 'self', zone: 'hand', count: 1, pick: 'choose' },
-            effects: [
-              {
-                op: 'conditional',
-                if: {
-                  has: {
-                    target: { who: 'self', zone: 'hand', filter: { cost: { eq: { expr: 'selfCost' } } } },
-                    atLeast: 2,
-                  },
-                },
-                then: [
-                  { op: 'discard', target: { self: true } },
-                  {
-                    op: 'discard',
-                    target: { who: 'self', zone: 'hand', filter: { cost: { eq: { expr: 'selfCost' } } }, count: 1, pick: 'choose' },
-                  },
-                  {
-                    op: 'moveTo',
-                    target: {
-                      who: 'self',
-                      zone: 'library',
-                      filter: { type: 'Action', cost: { eq: { expr: 'selfCost' } } },
-                      count: 1,
-                      pick: 'top',
-                    },
-                    zone: 'hand',
-                  },
-                  { op: 'shuffle', zone: 'library' },
-                ],
-              },
-            ],
+            op: 'discard',
+            target: { who: 'self', zone: 'hand', filter: { cost: { eq: { expr: 'selfCost' } } }, count: 1, pick: 'choose' },
           },
+          {
+            op: 'moveTo',
+            target: {
+              who: 'self',
+              zone: 'library',
+              filter: { type: 'Action', cost: { eq: { expr: 'selfCost' } } },
+              count: 1,
+              pick: 'top',
+            },
+            zone: 'hand',
+          },
+          { op: 'shuffle', zone: 'library' },
         ],
       },
     ],

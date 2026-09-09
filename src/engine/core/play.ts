@@ -34,7 +34,7 @@ import {
   runEffects,
 } from './triggers.js';
 import { defOfInstance, drawCards, moveInstance, safeDef, trashInstance } from './zones.js';
-import { questProgress } from '@engine/meta';
+import { manifestAura, questProgress } from '@engine/meta';
 
 export interface PlayOptions {
   /** Skip the Action cost (Play on Draw, Play on Buy, replay effects). */
@@ -149,6 +149,8 @@ interface ResolvedMods {
   buffStat: StatKey | null;
   absorbInto: InstanceId | null;
   bind: NextCardMod['bind'] | null;
+  /** The instance that armed the bind, so the two halves can name each other. */
+  bindSource: InstanceId | null;
 }
 
 function emptyMods(): ResolvedMods {
@@ -162,6 +164,7 @@ function emptyMods(): ResolvedMods {
     buffStat: null,
     absorbInto: null,
     bind: null,
+    bindSource: null,
   };
 }
 
@@ -202,7 +205,10 @@ export function consumePlayMods(
     if (mod.nerfTimes) out.nerfTimes += mod.nerfTimes;
     if (mod.buffStat) out.buffStat = mod.buffStat;
     if (mod.absorbInto) out.absorbInto = mod.absorbInto;
-    if (mod.bind) out.bind = mod.bind;
+    if (mod.bind) {
+      out.bind = mod.bind;
+      out.bindSource = mod.bindSource ?? null;
+    }
     const uses = (mod.uses ?? 1) - 1;
     if (uses > 0) keep.push({ ...mod, uses });
   }
@@ -243,6 +249,47 @@ export function resolvePlayOnDraw(
   return s;
 }
 
+/**
+ * SB-7 "Played together": the other half of a Pointer binding, played free.
+ *
+ * Returns the state unchanged unless the card that just resolved carries a
+ * pair id and its partner is still in the same player's hand.
+ */
+function playPointerPartner(
+  state: GameState,
+  player: PlayerId,
+  iid: InstanceId,
+  depth: number,
+): GameState {
+  if (depth > state.config.recursionDepth) return state;
+  const self = state.instances[iid];
+  const pair = self?.counters['pointerPair'] ?? 0;
+  if (!pair) return state;
+  const p = state.players[player];
+  if (!p) return state;
+
+  const partnerIid = p.hand.find((other) => {
+    const oi = state.instances[other];
+    return !!oi && other !== iid && (oi.counters['pointerPair'] ?? 0) === pair;
+  });
+  if (!partnerIid) return state;
+
+  const partner = state.instances[partnerIid];
+  if (!partner || (partner.counters['pointerPlaying'] ?? 0) > 0) return state;
+  if ((self?.counters['pointerPlaying'] ?? 0) > 0) return state;
+
+  let s = state;
+  if (self) self.counters['pointerPlaying'] = 1;
+  partner.counters['pointerPlaying'] = 1;
+  appendLog(s, 'pointerPlayedTogether', player, { with: iid, iid: partnerIid, pair });
+  s = playCard(s, player, partnerIid, { free: true, depth: depth + 1 });
+  const afterSelf = s.instances[iid];
+  if (afterSelf) delete afterSelf.counters['pointerPlaying'];
+  const afterPartner = s.instances[partnerIid];
+  if (afterPartner) delete afterPartner.counters['pointerPlaying'];
+  return s;
+}
+
 // ---------------------------------------------------------------------------
 // The play itself
 // ---------------------------------------------------------------------------
@@ -266,6 +313,31 @@ export function playCard(
     const cost = actionCostOf(s, iid);
     if (cost > p.actions) return s; // B18/B73 - caller should have gated this.
     p.actions -= cost;
+  }
+
+  // Hand position, captured BEFORE the card leaves the hand. §2.1: "Hand has
+  // an order, and adjacency matters" — Brownie loses Flimsy on the edge of the
+  // hand, Loaf of Bread plays the cards sandwiching it. Once step 2 runs the
+  // card is in `play` and its neighbours are unknowable, and a `{self:true}`
+  // selector short-circuits to the source instance without reading zone order,
+  // so the clause could not be written at all. Kept as counters so the effect
+  // body, the triggers and the text template can all read the same numbers.
+  const handAt = p.hand.indexOf(iid);
+  inst.counters['handIndex'] = handAt;
+  inst.counters['handSizeAtPlay'] = p.hand.length;
+  inst.counters['handEdge'] = handAt === 0 || handAt === p.hand.length - 1 ? 1 : 0;
+  // The two cards this one sat between, marked so a selector can reach them:
+  // `filter: { counter: { key: 'sandwich', gte: 1 } }`. Stale marks are cleared
+  // first, so the mark always describes the card resolving right now.
+  for (const other of p.hand) {
+    const oi = s.instances[other];
+    if (oi && oi.counters['sandwich']) oi.counters['sandwich'] = 0;
+  }
+  const leftNeighbour = handAt > 0 ? p.hand[handAt - 1] : undefined;
+  const rightNeighbour = handAt >= 0 && handAt < p.hand.length - 1 ? p.hand[handAt + 1] : undefined;
+  for (const n of [leftNeighbour, rightNeighbour]) {
+    const ni = n ? s.instances[n] : undefined;
+    if (ni) ni.counters['sandwich'] = 1;
   }
 
   // 2. Move to the play area and record the play.
@@ -341,6 +413,45 @@ export function playCard(
     if (host) host.extraEffects.push(...def.effects);
   }
 
+  // 6b. Bindings. `bind` was collected here and never consumed, so Infini
+  // Scepter's Oathbound Memory bound to nothing and Pointer's pairing did not
+  // exist at all.
+  if (mods.bind === 'oathboundMemory') {
+    // §9.2: "Oathbound Memory: [Card]" — the aura remembers the card it was
+    // bound to and mints a Temporary copy of THAT card each turn.
+    try {
+      s = manifestAura(s, player, 'oathbound_memory', 'celestial', def.id) ?? s;
+    } catch {
+      /* meta slice unavailable */
+    }
+  } else if (mods.bind === 'pointer' && mods.bindSource) {
+    // SB-7: the two halves are Played, Mutilated and Trashed together. Each
+    // names the other, so either one being trashed can find its partner.
+    // Re-read from `s`: step 5's `runEffects` returns a CLONE, so the `inst`
+    // captured at the top of this function is a dead object for any card with a
+    // non-empty effect body — which is 82% of the catalog. Stamping through it
+    // marked the Pointer and not the partner, so the pairing silently did not
+    // exist for most of the cards it can bind.
+    const live = s.instances[iid];
+    const partner = s.instances[mods.bindSource];
+    if (live && partner && partner.iid !== iid) {
+      // Both halves carry the SAME pair id, which is how each finds the other.
+      // SB-7 defines Mutilate as "trash one half, the other goes with it", and
+      // `trashWithTrigger` reads this counter to do it.
+      //
+      // The id is CONSUMED from the instance sequence, not merely peeked at.
+      // Reading `nextInstanceSeq + 1` without advancing it handed the same id
+      // to any two bindings formed with no instance minted in between, which
+      // silently linked four cards into one pair — trash any of them and all
+      // four went. One skipped instance id costs nothing.
+      const pair = s.nextInstanceSeq;
+      s.nextInstanceSeq = pair + 1;
+      live.counters['pointerPair'] = pair;
+      partner.counters['pointerPair'] = pair;
+      appendLog(s, 'pointerBound', player, { a: partner.iid, b: iid, pair });
+    }
+  }
+
   // 7. onPlay triggers on the card itself and on the Field (Blessed by Raza
   // refreshes on every Action), then table-wide onOpponentPlay.
   s = fireInstanceTriggers(s, 'onPlay', player, iid, depth);
@@ -349,6 +460,24 @@ export function playCard(
     if (other === player) continue;
     s = fireOwnedTriggers(s, 'onOpponentPlay', other, depth);
   }
+
+  // 7b. SB-7's third verb. Pointer's row lists Played / Mutilated / Trashed
+  // together, and the last two are symmetric properties of the pairing —
+  // trash either half and the other follows. "Played" has to mean the same
+  // thing or the row reads two ways in one sentence: play either half later
+  // and the other comes with it, for free.
+  //
+  // This cannot live on the card. Triggers are per-DEFINITION, and the partner
+  // is whatever the player happened to play next — its definition knows
+  // nothing about Pointer. The pairing is already an engine concept (the id
+  // is minted in step 6b and read by `trashWithTrigger`); this is the same
+  // concept's play half.
+  //
+  // The formation play does not re-enter here: step 6b stamps the Pointer
+  // while it is in `play`, and only a partner still sitting in HAND is pulled.
+  // `pointerPlaying` is the cycle guard, cleared on the way out, so a pair
+  // whose halves are both in hand plays each exactly once.
+  s = playPointerPartner(s, player, iid, depth);
 
   // 8. Cleanup: Flimsy / Temporary trash on play, unless Indestructible (B10-B12).
   const live = s.instances[iid];

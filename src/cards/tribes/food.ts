@@ -86,16 +86,56 @@ export const cards: CardDefinition[] = [
     rarity: 'token',
     keywords: ['Flimsy'],
     stats: { actions: 1, cards: 2 },
-    // A.16 prints "loses Flimsy if on the edge of your hand", and that clause is
-    // not expressible yet: a `{self:true}` selector short-circuits to the source
-    // instance without ever reading `zone`/`pick`, so the old `any:[top, bottom]`
-    // guard passed unconditionally and every Brownie shed Flimsy and persisted.
-    // Hand position has to be captured before `playCard` moves the card out of
-    // hand, which is an engine change; until then Brownie ships as plain Flimsy,
-    // the doc row's base state, rather than as a permanent free engine.
-    effects: [],
+    // A.16: "Flimsy - loses Flimsy if on the edge of your hand". §2.1 hand
+    // adjacency: `playCard` stamps `handEdge` before the card leaves the hand,
+    // readable here as `selfHandEdge`, so the corner piece can be told from a
+    // middle one. The strip lands before step 8's Flimsy cleanup, so an edge
+    // Brownie survives into play while a middle one still trashes.
+    //
+    // The row is a per-play test, so the strip has to be per-play too.
+    // `{setKeyword, on:false}` pushes into `removedKeywords` and nothing ever
+    // clears it, so a strip-only clause made the FIRST edge play permanent:
+    // an edge Brownie that survived into the GY came back and kept Flimsy off
+    // from the middle of the hand for the rest of the game. The else branch
+    // puts it back.
+    //
+    // Re-granting blind would be worse than the bug — `on:true` clears
+    // `removedKeywords`, so a middle Brownie would undo a Card Sleeve that had
+    // legitimately taken Flimsy off it. So the re-grant is gated on this
+    // instance's own mark: `counter` is set to 1 by the strip and back to 0 by
+    // the re-grant, and only a Brownie carrying its own mark puts Flimsy back.
+    // A Sleeve-stripped Brownie that never played from an edge has no mark and
+    // is left alone; a Sleeve landing on top of an edge Brownie's own strip is
+    // the one case the mark cannot tell apart, and the next middle play does
+    // put Flimsy back. `counter` is primed at 0 first because `selfCounter`
+    // falls back to the SUM of an instance's counters when none of the named
+    // keys exist, and `playCard` has already stamped `handIndex`,
+    // `handSizeAtPlay` and `handEdge` on this instance by the time the body
+    // runs — that sum is never 0, so an unprimed read would claim a mark that
+    // was never set.
+    effects: [
+      { op: 'addCounter', target: { self: true }, key: 'counter', amount: 0 },
+      {
+        op: 'conditional',
+        if: { expr: 'selfHandEdge' },
+        then: [
+          { op: 'setKeyword', target: { self: true }, keyword: 'Flimsy', on: false },
+          { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: '1 - selfCounter' } },
+        ],
+        else: [
+          {
+            op: 'conditional',
+            if: { expr: 'selfCounter >= 1' },
+            then: [
+              { op: 'setKeyword', target: { self: true }, keyword: 'Flimsy', on: true },
+              { op: 'addCounter', target: { self: true }, key: 'counter', amount: { expr: '0 - selfCounter' } },
+            ],
+          },
+        ],
+      },
+    ],
     triggers: [],
-    text: 'Flimsy. +1 Action, +2 Cards.',
+    text: 'Flimsy — loses Flimsy if on the edge of your hand. +2 Cards, +1 Action.',
     flavor: 'Corner piece.',
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
@@ -503,11 +543,22 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: {},
     effects: [
-      { op: 'playCard', target: { zone: 'hand', count: 2, pick: 'choose' } },
+      // §2.1 hand adjacency. `playCard` marks the two cards this one sat
+      // between with `sandwich = 1` before it leaves the hand, and clears stale
+      // marks first, so the filter names exactly the neighbours of the Loaf
+      // resolving right now. A `pick:'choose'` over the whole hand used to
+      // stand in for this, letting the player pick any two cards in hand,
+      // which is a strictly better card than the row prints. No `count`: the
+      // mark selects at most two, and a Loaf on the edge of the hand has only
+      // a single neighbour to play.
+      {
+        op: 'playCard',
+        target: { who: 'self', zone: 'hand', filter: { counter: { key: 'sandwich', gte: 1 } } },
+      },
       { op: 'createCard', defId: 'slice_of_bread', to: 'gy', count: 1 },
     ],
     triggers: [],
-    text: 'Flimsy. Also play the two cards sandwiching this one in your hand. Add a Slice of Bread to your GY.',
+    text: 'Flimsy. Also play the cards sandwiching this in hand. Add a Slice of Bread to GY.',
     flavor: 'Everything between the ends.',
     complexity: 'T3',
     subsystems: ['S-EFFECTS'],

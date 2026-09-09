@@ -29,6 +29,7 @@ const IMPLEMENTED_OPS: string[] = [
   'transform',
   'recruit',
   'fuse',
+  'absorb',
   'shuffle',
   'sortLibraryByCost',
   'reveal',

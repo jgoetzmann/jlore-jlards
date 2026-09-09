@@ -841,22 +841,48 @@ printed cost, and the trigger's own source instance is the rider rather than the
 purchase. Rebate's "refunds 60% of its cost" and Professor of Curvature's "that
 purchase is free" both depend on it.
 
-### SB-62. What is still not expressible
+### SB-62. The clauses the DSL could not say, and what each one cost to say
 
-Recorded so it is not re-litigated. Each of these is a *clause*, not a whole
-card; the cards ship faithful to their doc row with the clause absent rather
-than approximated, and each carries a comment naming what it needs.
+This section started life as a list of clauses that shipped absent rather than
+approximated. Every one of them is now implemented; the table is kept because
+the *shape* of the list is the finding. A clause is unwriteable when the engine
+has no hook at the moment the sentence describes — not when the sentence is
+complicated. Each row below is one hook, and most were a few lines.
 
-| Clause | Needs |
-|---|---|
-| Safety Net / The Fall Guy — redirect a trash | A pre-move "would be trashed" window carrying the subject. `onTrash` fires after the card is already in the trash. |
-| Freeze Tag — "if the two piles cost the same" | A pile binding that survives between nodes. A second selector rolls a fresh pile. |
-| Pointer, Hivemind, Infini Scepter, Homebrew | `NextCardMod.bind` / `absorbInto` are collected and not yet consumed on every path. |
-| Brownie, Loaf of Bread — hand adjacency | Hand position captured before `playCard` moves the card out of hand. |
-| Synchro Summon — "two cards of the same cost" | A filter axis for "has a same-cost partner in this zone". |
-| Cult Leader — affordability on the OFFER | `resolveFilter` in the pool and pile-selector paths, not only the selector path. |
-| Zephrys, Second Time Around, Infinite Realities | S-SIM, cut on purpose (DESIGN-CHOICES §11). |
-| The Eternal Show | The deliberate paradox loop, capped by SB-24 rather than resolved. |
+| Clause | The hook it was missing | Where it lives now |
+|---|---|---|
+| Safety Net / The Fall Guy — redirect a trash | A pre-move "would be trashed" window carrying the subject. `onTrash` fires after the card is already in the trash. | `offerTrashWindow` + the `onWouldTrash` event (`core/triggers.ts`); the subject wears `wouldTrash`, a watcher answers with `trashSpared` |
+| Freeze Tag — "if the two piles cost the same" | A pile binding that survives between nodes. A second selector rolls a fresh pile. | `resolveFilter` on pile selectors, comparing against the bound pile |
+| Brownie, Loaf of Bread — hand adjacency | Hand position captured before `playCard` moves the card out of hand | `core/play.ts` step 1b writes `handIndex` / `handSizeAtPlay` / `handEdge` and marks the two neighbours `sandwich` |
+| Synchro Summon — "two cards of the same cost" | A filter axis for "has a same-cost partner in this zone" | `CardFilter.hasSameCostPartnerIn` (`effects/select.ts`) |
+| Cult Leader — affordability on the OFFER | `resolveFilter` in the pool and pile-selector paths, not only the selector path | `effects/pools.ts`, plus `livePriceOfDef` so the offer and the gain read one price |
+| Hivemind, Infini Scepter — deferred absorb / bind | `NextCardMod.absorbInto` and `.bind` were collected and never consumed | `core/play.ts` steps 6 and 6b; `ABSORB_SELF` resolves the `'self'` sentinel card data has to write |
+| Homebrew — absorb with no play in between | Nothing in the DSL wrote `extraEffects` directly; the only door was arming a mod and waiting for a play that might never come | `{op:'absorb'}` (`effects/ops/movement.ts`) |
+| Pointer — "Played together" | Triggers are per-**definition** and the partner is whatever was played next, so no card could carry this | `core/play.ts` step 7b, reading the same pair id step 6b mints and `trashWithTrigger` reads for Mutilate |
+| Zephrys, Second Time Around, Infinite Realities | S-SIM, cut on purpose (DESIGN-CHOICES §11) | still cut |
+| The Eternal Show | The deliberate paradox loop | capped by SB-24 rather than resolved, on purpose |
+
+Two engine defects surfaced only once the clauses above were live, and both
+are the SB-42/SB-43 shape — *two implementations of the same thing, and the
+reachable one is the incomplete one*:
+
+- **`resolveCardPlay` (`effects/ops/replay.ts`) never consulted `nextCardMods`.**
+  `core/play.ts` step 6 absorbs; every play the *effects layer* makes — Ricochet,
+  Around the World, `{op:'playCard'}` — went through the other function, watched
+  the card resolve and left the modifier armed. Hivemind's promise was kept only
+  if the player happened to play a second matching card by hand. `absorbFor` now
+  consumes it on that path too, narrowly: the multiply half is already spent by
+  `multiplierFor`, so consuming the whole modifier there would take it twice.
+- **The Pointer pair id was read off `nextInstanceSeq` without consuming it.**
+  Two bindings formed with no instance minted in between collided on one id,
+  linking four cards into one pair — trash any of them and all four went. The id
+  is now taken from the sequence and the sequence advanced. One skipped instance
+  id costs nothing.
+
+`pointerPair` is an instance sequence number, which also meant `selfCounter`
+read in the hundreds for any card that had ever been Pointed to. It and the
+hand-adjacency counters are in `BOOKKEEPING_COUNTERS` now: a counter the engine
+writes on every play is not a counter the card is carrying.
 
 ---
 

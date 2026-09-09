@@ -31,6 +31,18 @@ const BOOKKEEPING_COUNTERS: ReadonlySet<string> = new Set([
   'trashSurvivals',
   'promptTurn',
   'promptsThisTurn',
+  // Hand adjacency (§2.1) and the SB-7 pairing are engine bookkeeping written
+  // on every play. `pointerPair` in particular is an instance sequence number,
+  // so leaving it in made `selfCounter` read in the hundreds for any card that
+  // had ever been Pointed to.
+  'handIndex',
+  'handSizeAtPlay',
+  'handEdge',
+  'sandwich',
+  'pointerPair',
+  'pointerPlaying',
+  'wouldTrash',
+  'trashSpared',
 ]);
 
 function deckOf(state: GameState, player: PlayerId): InstanceId[] {
@@ -247,6 +259,9 @@ export function buildVars(
       vars.selfCounter = sawNamed ? named : counterTotal;
       vars.selfCost = instanceCost(state, sourceIid);
       vars.selfPricePaid = src.counters['pricePaid'] ?? 0;
+      vars.selfHandIndex = src.counters['handIndex'] ?? 0;
+      vars.selfHandSizeAtPlay = src.counters['handSizeAtPlay'] ?? 0;
+      vars.selfHandEdge = src.counters['handEdge'] ?? 0;
     }
   }
 

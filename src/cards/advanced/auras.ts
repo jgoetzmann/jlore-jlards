@@ -400,16 +400,19 @@ export const auras: AuraDefinition[] = [
     name: 'Oathbound Memory',
     tier: 'celestial',
     text: 'Start of each turn, add a Temporary copy of the bound card to your hand, +1 Action.',
+    // The start-of-turn payout is machinery, not data: `auraStartOfTurn`
+    // (meta/auras.ts) reads this instance's `boundDefId` — the card Infini
+    // Scepter bound it to — and runs `oathboundEffects`, which is exactly the
+    // printed line, a Temporary copy of THAT card plus +1 Action.
+    // A `startOfTurn` trigger here does not replace that half, it runs in
+    // ADDITION to it, in the same window, a few lines further down the same
+    // loop. So the trigger that used to sit here made the aura pay twice every
+    // turn: measured, one turn with the aura bound to a card produced two
+    // Temporary cards in hand (the bound one and a random Known Universe
+    // stranger, because a data trigger cannot read `boundDefId`) and +2
+    // Actions. Deleted; the engine half is the one §9.2 describes.
     effects: [],
-    triggers: [
-      {
-        on: 'startOfTurn',
-        effects: [
-          { op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand', keywords: ['Temporary'] },
-          { op: 'gain', stat: 'actions', amount: 1 },
-        ],
-      },
-    ],
+    triggers: [],
     art: { key: 'aura_oathbound_memory', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 

@@ -86,6 +86,41 @@ function multiplierFor(s: GameState, player: string, base: number, stats: StatKe
   return mult;
 }
 
+/**
+ * Hivemind's half of the play: "this card permanently gains its effects".
+ *
+ * `core/play.ts` step 6 does this for the plays a player makes by hand, on buy
+ * and on draw. Every other play in the game arrives here instead — Ricochet,
+ * Around the World, Play on Draw cascades routed through `opPlayCard` — and
+ * this function never consulted `nextCardMods`, so an armed absorb watched the
+ * card resolve and stayed armed. The promise was kept only if the player
+ * happened to play a second matching card themselves.
+ *
+ * Deliberately narrower than `consumePlayMods`: the multiply half is already
+ * spent by `multiplierFor` above, and consuming the whole modifier here would
+ * take it twice.
+ */
+function absorbFor(s: GameState, player: string, iid: InstanceId, def: CardDefinition): void {
+  const p = s.players[player];
+  if (!p || def.effects.length === 0) return;
+  for (let k = 0; k < p.nextCardMods.length; k += 1) {
+    const mod = p.nextCardMods[k];
+    if (!mod || !mod.absorbInto) continue;
+    if (mod.appliesTo !== undefined && mod.appliesTo !== 'play' && mod.appliesTo !== 'action') continue;
+    // A filtered absorb waits for the card it actually names.
+    if (mod.filter && !matchesFilter(s, iid, mod.filter)) continue;
+    const host = s.instances[mod.absorbInto];
+    if (host) {
+      host.extraEffects.push(...def.effects);
+      log(s, 'absorb', { iid: host.iid, defId: def.id, clauses: def.effects.length }, player);
+    }
+    const uses = (typeof mod.uses === 'number' ? mod.uses : 1) - 1;
+    if (uses > 0) mod.uses = uses;
+    else p.nextCardMods.splice(k, 1);
+    return;
+  }
+}
+
 function applyStatLine(
   s: GameState,
   item: QueuedEffect,
@@ -171,6 +206,8 @@ export function resolveCardPlay(
       }),
     );
   }
+
+  absorbFor(s, player, iid, def);
 
   log(s, 'playCard', { iid, defId: i.defId, multiplier: mult, replay: !moveToPlay }, player);
   fireEvent(s, q, item, 'onPlay', iid, player);
