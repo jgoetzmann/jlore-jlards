@@ -62,7 +62,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'egg', status: 'placeholder' },
+    art: { key: 'egg', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'big_egg',
@@ -81,7 +81,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'big_egg', status: 'placeholder' },
+    art: { key: 'big_egg', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'golden_egg',
@@ -100,7 +100,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'golden_egg', status: 'placeholder', anim: 'coin' },
+    art: { key: 'golden_egg', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'diamond_egg',
@@ -119,7 +119,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'diamond_egg', status: 'placeholder', anim: 'coin' },
+    art: { key: 'diamond_egg', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'rotten_egg',
@@ -138,7 +138,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'rotten_egg', status: 'placeholder' },
+    art: { key: 'rotten_egg', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 
   // -------------------------------------------------------------------------
@@ -161,7 +161,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'tiny_carton_of_eggs', status: 'placeholder' },
+    art: { key: 'tiny_carton_of_eggs', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'chicken_coop',
@@ -180,7 +180,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'chicken_coop', status: 'placeholder' },
+    art: { key: 'chicken_coop', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'small_carton_of_eggs',
@@ -199,7 +199,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'small_carton_of_eggs', status: 'placeholder' },
+    art: { key: 'small_carton_of_eggs', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'dozen_eggs',
@@ -218,7 +218,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'dozen_eggs', status: 'placeholder' },
+    art: { key: 'dozen_eggs', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'bulk_eggs',
@@ -237,7 +237,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'bulk_eggs', status: 'placeholder' },
+    art: { key: 'bulk_eggs', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'hen',
@@ -288,7 +288,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'hen', status: 'placeholder', anim: 'summon' },
+    art: { key: 'hen', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'solar_eclipse', status: 'placeholder', anim: 'explode' },
+    art: { key: 'solar_eclipse', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'kys_chosen',
@@ -42,7 +42,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'kys_chosen', status: 'placeholder' },
+    art: { key: 'kys_chosen', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'misery',
@@ -61,7 +61,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'misery', status: 'placeholder', anim: 'trash' },
+    art: { key: 'misery', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'drain_game',
@@ -79,7 +79,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'drain_game', status: 'placeholder', anim: 'coin' },
+    art: { key: 'drain_game', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'spell_tyrant',
@@ -103,7 +103,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'spell_tyrant', status: 'placeholder' },
+    art: { key: 'spell_tyrant', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'mathemagiks',
@@ -133,7 +133,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CODEX', 'S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'mathemagiks', status: 'placeholder' },
+    art: { key: 'mathemagiks', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_past',
@@ -156,7 +156,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'the_past', status: 'placeholder' },
+    art: { key: 'the_past', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_future',
@@ -188,7 +188,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'the_future', status: 'placeholder' },
+    art: { key: 'the_future', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_eternal_show',
@@ -221,7 +221,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-MULTIPLIER'],
     shop: 'draft',
-    art: { key: 'the_eternal_show', status: 'placeholder' },
+    art: { key: 'the_eternal_show', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'right_hand_man',
@@ -239,7 +239,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'right_hand_man', status: 'placeholder' },
+    art: { key: 'right_hand_man', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'card_mastery',
@@ -257,7 +257,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'card_mastery', status: 'placeholder' },
+    art: { key: 'card_mastery', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'infini_scepter',
@@ -278,7 +278,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-AURA', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'infini_scepter', status: 'placeholder' },
+    art: { key: 'infini_scepter', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'ancient_acquisition',
@@ -315,7 +315,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'ancient_acquisition', status: 'placeholder' },
+    art: { key: 'ancient_acquisition', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'back_from_the_gy',
@@ -369,7 +369,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'back_from_the_gy', status: 'placeholder' },
+    art: { key: 'back_from_the_gy', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'pointer',
@@ -388,7 +388,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'pointer', status: 'placeholder' },
+    art: { key: 'pointer', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'hivemind',
@@ -409,7 +409,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'hivemind', status: 'placeholder' },
+    art: { key: 'hivemind', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'homebrew',
@@ -439,7 +439,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-CODEX'],
     shop: 'draft',
-    art: { key: 'homebrew', status: 'placeholder' },
+    art: { key: 'homebrew', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'one_twelfth_in_the_light',
@@ -463,7 +463,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'one_twelfth_in_the_light', status: 'placeholder' },
+    art: { key: 'one_twelfth_in_the_light', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'pashes_the_pie_rat',
@@ -490,7 +490,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PERSIST'],
     shop: 'draft',
-    art: { key: 'pashes_the_pie_rat', status: 'placeholder' },
+    art: { key: 'pashes_the_pie_rat', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

@@ -45,7 +45,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-LOCK', 'S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'chains_of_the_sovereign', status: 'placeholder' },
+    art: { key: 'chains_of_the_sovereign', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'destiny_draw',
@@ -70,7 +70,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET', 'S-CORE'],
     shop: 'prophet',
-    art: { key: 'destiny_draw', status: 'placeholder' },
+    art: { key: 'destiny_draw', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'mulligan',
@@ -89,7 +89,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET', 'S-CORE'],
     shop: 'prophet',
-    art: { key: 'mulligan', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'mulligan', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
   {
     id: 'cost_co',
@@ -108,7 +108,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'cost_co', status: 'placeholder' },
+    art: { key: 'cost_co', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'all_in',
@@ -131,7 +131,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-CORE'],
     shop: 'prophet',
-    art: { key: 'all_in', status: 'placeholder', anim: 'trash' },
+    art: { key: 'all_in', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'platinum',
@@ -150,7 +150,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'platinum', status: 'placeholder', anim: 'coin' },
+    art: { key: 'platinum', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'the_trilogy',
@@ -176,7 +176,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-HIDDEN', 'S-TOKEN'],
     shop: 'prophet',
-    art: { key: 'the_trilogy', status: 'placeholder' },
+    art: { key: 'the_trilogy', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'pray_for_rain',
@@ -202,7 +202,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'pray_for_rain', status: 'placeholder' },
+    art: { key: 'pray_for_rain', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'project_doomsday',
@@ -224,7 +224,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-TOKEN', 'S-ENDGAME'],
     shop: 'prophet',
-    art: { key: 'project_doomsday', status: 'placeholder', anim: 'explode' },
+    art: { key: 'project_doomsday', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'kwzki_high_council_consultant',
@@ -272,7 +272,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-DISCOVER', 'S-CODEX'],
     shop: 'prophet',
-    art: { key: 'kwzki_high_council_consultant', status: 'placeholder' },
+    art: { key: 'kwzki_high_council_consultant', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'truss_pluss',
@@ -291,7 +291,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'truss_pluss', status: 'placeholder' },
+    art: { key: 'truss_pluss', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'seal_the_rift',
@@ -324,7 +324,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-LOCK', 'S-DELAYED', 'S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'seal_the_rift', status: 'placeholder' },
+    art: { key: 'seal_the_rift', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'ebon_blade',
@@ -353,7 +353,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-STEAL', 'S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'ebon_blade', status: 'placeholder', anim: 'trash' },
+    art: { key: 'ebon_blade', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'idol_of_the_false_god',
@@ -381,7 +381,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-LOCK'],
     shop: 'prophet',
-    art: { key: 'idol_of_the_false_god', status: 'placeholder', anim: 'summon' },
+    art: { key: 'idol_of_the_false_god', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'religious_dividends',
@@ -411,7 +411,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET', 'S-LOCK'],
     shop: 'prophet',
-    art: { key: 'religious_dividends', status: 'placeholder' },
+    art: { key: 'religious_dividends', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'giants_horn',
@@ -442,7 +442,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-DISCOVER'],
     shop: 'prophet',
-    art: { key: 'giants_horn', status: 'placeholder' },
+    art: { key: 'giants_horn', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'scripture_of_kwzki',
@@ -474,7 +474,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-COSTMOD', 'S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'scripture_of_kwzki', status: 'placeholder' },
+    art: { key: 'scripture_of_kwzki', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'scripture_of_siva',
@@ -508,7 +508,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-DISCOVER', 'S-STEAL', 'S-HIDDEN'],
     shop: 'prophet',
-    art: { key: 'scripture_of_siva', status: 'placeholder' },
+    art: { key: 'scripture_of_siva', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'scripture_of_jayaad',
@@ -527,7 +527,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'scripture_of_jayaad', status: 'placeholder', anim: 'trash' },
+    art: { key: 'scripture_of_jayaad', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'scripture_of_space',
@@ -546,7 +546,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-AURA', 'S-PROPHET', 'S-DISCOVER'],
     shop: 'prophet',
-    art: { key: 'scripture_of_space', status: 'placeholder', anim: 'summon' },
+    art: { key: 'scripture_of_space', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'tnack_trav_prophesized_savior',
@@ -565,7 +565,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET', 'S-TOKEN'],
     shop: 'prophet',
-    art: { key: 'tnack_trav_prophesized_savior', status: 'placeholder', anim: 'summon' },
+    art: { key: 'tnack_trav_prophesized_savior', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'prophesized_jlore',
@@ -590,7 +590,7 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-PROPHET', 'S-ENDGAME'],
     excludeFromPools: true,
     shop: 'prophet',
-    art: { key: 'prophesized_jlore', status: 'placeholder', anim: 'summon' },
+    art: { key: 'prophesized_jlore', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'the_unconcerned_lion',
@@ -609,7 +609,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET'],
     shop: 'prophet',
-    art: { key: 'the_unconcerned_lion', status: 'placeholder' },
+    art: { key: 'the_unconcerned_lion', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 
   // --- Token generated by Project: Doomsday --------------------------------
@@ -630,7 +630,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-ENDGAME'],
     notPurchasable: true,
-    art: { key: 'doomsday_button', status: 'placeholder', anim: 'explode' },
+    art: { key: 'doomsday_button', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
 ];
 

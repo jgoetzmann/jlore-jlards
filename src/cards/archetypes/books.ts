@@ -27,7 +27,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'library_card', status: 'placeholder', anim: 'summon' },
+    art: { key: 'library_card', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'premium_library_card',
@@ -46,7 +46,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'premium_library_card', status: 'placeholder', anim: 'summon' },
+    art: { key: 'premium_library_card', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'premium_premium_library_card',
@@ -65,7 +65,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'premium_premium_library_card', status: 'placeholder', anim: 'summon' },
+    art: { key: 'premium_premium_library_card', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'shockwaves_dream',
@@ -87,7 +87,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'shockwaves_dream', status: 'placeholder', anim: 'trash' },
+    art: { key: 'shockwaves_dream', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'archivist',
@@ -120,7 +120,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'archivist', status: 'placeholder' },
+    art: { key: 'archivist', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'back_to_the_raq',
@@ -142,7 +142,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'back_to_the_raq', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'back_to_the_raq', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
 ];
 

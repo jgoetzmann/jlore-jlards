@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'truss', status: 'placeholder' },
+    art: { key: 'truss', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'big_truss',
@@ -44,7 +44,7 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-BIGACTION'],
     shop: 'draft',
     bigAction: 2,
-    art: { key: 'big_truss', status: 'placeholder' },
+    art: { key: 'big_truss', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'nap',
@@ -67,7 +67,7 @@ export const cards: CardDefinition[] = [
     subsystems: ['S-BIGACTION'],
     shop: 'draft',
     bigAction: 3,
-    art: { key: 'nap', status: 'placeholder' },
+    art: { key: 'nap', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'truss_monk',
@@ -86,7 +86,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'truss_monk', status: 'placeholder' },
+    art: { key: 'truss_monk', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'truss_trust',
@@ -108,7 +108,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'truss_trust', status: 'placeholder' },
+    art: { key: 'truss_trust', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'truss_flick',
@@ -137,7 +137,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-CORE'],
     shop: 'draft',
-    art: { key: 'truss_flick', status: 'placeholder', anim: 'trash' },
+    art: { key: 'truss_flick', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: '401j',
@@ -160,7 +160,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: '401j', status: 'placeholder' },
+    art: { key: '401j', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

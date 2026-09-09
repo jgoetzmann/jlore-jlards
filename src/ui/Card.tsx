@@ -25,7 +25,7 @@ export interface CardProps {
 }
 
 export function artUrl(key: string): string {
-  return `/art/${encodeURIComponent(key)}.png`;
+  return `/art/${encodeURIComponent(key)}.jpg`;
 }
 
 /** Deterministic hue from a name, so the placeholder is stable per card. */

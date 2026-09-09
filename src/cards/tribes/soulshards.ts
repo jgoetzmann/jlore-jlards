@@ -25,7 +25,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'soul_shard', status: 'placeholder' },
+    art: { key: 'soul_shard', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'soul_jailor',
@@ -44,7 +44,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'soul_jailor', status: 'placeholder' },
+    art: { key: 'soul_jailor', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'soul_slicer',
@@ -73,7 +73,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-COMBO', 'S-TOKEN'],
     shop: 'draft',
-    art: { key: 'soul_slicer', status: 'placeholder', anim: 'trash' },
+    art: { key: 'soul_slicer', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'luckysoul_hoarder',
@@ -95,7 +95,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'luckysoul_hoarder', status: 'placeholder', anim: 'coin' },
+    art: { key: 'luckysoul_hoarder', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'soulcologist_mike_kwzka',
@@ -121,7 +121,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'soulcologist_mike_kwzka', status: 'placeholder', anim: 'summon' },
+    art: { key: 'soulcologist_mike_kwzka', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'soul_shard_lapidary',
@@ -155,7 +155,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
     shop: 'draft',
-    art: { key: 'soul_shard_lapidary', status: 'placeholder' },
+    art: { key: 'soul_shard_lapidary', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

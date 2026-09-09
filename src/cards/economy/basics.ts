@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'resource',
-    art: { key: 'copper', status: 'placeholder', anim: 'coin' },
+    art: { key: 'copper', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'silver',
@@ -43,7 +43,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'resource',
-    art: { key: 'silver', status: 'placeholder', anim: 'coin' },
+    art: { key: 'silver', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'gold',
@@ -62,7 +62,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'resource',
-    art: { key: 'gold', status: 'placeholder', anim: 'coin' },
+    art: { key: 'gold', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'diamond',
@@ -81,7 +81,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'resource',
-    art: { key: 'diamond', status: 'placeholder', anim: 'coin' },
+    art: { key: 'diamond', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
 
   // --- A.2 Points Shop -----------------------------------------------------
@@ -102,7 +102,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'points',
-    art: { key: 'tix', status: 'placeholder' },
+    art: { key: 'tix', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'robux',
@@ -121,7 +121,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE'],
     shop: 'points',
-    art: { key: 'robux', status: 'placeholder' },
+    art: { key: 'robux', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'jlore',
@@ -146,7 +146,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-CORE', 'S-ENDGAME'],
     shop: 'points',
-    art: { key: 'jlore', status: 'placeholder' },
+    art: { key: 'jlore', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

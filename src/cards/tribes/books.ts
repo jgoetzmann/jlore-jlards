@@ -41,7 +41,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'book_of_lethal_kill', status: 'placeholder', anim: 'explode' },
+    art: { key: 'book_of_lethal_kill', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'explode' },
   },
   {
     id: 'book_of_conspiracy',
@@ -60,7 +60,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN', 'S-PROPHET'],
     notPurchasable: true,
-    art: { key: 'book_of_conspiracy', status: 'placeholder' },
+    art: { key: 'book_of_conspiracy', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'book_of_books',
@@ -79,7 +79,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_books', status: 'placeholder', anim: 'summon' },
+    art: { key: 'book_of_books', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'book_of_flame',
@@ -105,7 +105,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_flame', status: 'placeholder', anim: 'trash' },
+    art: { key: 'book_of_flame', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'book_of_knowledge',
@@ -124,7 +124,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_knowledge', status: 'placeholder' },
+    art: { key: 'book_of_knowledge', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'book_of_random',
@@ -169,7 +169,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-EFFECTS'],
     notPurchasable: true,
-    art: { key: 'book_of_random', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'book_of_random', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
   {
     id: 'book_of_frost',
@@ -188,7 +188,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_frost', status: 'placeholder' },
+    art: { key: 'book_of_frost', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'book_of_curses',
@@ -207,7 +207,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_curses', status: 'placeholder', anim: 'summon' },
+    art: { key: 'book_of_curses', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'book_of_greed',
@@ -234,7 +234,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN', 'S-SHOP'],
     notPurchasable: true,
-    art: { key: 'book_of_greed', status: 'placeholder', anim: 'coin' },
+    art: { key: 'book_of_greed', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'book_of_felinors',
@@ -256,7 +256,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_felinors', status: 'placeholder', anim: 'summon' },
+    art: { key: 'book_of_felinors', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'book_of_blood',
@@ -288,7 +288,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     notPurchasable: true,
-    art: { key: 'book_of_blood', status: 'placeholder' },
+    art: { key: 'book_of_blood', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'book_of_moon',
@@ -307,7 +307,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'book_of_moon', status: 'placeholder', anim: 'summon' },
+    art: { key: 'book_of_moon', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 
   // -------------------------------------------------------------------------
@@ -330,7 +330,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'library_card', status: 'placeholder' },
+    art: { key: 'library_card', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'premium_library_card',
@@ -349,7 +349,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'premium_library_card', status: 'placeholder' },
+    art: { key: 'premium_library_card', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'premium_premium_library_card',
@@ -368,7 +368,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'premium_premium_library_card', status: 'placeholder' },
+    art: { key: 'premium_premium_library_card', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'shockwaves_dream',
@@ -391,7 +391,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'shockwaves_dream', status: 'placeholder', anim: 'trash' },
+    art: { key: 'shockwaves_dream', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'archivist',
@@ -431,7 +431,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'archivist', status: 'placeholder' },
+    art: { key: 'archivist', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'back_to_the_raq',
@@ -453,7 +453,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'back_to_the_raq', status: 'placeholder', anim: 'shuffle' },
+    art: { key: 'back_to_the_raq', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'shuffle' },
   },
 ];
 

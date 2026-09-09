@@ -53,6 +53,8 @@ npm run replay -- --seed=42 --players=3          # reproduce a match exactly
 npm run replay -- --seed=42 --players=3 --turn=14  # stop and print the board
 npm run relay:check    # verify Upstash credentials + the live relay backend
 npm run cards:export   # cards + auras as JSON, for art tooling
+npm run art:generate   # render card art locally into public/art/
+npm run art:status     # mark catalog art placeholder -> final once it exists
 npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
 ```
 
@@ -108,6 +110,27 @@ npm run cards:validate
 No engine changes unless the card needs a genuinely new effect op. `stats` holds
 plain stat lines (`+1 Action, +2 Money`); only non-stat behaviour goes in
 `effects`. That split is what lets Buff/Nerf find a stat line at all.
+
+Then give it a picture:
+
+```bash
+npm run art:generate   # renders only what has no file yet
+npm run art:status     # marks the new card's art final
+```
+
+## Art
+
+Every card and aura has an illustration in `public/art/`, generated locally from
+the card's own catalog data — name, subtypes, type, rarity — against one fixed
+house style. There is no per-card prompt to write, so a new card gets art from
+the same rules the other 558 got.
+
+The seed is a hash of the card's art key, so the set is reproducible: the same
+card renders the same picture on any machine, an interrupted run resumes by
+skipping what exists, and a card that draws a dud can be re-rolled on its own
+(`npm run art:generate -- --reroll=copper`) with the bump recorded in
+`tools/art-seeds.json`. Details and the commissioned-art path are in
+[`public/art/README.md`](public/art/README.md).
 
 ## Docs
 

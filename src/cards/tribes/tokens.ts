@@ -25,7 +25,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'felinor', status: 'placeholder' },
+    art: { key: 'felinor', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'warhero_token',
@@ -44,7 +44,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'warhero_token', status: 'placeholder' },
+    art: { key: 'warhero_token', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

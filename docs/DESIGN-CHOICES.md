@@ -159,7 +159,58 @@ The stated use for this repo is art, animation, playtesting, balance, and QA. So
 
 - **Every card carries an `art` slot** (`key`, `status`, `artist`, `anim`) from
   the first commit. `npm run art:manifest` lists every card whose art is still a
-  placeholder, so the art pass has a worklist instead of a spreadsheet.
+  placeholder, so the art pass has a worklist instead of a spreadsheet. That
+  worklist is now empty — see §10.1.
+
+### 10.1 The art is generated, and generating it is one command
+
+533 cards and 25 auras need 559 illustrations, which is not a thing anyone draws
+for a hobby project, and a directory of gradient placeholders is not a game. So
+art is produced the same way cards are: **from the catalog, by rule.**
+
+`tools/gen-art.ts` owns the prompts and `tools/art_render.py` owns the pixels,
+meeting at `dist-cards/art-jobs.json` — the same seam `cards:export` already uses
+to hand catalog data to art tooling. A card's prompt is built from its own data
+(name, subtypes, type, rarity) against one fixed house style. The split is the
+whole design: the house style is what makes 559 images read as one game, and the
+per-card clause is what makes them different. **No prompt is hand-authored**, so
+adding a card to `src/cards/` gets art from the rules the other 558 got.
+
+Four decisions worth keeping:
+
+**Local, not a hosted image API.** The free endpoints throttle anonymous callers
+to roughly one image per 45 seconds per address — about seven hours per full run,
+with a fresh failure every time the limit moves. A local model on the machine's
+own GPU does the same 559 in ~13 minutes, offline, unmetered. It also takes a
+real `negative_prompt`, which turned out to be the only reliable fix for the
+first run's actual defects.
+
+**Seeds, for the same reason the engine has them.** Each image's seed is a hash
+of its art key, so the set is reproducible on any machine, an interrupted run
+resumes by skipping what exists, and re-running never silently redraws the set.
+
+**A recorded re-roll.** At this scale the prompt stops being the only variable: a
+good prompt still draws the occasional dud, and Copper's first render came out as
+a ceramic plate while the *identical* prompt on another seed produced a hoard of
+coins. `--reroll=<key>` bumps that key's salt in `tools/art-seeds.json` and
+re-renders only it. Committing the bump is what keeps determinism honest — a
+fresh clone regenerates the accepted image rather than rolling the dice again.
+
+**JPEG, not PNG.** The art is opaque, because the client draws the card frame
+itself, so alpha is never used. PNG on painterly content would have taken the
+committed set from ~29 MB to well over 250 MB for no visible difference.
+
+Two failures here were only findable by looking at the output, which is worth
+recording because both were silent:
+
+- **The prompt named what it wanted to exclude.** "no text, no border" in a
+  positive prompt is not negation — it is a list of nouns, and the model drew
+  ornate gold borders and garbled lettering on every card. Suppression belongs in
+  `negative_prompt`; the positive prompt should never name the unwanted thing.
+- **CLIP truncates at 77 tokens** and says so in a warning that scrolls past in a
+  559-image run. The style clauses sit at the end of the prompt, so overrunning
+  the budget silently dropped exactly the terms holding the set together. Prompts
+  now measure 46–66 tokens and there is a check for it.
 - **`npm run sim`** plays bot matches headlessly and **`npm run balance`**
   aggregates win rate by card and anomaly, buy rate and first-buy turn, match
   length by variant, which end condition fired, and Discover offered-vs-picked

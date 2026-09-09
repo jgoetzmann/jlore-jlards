@@ -24,7 +24,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'false_hero', status: 'placeholder', anim: 'summon' },
+    art: { key: 'false_hero', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'tylannt',
@@ -43,7 +43,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'tylannt', status: 'placeholder', anim: 'summon' },
+    art: { key: 'tylannt', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'aura_farming',
@@ -62,7 +62,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'aura_farming', status: 'placeholder', anim: 'summon' },
+    art: { key: 'aura_farming', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'aura_gambit',
@@ -90,7 +90,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PVP'],
     shop: 'draft',
-    art: { key: 'aura_gambit', status: 'placeholder', anim: 'summon' },
+    art: { key: 'aura_gambit', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'generational_aura_debt',
@@ -113,7 +113,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'generational_aura_debt', status: 'placeholder', anim: 'summon' },
+    art: { key: 'generational_aura_debt', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

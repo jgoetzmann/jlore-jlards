@@ -165,7 +165,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-COSTMOD', 'S-CORE'],
     shop: 'draft',
-    art: { key: 'craft_a_card', status: 'placeholder', anim: 'summon' },
+    art: { key: 'craft_a_card', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

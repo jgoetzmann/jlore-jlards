@@ -25,7 +25,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PERSIST'],
     shop: 'draft',
-    art: { key: 'recurring_felinor', status: 'placeholder' },
+    art: { key: 'recurring_felinor', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'felinor_feelings',
@@ -47,7 +47,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'felinor_feelings', status: 'placeholder', anim: 'summon' },
+    art: { key: 'felinor_feelings', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'two_mans',
@@ -79,7 +79,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'two_mans', status: 'placeholder' },
+    art: { key: 'two_mans', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'all_night_baby',
@@ -111,7 +111,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'all_night_baby', status: 'placeholder' },
+    art: { key: 'all_night_baby', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'lord_of_the_cave',
@@ -151,7 +151,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'lord_of_the_cave', status: 'placeholder', anim: 'summon' },
+    art: { key: 'lord_of_the_cave', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'mewing',
@@ -182,7 +182,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-CODEX'],
     shop: 'draft',
-    art: { key: 'mewing', status: 'placeholder', anim: 'summon' },
+    art: { key: 'mewing', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'nine_lives_loan',
@@ -211,7 +211,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'nine_lives_loan', status: 'placeholder', anim: 'coin' },
+    art: { key: 'nine_lives_loan', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'night_on_the_town',
@@ -244,7 +244,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'night_on_the_town', status: 'placeholder', anim: 'summon' },
+    art: { key: 'night_on_the_town', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'felinor_factory',
@@ -273,7 +273,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'felinor_factory', status: 'placeholder', anim: 'summon' },
+    art: { key: 'felinor_factory', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'box_of_kitties',
@@ -299,7 +299,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'box_of_kitties', status: 'placeholder', anim: 'summon' },
+    art: { key: 'box_of_kitties', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'maid_dress',
@@ -326,7 +326,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'maid_dress', status: 'placeholder', anim: 'summon' },
+    art: { key: 'maid_dress', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'ssr_plus_catboy_maid',
@@ -345,7 +345,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'ssr_plus_catboy_maid', status: 'placeholder' },
+    art: { key: 'ssr_plus_catboy_maid', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'chonker',
@@ -366,7 +366,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BIGACTION', 'S-TOKEN'],
     shop: 'draft',
-    art: { key: 'chonker', status: 'placeholder' },
+    art: { key: 'chonker', status: 'final', artist: 'LCM Dreamshaper v7' },
     bigAction: 2,
   },
   {
@@ -396,7 +396,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN', 'S-PVP'],
     shop: 'draft',
-    art: { key: 'took_him_to_the_jo', status: 'placeholder', anim: 'trash' },
+    art: { key: 'took_him_to_the_jo', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'grinder_veteran',
@@ -422,7 +422,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'grinder_veteran', status: 'placeholder' },
+    art: { key: 'grinder_veteran', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'the_menagerie',
@@ -444,7 +444,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'the_menagerie', status: 'placeholder', anim: 'summon' },
+    art: { key: 'the_menagerie', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'spider_eb',
@@ -465,7 +465,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PLAGUE', 'S-TOKEN'],
     shop: 'draft',
-    art: { key: 'spider_eb', status: 'placeholder', anim: 'summon' },
+    art: { key: 'spider_eb', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'cn_auspicious_kitty',
@@ -492,7 +492,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-TOKEN'],
     shop: 'draft',
-    art: { key: 'cn_auspicious_kitty', status: 'placeholder', anim: 'summon' },
+    art: { key: 'cn_auspicious_kitty', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
 ];
 

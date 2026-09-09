@@ -33,7 +33,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_fruit', status: 'placeholder', anim: 'summon' },
+    art: { key: 'miracle_fruit', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'summon' },
   },
   {
     id: 'miracle_transmutation',
@@ -57,7 +57,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_transmutation', status: 'placeholder' },
+    art: { key: 'miracle_transmutation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_sanctification',
@@ -83,7 +83,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     notPurchasable: true,
-    art: { key: 'miracle_sanctification', status: 'placeholder' },
+    art: { key: 'miracle_sanctification', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_tithe_of_jlore',
@@ -101,7 +101,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-SHOP'],
     notPurchasable: true,
-    art: { key: 'miracle_tithe_of_jlore', status: 'placeholder' },
+    art: { key: 'miracle_tithe_of_jlore', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_animation',
@@ -134,7 +134,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-BUFF'],
     notPurchasable: true,
-    art: { key: 'miracle_animation', status: 'placeholder' },
+    art: { key: 'miracle_animation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_the_covetous_hand',
@@ -158,7 +158,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_the_covetous_hand', status: 'placeholder' },
+    art: { key: 'miracle_the_covetous_hand', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_manna',
@@ -178,7 +178,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_manna', status: 'placeholder', anim: 'coin' },
+    art: { key: 'miracle_manna', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'miracle_the_library',
@@ -196,7 +196,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_the_library', status: 'placeholder' },
+    art: { key: 'miracle_the_library', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_multiplication',
@@ -214,7 +214,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_multiplication', status: 'placeholder' },
+    art: { key: 'miracle_multiplication', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_duplication',
@@ -238,7 +238,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_duplication', status: 'placeholder' },
+    art: { key: 'miracle_duplication', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_diamond_rain',
@@ -256,7 +256,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CORE'],
     notPurchasable: true,
-    art: { key: 'miracle_diamond_rain', status: 'placeholder' },
+    art: { key: 'miracle_diamond_rain', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_revelation',
@@ -283,7 +283,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-CODEX'],
     notPurchasable: true,
-    art: { key: 'miracle_revelation', status: 'placeholder' },
+    art: { key: 'miracle_revelation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_prophecy',
@@ -301,7 +301,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET'],
     notPurchasable: true,
-    art: { key: 'miracle_prophecy', status: 'placeholder' },
+    art: { key: 'miracle_prophecy', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'miracle_moonfall',
@@ -327,7 +327,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-SHOP', 'S-TOKEN'],
     notPurchasable: true,
-    art: { key: 'miracle_moonfall', status: 'placeholder' },
+    art: { key: 'miracle_moonfall', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 

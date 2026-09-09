@@ -21,7 +21,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'novice_acolyte', status: 'placeholder' },
+    art: { key: 'novice_acolyte', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'prophet_injection',
@@ -40,7 +40,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'prophet_injection', status: 'placeholder' },
+    art: { key: 'prophet_injection', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'perish_priest',
@@ -59,7 +59,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'perish_priest', status: 'placeholder' },
+    art: { key: 'perish_priest', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'lection',
@@ -91,7 +91,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T4',
     subsystems: ['S-PERSIST', 'S-PROPHET', 'S-TEXTGEN'],
     shop: 'draft',
-    art: { key: 'lection', status: 'placeholder' },
+    art: { key: 'lection', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'pomegranate',
@@ -110,7 +110,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'pomegranate', status: 'placeholder' },
+    art: { key: 'pomegranate', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'mythmaker',
@@ -129,7 +129,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'mythmaker', status: 'placeholder' },
+    art: { key: 'mythmaker', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'new_canon',
@@ -169,7 +169,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'new_canon', status: 'placeholder', anim: 'trash' },
+    art: { key: 'new_canon', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'trash' },
   },
   {
     id: 'meditation',
@@ -195,7 +195,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-COMBO', 'S-PROPHET'],
     shop: 'draft',
-    art: { key: 'meditation', status: 'placeholder' },
+    art: { key: 'meditation', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'sleep_preacher',
@@ -219,7 +219,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'sleep_preacher', status: 'placeholder' },
+    art: { key: 'sleep_preacher', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'money_church',
@@ -241,7 +241,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T2',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'money_church', status: 'placeholder', anim: 'coin' },
+    art: { key: 'money_church', status: 'final', artist: 'LCM Dreamshaper v7', anim: 'coin' },
   },
   {
     id: 'temple_marketplace',
@@ -260,7 +260,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T1',
     subsystems: ['S-PROPHET'],
     shop: 'draft',
-    art: { key: 'temple_marketplace', status: 'placeholder' },
+    art: { key: 'temple_marketplace', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
     id: 'feel_so_clean_like_a_prophet_machine',
@@ -291,7 +291,7 @@ export const cards: CardDefinition[] = [
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-CORE'],
     shop: 'draft',
-    art: { key: 'feel_so_clean_like_a_prophet_machine', status: 'placeholder' },
+    art: { key: 'feel_so_clean_like_a_prophet_machine', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
 ];
 
