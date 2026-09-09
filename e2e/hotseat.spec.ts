@@ -121,14 +121,18 @@ test.describe('hotseat — a game you can actually play', () => {
     await focusSeatToMove(page);
 
     // Play every Copper to bank money. Wait for the hand to shrink each time
-    // rather than sleeping, so this does not race the re-render.
+    // rather than sleeping, so this does not race the re-render, and clear any
+    // prompt in between — the overlay covers the board, so clicking through it
+    // waits for actionability until the test times out.
     for (let i = 0; i < 5; i += 1) {
+      await clearPrompt(page);
       const copper = page.getByTestId('hand').locator('[data-card-id="copper"]').first();
       if ((await copper.count()) === 0) break;
       const before = await page.getByTestId('hand').getByTestId('card').count();
       await copper.click();
       await expect.poll(async () => page.getByTestId('hand').getByTestId('card').count()).toBeLessThan(before);
     }
+    await clearPrompt(page);
 
     expect(await statValue(page, 'money')).toBeGreaterThan(0);
     expect(await statValue(page, 'buys')).toBe(1);
@@ -143,7 +147,10 @@ test.describe('hotseat — a game you can actually play', () => {
     const pile = page.locator(`[data-pile-id="${pileId}"]`);
     const countBefore = Number(await pile.getAttribute('data-pile-count'));
 
+    await clearPrompt(page);
     await pile.getByTestId('buy').click();
+    // A Play-on-Buy card resolves as it is bought and can raise a prompt.
+    await clearPrompt(page);
 
     // The Buy is spent and that specific pile lost exactly one card.
     await expect.poll(async () => statValue(page, 'buys'), { message: 'buys should drop' }).toBe(0);
