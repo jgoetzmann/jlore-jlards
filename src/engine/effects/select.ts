@@ -89,6 +89,62 @@ export const NAMED_FILTERS: Record<string, CardFilter> = {
 // Numeric filters
 // ---------------------------------------------------------------------------
 
+/**
+ * Evaluate a filter's expression bounds against a context, so matching only
+ * ever sees literals. "A card you can currently afford" is a `cost.lte` of
+ * `{expr:'moneyUnspent'}`; `matchesFilter` has no context of its own, so the
+ * selector and pool paths resolve the filter once before they start matching.
+ */
+export function resolveFilter(
+  state: GameState,
+  filter: CardFilter | undefined,
+  ctx: EffectContext,
+): CardFilter | undefined {
+  if (!filter) return filter;
+  const num = (nf: NumericFilter | undefined): NumericFilter | undefined => {
+    if (!nf) return nf;
+    let touched = false;
+    const out: Record<string, number> = {};
+    for (const key of ['eq', 'lt', 'lte', 'gt', 'gte'] as const) {
+      const v = nf[key];
+      if (v === undefined) continue;
+      if (typeof v === 'number') {
+        out[key] = v;
+        continue;
+      }
+      touched = true;
+      out[key] = Math.floor(evalAmount(state, v, ctx));
+    }
+    return touched ? (out as NumericFilter) : nf;
+  };
+  const cost = num(filter.cost);
+  const counter = filter.counter
+    ? { ...filter.counter, ...(num(filter.counter) ?? {}) }
+    : filter.counter;
+  const not = resolveFilter(state, filter.not, ctx);
+  if (cost === filter.cost && counter === filter.counter && not === filter.not) return filter;
+  const out: CardFilter = { ...filter };
+  if (cost) out.cost = cost;
+  if (counter) out.counter = counter as CardFilter['counter'];
+  if (not) out.not = not;
+  return out;
+}
+
+/** The two name-shaped filter axes, shared by definition and instance matching. */
+function nameAxesOk(def: CardDefinition, filter: CardFilter): boolean {
+  if (filter.nameContainsAny && filter.nameContainsAny.length > 0) {
+    const lower = def.name.toLowerCase();
+    if (!filter.nameContainsAny.some((s) => lower.includes(s.toLowerCase()))) return false;
+  }
+  if (typeof filter.wordCountLt === 'number') {
+    // `wordCount` is frozen at authoring time (gameplay doc 10.4), so Hired
+    // Shrimp's count never depends on how its own text happens to render.
+    const words = def.wordCount ?? def.text.trim().split(/\s+/).filter(Boolean).length;
+    if (!(words < filter.wordCountLt)) return false;
+  }
+  return true;
+}
+
 export function matchesNumeric(n: number, f: NumericFilter | undefined): boolean {
   if (!f) return true;
   if (typeof f.eq === 'number' && n !== f.eq) return false;
@@ -129,6 +185,7 @@ export function matchesDefFilter(
   }
 
   if (typeof filter.name === 'string' && def.name !== filter.name) return false;
+  if (!nameAxesOk(def, filter)) return false;
 
   const defIds = asArray(filter.defId);
   if (defIds.length > 0 && defIds.indexOf(def.id) < 0) return false;
@@ -167,7 +224,12 @@ export function matchesFilter(state: GameState, iid: InstanceId, filter?: CardFi
   if (types.length > 0 && !types.some((t) => def.types.indexOf(t) >= 0)) return false;
 
   const subs = asArray(filter.subtype);
-  if (subs.length > 0 && !subs.some((t) => def.subtypes.indexOf(t) >= 0)) return false;
+  if (subs.length > 0) {
+    // A subtype can be granted at runtime, so an instance's tribe is its
+    // printed subtypes plus anything RCT CN and friends added.
+    const live = i.addedSubtypes ? def.subtypes.concat(i.addedSubtypes) : def.subtypes;
+    if (!subs.some((t) => live.indexOf(t) >= 0)) return false;
+  }
 
   const tags = asArray(filter.tag);
   if (tags.length > 0 && !tags.some((t) => def.tags.indexOf(t) >= 0)) return false;
@@ -182,6 +244,7 @@ export function matchesFilter(state: GameState, iid: InstanceId, filter?: CardFi
   }
 
   if (typeof filter.name === 'string' && def.name !== filter.name) return false;
+  if (!nameAxesOk(def, filter)) return false;
 
   const defIds = asArray(filter.defId);
   if (defIds.length > 0 && defIds.indexOf(i.defId) < 0) return false;
@@ -259,8 +322,28 @@ export function selectInstancesWith(
     return ctx.sourceIid && state.instances[ctx.sourceIid] ? [ctx.sourceIid] : [];
   }
 
+  const players = resolveWho(state, sel.who, ctx.player, rng, ctx.sourceIid);
+
+  // `count` is a total across everyone the selector reached, which is right for
+  // "trash 2 cards from the table" and wrong for "each opponent discards 2" —
+  // the second only ever took 2 between them. `perPlayer` runs the whole
+  // count-and-pick once per resolved player instead.
+  if (sel.perPlayer && players.length > 1) {
+    const out: InstanceId[] = [];
+    for (const pid of players) out.push(...selectFor(state, sel, ctx, rng, [pid]));
+    return uniq(out);
+  }
+  return selectFor(state, sel, ctx, rng, players);
+}
+
+function selectFor(
+  state: GameState,
+  sel: Selector,
+  ctx: EffectContext,
+  rng: Rng | null,
+  players: PlayerId[],
+): InstanceId[] {
   const zones: Zone[] = sel.zone ? asArray(sel.zone) : DEFAULT_ZONES;
-  const players = resolveWho(state, sel.who, ctx.player, rng);
 
   const candidates: InstanceId[] = [];
   for (const zone of zones) {
@@ -271,7 +354,8 @@ export function selectInstancesWith(
     for (const pid of players) candidates.push(...zoneIds(state, pid, zone));
   }
 
-  let matched = uniq(candidates).filter((iid) => matchesFilter(state, iid, sel.filter));
+  const live = resolveFilter(state, sel.filter, ctx);
+  let matched = uniq(candidates).filter((iid) => matchesFilter(state, iid, live));
   if (matched.length === 0) return [];
 
   const wantRaw = sel.count === undefined ? matched.length : evalAmount(state, sel.count, ctx);

@@ -129,14 +129,27 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+/**
+ * A NumericFilter bound may be an expression. This is the state-free,
+ * definition-level path with no context to evaluate one against, so a non
+ * literal bound is skipped — the same way `plagued` and `inMatch` are ignored
+ * here. The selector and pool paths resolve them first (see `resolveFilter`).
+ */
 function numOk(value: number | undefined, nf: NumericFilter | undefined): boolean {
   if (!nf) return true;
   const v = value ?? 0;
-  if (nf.eq !== undefined && v !== nf.eq) return false;
-  if (nf.lt !== undefined && !(v < nf.lt)) return false;
-  if (nf.lte !== undefined && !(v <= nf.lte)) return false;
-  if (nf.gt !== undefined && !(v > nf.gt)) return false;
-  if (nf.gte !== undefined && !(v >= nf.gte)) return false;
+  const lit = (b: NumericFilter[keyof NumericFilter]): number | undefined =>
+    typeof b === 'number' ? b : undefined;
+  const eq = lit(nf.eq);
+  const lt = lit(nf.lt);
+  const lte = lit(nf.lte);
+  const gt = lit(nf.gt);
+  const gte = lit(nf.gte);
+  if (eq !== undefined && v !== eq) return false;
+  if (lt !== undefined && !(v < lt)) return false;
+  if (lte !== undefined && !(v <= lte)) return false;
+  if (gt !== undefined && !(v > gt)) return false;
+  if (gte !== undefined && !(v >= gte)) return false;
   return true;
 }
 

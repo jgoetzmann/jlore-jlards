@@ -169,6 +169,8 @@ export interface CardInstance {
   addedKeywords: Keyword[];
   /** Keywords stripped at runtime (Card Sleeve, Archivist, Goatman Family Genetics). */
   removedKeywords: Keyword[];
+  /** Subtypes granted at runtime (RCT CN makes a card a CN card). */
+  addedSubtypes?: string[];
   /** plague, playCount, upgrades, vp, trashSurvivals, ... */
   counters: Record<string, number>;
   /** Per-instance stat buffs (Quick Patch, Relics, Shining Kit). */
@@ -220,6 +222,16 @@ export const EXPR_VARS = [
   'lockedPiles',
   /** Constellation's X: the longest unbroken run of costs 1, 2, ... in your deck. */
   'longestCostRun',
+  'buysUsedThisTurn',
+  /** Deck size and Library height of the opponent with the most, for real leads. */
+  'largestOpponentDeck',
+  'tallestOpponentLibrary',
+  /** VP sitting in your hand, printed plus accrued. A sum, not a card count. */
+  'vpInHand',
+  'cheapestInHand',
+  /** The deepest single Relic upgrade in your deck — the highest, never the sum. */
+  'maxRelicUpgrades',
+  'avgDraftPileCost',
   'selfPlayCount',
   'selfCounter',
   'selfCost',
@@ -246,6 +258,14 @@ export interface CardFilter {
   rarity?: Rarity | Rarity[];
   keyword?: Keyword | Keyword[];
   name?: string;
+  /** Case-insensitive: the name contains at least one of these substrings. */
+  nameContainsAny?: string[];
+  /**
+   * The card's printed rules text is shorter than this many words. Hired Shrimp
+   * is the only user; `CardDefinition.wordCount` is frozen at authoring time so
+   * the count never depends on how the text renders (SB-30 / gameplay doc 10.4).
+   */
+  wordCountLt?: number;
   defId?: CardDefId | CardDefId[];
   cost?: NumericFilter;
   /** Cards NOT matching this nested filter. */
@@ -264,22 +284,51 @@ export interface CardFilter {
   inMatch?: boolean;
 }
 
+/**
+ * Bounds may be an expression, so a filter can read live state — "a card you
+ * can currently afford" is `cost: { lte: { expr: 'moneyUnspent' } }`. A
+ * selector resolves these against its context before matching; an unresolved
+ * bound is ignored rather than failing closed.
+ */
 export interface NumericFilter {
-  eq?: number;
-  lt?: number;
-  lte?: number;
-  gt?: number;
-  gte?: number;
+  eq?: Amount;
+  lt?: Amount;
+  lte?: Amount;
+  gt?: Amount;
+  gte?: Amount;
 }
 
-export type Who = 'self' | 'eachOpponent' | 'randomOpponent' | 'chosenOpponent' | 'eachPlayer';
+/**
+ * `self` is whoever the effect is resolving for, which inside a trigger is the
+ * instance's owner — not necessarily the player taking the turn. `activePlayer`
+ * is the seat actually playing, which is what "the current player" means on a
+ * card like Recurring Felinor. `owner` is the source instance's owner, for a
+ * trigger that has to pay the card's owner rather than the actor.
+ */
+export type Who =
+  | 'self'
+  | 'eachOpponent'
+  | 'randomOpponent'
+  | 'chosenOpponent'
+  | 'eachPlayer'
+  | 'activePlayer'
+  | 'nextPlayer'
+  | 'owner';
 
 export interface Selector {
   who?: Who;
   zone?: Zone | Zone[];
   filter?: CardFilter;
-  /** How many to take. Omitted means all matches. */
+  /**
+   * How many to take. Omitted means all matches.
+   *
+   * This is a TOTAL across every player `who` reached, not a quota each. "Each
+   * opponent discards 2" needs `perPlayer: true`, or two opponents lose two
+   * cards between them.
+   */
   count?: Amount;
+  /** Apply `count` and `pick` once per resolved player rather than to the pool. */
+  perPlayer?: boolean;
   /** How to pick when count < matches. */
   pick?: 'choose' | 'random' | 'top' | 'bottom' | 'mostExpensive' | 'cheapest' | 'lastPlayed';
   /** Who does the choosing when pick === 'choose'. */
@@ -340,6 +389,15 @@ export type EffectNode =
   | { op: 'copyCard'; target: Selector; to: Zone; who?: Who; keywords?: Keyword[] }
   | { op: 'transform'; target: Selector; into: CardDefId | { pool: PoolSpec } | { costDelta: number } | 'upgrade' | 'downgrade' }
   | { op: 'recruit'; zone?: Zone; filter?: CardFilter; count?: Amount; who?: Who; to?: Zone }
+  /**
+   * Merge two or more cards into one composite (§3.1 "Fused"). The components
+   * are consumed and the result lands in `to` (default: where the first
+   * component already was, so Matchmaker can fuse cards inside a Library).
+   * A component with an `onFuse` trigger gets to react first — that is Chopped
+   * Chuzz's "when this attempts to Fuse, trash it instead" — and anything that
+   * leaves play during that window is dropped from the merge.
+   */
+  | { op: 'fuse'; target: Selector; to?: Zone }
   | { op: 'shuffle'; zone?: Zone; who?: Who }
   | { op: 'sortLibraryByCost'; who?: Who }
   | { op: 'reveal'; target: Selector }
@@ -381,7 +439,12 @@ export type EffectNode =
   // --- counters and misc ---
   | { op: 'plague'; target: Selector | PileSelector; amount: Amount }
   | { op: 'removePlague'; target: Selector | PileSelector }
-  | { op: 'addCounter'; target: Selector; key: string; amount: Amount }
+  /**
+   * `scope:'player'` writes to `PlayerState.counters` instead of to an
+   * instance — a mark that belongs to the seat, not to a card. A key prefixed
+   * `turn:` is cleared at the start of that player's turn.
+   */
+  | { op: 'addCounter'; target?: Selector; key: string; amount: Amount; scope?: 'instance' | 'player'; who?: Who }
   | { op: 'scoreOnCard'; target: Selector; amount: Amount; secret?: boolean }
   | { op: 'setKeyword'; target: Selector; keyword: Keyword; on: boolean }
   | { op: 'resetCombo' }
@@ -398,6 +461,10 @@ export interface NextCardMod {
   costFloor?: number;
   /** Grant a keyword to the next card played. */
   grantKeyword?: Keyword;
+  /** Grant a subtype — RCT CN makes the next card played a CN card. */
+  grantSubtype?: string;
+  /** Which stat `buffTimes`/`nerfTimes` moves. Omitted means a random one. */
+  buffStat?: StatKey;
   /** Effects appended to the next card played. */
   appendEffects?: EffectNode[];
   /** Buff the next card played N times. */
@@ -452,6 +519,8 @@ export type TriggerEvent =
   | 'onOpponentBuy'
   | 'onOpponentPlay'
   | 'onPlagueAdded'
+  /** Fires on each component as a fusion is attempted, before it is merged. */
+  | 'onFuse'
   | 'gameEnd';
 
 export interface Trigger {

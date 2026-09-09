@@ -1,7 +1,15 @@
 /**
  * Movement and creation ops.
  */
-import type { CardDefId, GameState, InstanceId, PoolSpec, QueuedEffect, Zone } from '@engine/types';
+import type {
+  CardDefId,
+  CardDefinition,
+  GameState,
+  InstanceId,
+  PoolSpec,
+  QueuedEffect,
+  Zone,
+} from '@engine/types';
 import { defCost, log, resolveWho, tryGetCard, uniq } from '../runtime';
 import { evalAmount } from '../evaluate';
 import {
@@ -17,6 +25,9 @@ import { createInstance, moveInstance, type Position } from '@engine/core/zones'
 import { fireEvent, shuffleWithTrigger } from '../triggers';
 import { poolCandidates, resolveDefIdSpec, sampleOne } from '../pools';
 import { matchesDefFilter } from '../select';
+import { downgradedDefId, upgradedDefId } from '@engine/systems/upgrade.js';
+import { fusedDefinition } from '@engine/systems/fuse.js';
+import { registerCards } from '@engine/registry';
 
 const OWNED: Zone[] = ['library', 'hand', 'gy', 'play'];
 
@@ -52,7 +63,7 @@ export function opMoveTo(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
   let destOwner: string | null | undefined;
   if (node.who) {
     const rng = takeRng(s);
-    const picked = resolveWho(s, node.who, item.player, rng);
+    const picked = resolveWho(s, node.who, item.player, rng, item.sourceIid);
     commitRng(s, rng);
     destOwner = picked.length > 0 ? picked[0] : undefined;
   }
@@ -76,7 +87,7 @@ export function opCreateCard(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   if (count === 0) return 'ok';
 
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
 
   for (const pid of players) {
     for (let k = 0; k < count; k += 1) {
@@ -107,7 +118,7 @@ export function opGainCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
   if (count === 0) return 'ok';
 
   const rngWho = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rngWho);
+  const players = resolveWho(s, node.who, item.player, rngWho, item.sourceIid);
   commitRng(s, rngWho);
 
   const isPool = !!node.from && typeof node.from === 'object' && 'pool' in node.from;
@@ -170,7 +181,7 @@ export function opCopyCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
   if (targets === null) return 'suspend';
 
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
   const owner = players.length > 0 ? players[0] : item.player;
 
@@ -210,7 +221,19 @@ export function opTransform(s: GameState, item: QueuedEffect, q: QueuedEffect[],
     if (typeof node.into === 'string' && node.into !== 'upgrade' && node.into !== 'downgrade') {
       nextDefId = node.into;
     } else if (node.into === 'upgrade' || node.into === 'downgrade') {
-      nextDefId = pickByCostDelta(s, ctx, oldDefId, node.into === 'upgrade' ? 1 : -1, rng);
+      // 3.2 defines Upgrade on a Resource as the next rung of the ladder —
+      // Copper to Silver to Gold to Diamond — not "a random card costing one
+      // more". `upgradedDefId`/`downgradedDefId` already implement the ladder,
+      // including "Diamond stays a Diamond", so a Resource takes that route and
+      // everything else keeps the cost-delta approximation.
+      // `upgradedDefId` returns the SAME id at the top rung, and the
+      // `nextDefId === oldDefId` guard below turns that into the no-op the doc
+      // asks for ("Diamond stays a Diamond"). null means "not a Resource",
+      // which is the only case that falls back to the cost approximation.
+      const rung =
+        node.into === 'upgrade' ? upgradedDefId(oldDefId) : downgradedDefId(oldDefId);
+      nextDefId =
+        rung ?? pickByCostDelta(s, ctx, oldDefId, node.into === 'upgrade' ? 1 : -1, rng);
     } else if (node.into && typeof node.into === 'object' && 'pool' in node.into) {
       nextDefId = sampleOne(s, node.into.pool, ctx, rng);
     } else if (node.into && typeof node.into === 'object' && 'costDelta' in node.into) {
@@ -257,7 +280,7 @@ export function opRecruit(s: GameState, item: QueuedEffect, q: QueuedEffect[]): 
   const count = node.count === undefined ? 1 : Math.max(0, Math.floor(evalAmount(s, node.count, ctx)));
 
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
 
   for (const pid of players) {
@@ -308,7 +331,7 @@ export function opShuffle(s: GameState, item: QueuedEffect, q: QueuedEffect[]): 
   if (node.op !== 'shuffle') return 'ok';
   const zone: Zone = node.zone ?? 'library';
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
   for (const pid of players) {
     shuffleWithTrigger(s, item, q, pid, zone);
@@ -321,7 +344,7 @@ export function opSortLibraryByCost(s: GameState, item: QueuedEffect): OpResult 
   const node = item.node;
   if (node.op !== 'sortLibraryByCost') return 'ok';
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
   for (const pid of players) sortLibraryByCost(s, pid, false);
   return 'ok';
@@ -340,5 +363,71 @@ export function opReveal(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
     for (const pid of s.playerOrder) noteCodex(s, pid, i.defId);
   }
   if (defIds.length > 0) log(s, 'reveal', { iids: targets, defIds }, item.player);
+  return 'ok';
+}
+
+/**
+ * §3.1 Fused — merge two or more cards into one composite.
+ *
+ * The composite definition is built by `fusedDefinition` (which already
+ * implements SB-13's arithmetic: summed cost capped at 20, unioned types, the
+ * max rarity, concatenated effects) and registered under a generated id so the
+ * result is a real card that can be copied, Discovered and Buffed like any
+ * other. The components are consumed.
+ *
+ * Each component sees an `onFuse` trigger first. That is the hook Chopped Chuzz
+ * needs — "when this attempts to Fuse, trash it instead" — and any component
+ * that has left its zone by the time the triggers finish is simply dropped from
+ * the merge rather than silently fused anyway.
+ */
+export function opFuse(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pre): OpResult {
+  const node = item.node;
+  if (node.op !== 'fuse') return 'ok';
+  const targets = resolveTargets(s, item, q, node.target, pre, 'Fuse cards');
+  if (targets === null) return 'suspend';
+  if (targets.length < 2) return 'ok';
+
+  const zoneBefore = new Map<InstanceId, Zone>();
+  for (const iid of targets) {
+    const i = s.instances[iid];
+    if (i) zoneBefore.set(iid, i.zone);
+  }
+  for (const iid of targets) fireEvent(s, q, item, 'onFuse', iid, item.player);
+
+  // Anything that moved (Chopped Chuzz trashing itself) is out of the merge.
+  const live = targets.filter((iid) => {
+    const i = s.instances[iid];
+    return !!i && i.zone === zoneBefore.get(iid);
+  });
+  if (live.length < 2) {
+    log(s, 'fuseAborted', { attempted: targets, live }, item.player);
+    return 'ok';
+  }
+
+  const defs: CardDefinition[] = [];
+  for (const iid of live) {
+    const def = tryGetCard(s.instances[iid]!.defId);
+    if (def) defs.push(def);
+  }
+  if (defs.length < 2) return 'ok';
+
+  const fused = fusedDefinition(defs);
+  registerCards([fused]);
+  if (s.defsInMatch.indexOf(fused.id) < 0) s.defsInMatch.push(fused.id);
+
+  // The first component becomes the composite in place, so a fusion inside a
+  // Library stays in the Library at its position. The rest are consumed.
+  const hostIid = live[0] as InstanceId;
+  const host = s.instances[hostIid]!;
+  host.defId = fused.id;
+  host.fusedFrom = defs.map((d) => d.id);
+  for (let k = 1; k < live.length; k += 1) {
+    moveInstance(s, live[k] as InstanceId, null, 'trash');
+  }
+  if (node.to && node.to !== host.zone) {
+    moveInstance(s, hostIid, OWNED.indexOf(node.to) >= 0 ? item.player : null, node.to);
+  }
+  if (host.owner) noteCodex(s, host.owner, fused.id);
+  log(s, 'fuse', { iid: hostIid, defId: fused.id, from: host.fusedFrom }, item.player);
   return 'ok';
 }

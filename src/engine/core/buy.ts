@@ -15,11 +15,17 @@
 import type { GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
 import { canBuy as shopCanBuy, costOf, isLocked } from '@engine/shop';
 import { appendLog } from './log.js';
-import { fireFieldTriggers, fireInstanceTriggers, fireOwnedTriggers } from './triggers.js';
+import {
+  fireFieldTriggers,
+  fireInstanceTriggers,
+  fireOwnedTriggers,
+  firePlayTriggers,
+} from './triggers.js';
 import { hasKeyword } from '@engine/systems';
 import { moveInstance, safeDef, topOfPile } from './zones.js';
 import { playCard } from './play.js';
 import { noteEndCondition } from './endgame.js';
+import { questProgress } from '@engine/meta';
 
 /** The one card allowed to bank negative Prophet (SB-5 / B61). */
 function allowsNegativeProphet(defId: string): boolean {
@@ -180,13 +186,24 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
     buysLeft: p.buys,
   });
 
+  // B.4 floors 1, 3b and 3c ride on ordinary purchases.
+  try {
+    s = questProgress(s, player, 'buy', 1) ?? s;
+    if (paid >= 8) s = questProgress(s, player, 'buyCost8', 1) ?? s;
+    if (inst.defId === 'diamond') s = questProgress(s, player, 'buyDiamond', 1) ?? s;
+  } catch {
+    /* meta slice unavailable */
+  }
+
   // Triggers: onBuy and onGain are different windows (12.3). Both stay
   // instance-only for cards — sweeping every owned card here would fire riders
   // from a player's graveyard — but the Field has to see them, or Double Header
   // never copies a purchase.
   s = fireInstanceTriggers(s, 'onBuy', player, iid, 0);
+  s = firePlayTriggers(s, 'onBuy', player, iid, 0);
   s = fireFieldTriggers(s, 'onBuy', player, 0);
   s = fireInstanceTriggers(s, 'onGain', player, iid, 0);
+  s = firePlayTriggers(s, 'onGain', player, iid, 0);
   s = fireFieldTriggers(s, 'onGain', player, 0);
   for (const other of s.playerOrder) {
     if (other === player) continue;

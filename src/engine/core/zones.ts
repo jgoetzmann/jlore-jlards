@@ -212,6 +212,22 @@ export function trashInstance(state: GameState, iid: InstanceId): boolean {
     return false;
   }
   const owner = inst.owner;
+  // Per-player tallies the rest of the engine reads back: the In Too Deep quest
+  // counts trashes (B.4 floor 2b) and Felinor Factory asks whether you trashed
+  // a Felinor THIS turn, which no zone query can answer — the trash is global
+  // and keeps every card any player ever trashed. Counted here rather than in
+  // the effects layer so `core` never has to import `meta` from a zone move.
+  const p = owner ? state.players[owner] : undefined;
+  if (p) {
+    p.counters['trashedTotal'] = (p.counters['trashedTotal'] ?? 0) + 1;
+    p.counters['turn:trashed'] = (p.counters['turn:trashed'] ?? 0) + 1;
+    for (const sub of safeDef(inst.defId).subtypes) {
+      // Readable from an expression as `trashedFelinor`, so the key has to be a
+      // bare identifier once the `turn:` prefix is stripped.
+      const key = `turn:trashed${sub.replace(/[^A-Za-z0-9]/g, '')}`;
+      p.counters[key] = (p.counters[key] ?? 0) + 1;
+    }
+  }
   moveInstance(state, iid, owner, 'trash');
   appendLog(state, 'trash', owner, { iid, defId: inst.defId });
   return true;

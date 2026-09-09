@@ -149,7 +149,17 @@ export function fireOwnedTriggers(
 ): GameState {
   const p = state.players[player];
   if (!p) return state;
-  const candidates = [...p.play, ...p.hand, ...p.gy, ...p.library];
+  // The trash is not a zone a player "owns", so it is swept only for triggers
+  // that explicitly name it — Nickel and Dime is Flimsy and does its work from
+  // the trash, and no `zones:['trash']` declaration could reach it otherwise.
+  const trashed = Object.keys(state.instances).filter((iid) => {
+    const inst = state.instances[iid];
+    if (!inst || inst.zone !== 'trash' || inst.owner !== player) return false;
+    return (safeDef(inst.defId).triggers ?? []).some(
+      (t) => t.on === event && t.zones && t.zones.includes('trash'),
+    );
+  });
+  const candidates = [...p.play, ...p.hand, ...p.gy, ...p.library, ...trashed];
   let s = state;
   for (const iid of candidates) {
     const inst = s.instances[iid];
@@ -179,6 +189,39 @@ export function fireOwnedTriggers(
  * Lead's pile lock from a player's graveyard. Those sites call this instead, so
  * an aura sees the event without widening the card dispatch.
  */
+/**
+ * Fire an event across the cards a player currently has IN PLAY.
+ *
+ * `onBuy` and `onPlay` reach only the card they happened to, which leaves no
+ * way to write "your next purchase this turn refunds 60%" as a rider sitting in
+ * play. Sweeping every owned zone instead is not safe — Lead's pile-lock rider
+ * declares no zones, so a Lead in a player's graveyard would fire it on every
+ * purchase anyone made. The play area is the zone a rider is actually in.
+ */
+export function firePlayTriggers(
+  state: GameState,
+  event: TriggerEvent,
+  player: PlayerId,
+  exceptIid: InstanceId | null,
+  depth = 0,
+): GameState {
+  const p = state.players[player];
+  if (!p) return state;
+  let s = state;
+  for (const iid of [...p.play]) {
+    if (iid === exceptIid) continue;
+    const inst = s.instances[iid];
+    if (!inst) continue;
+    const list = safeDef(inst.defId).triggers ?? [];
+    // Only a trigger that declares where it watches from counts as a rider;
+    // an undeclared `onBuy` still means "when I am bought".
+    if (!list.some((t) => t.on === event && t.zones && t.zones.includes('play'))) continue;
+    s = fireInstanceTriggers(s, event, player, iid, depth);
+    if (s.pending) break;
+  }
+  return s;
+}
+
 export function fireFieldTriggers(
   state: GameState,
   event: TriggerEvent,

@@ -45,7 +45,7 @@ export function opGain(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const delta = scaled < 0 ? Math.ceil(scaled) : Math.floor(scaled);
 
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   if (node.who === 'randomOpponent') commitRng(s, rng);
 
   for (const pid of players) {
@@ -69,7 +69,7 @@ export function opDraw(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const mult = item.multiplier > 0 ? item.multiplier : 1;
   const n = Math.max(0, Math.floor(evalAmount(s, node.amount, ctx) * mult));
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   if (node.who === 'randomOpponent') commitRng(s, rng);
   for (const pid of players) resolveDrawn(s, item, q, pid, drawCards(s, pid, n));
   return 'ok';
@@ -81,7 +81,7 @@ export function opMill(s: GameState, item: QueuedEffect, q: QueuedEffect[]): OpR
   const ctx = ctxFor(item);
   const n = Math.max(0, Math.floor(evalAmount(s, node.amount, ctx)));
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   if (node.who === 'randomOpponent') commitRng(s, rng);
   for (const pid of players) millCards(s, pid, n);
   return 'ok';
@@ -103,7 +103,7 @@ export function opDiscardDownTo(s: GameState, item: QueuedEffect, q: QueuedEffec
   const ctx = ctxFor(item);
   const target = Math.max(0, Math.floor(evalAmount(s, node.amount, ctx)));
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   if (node.who === 'randomOpponent') commitRng(s, rng);
 
   for (const pid of players) {

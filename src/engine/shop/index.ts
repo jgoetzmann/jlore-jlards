@@ -107,6 +107,7 @@ export {
   DEFAULT_COST_FLOOR,
   applyCostMod,
   canAffordMoney,
+  costModExpiryFor,
   costModIsActive,
   costModStack,
 } from './cost';

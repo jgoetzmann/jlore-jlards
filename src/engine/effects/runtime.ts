@@ -179,8 +179,24 @@ export function resolveWho(
   who: Who | undefined,
   player: PlayerId,
   rng: Rng | null,
+  sourceIid?: InstanceId | null,
 ): PlayerId[] {
   switch (who) {
+    case 'activePlayer':
+      // Inside a trigger `self` is the instance's owner, so "the current
+      // player" needs its own name — Recurring Felinor goes to the GY of
+      // whoever is taking the turn, not of whoever owns the card.
+      return [s.activePlayer];
+    case 'nextPlayer': {
+      const live = livePlayers(s);
+      if (live.length === 0) return [];
+      const at = live.indexOf(player);
+      return [live[(at < 0 ? 0 : at + 1) % live.length] as PlayerId];
+    }
+    case 'owner': {
+      const inst = sourceIid ? s.instances[sourceIid] : undefined;
+      return [inst?.owner ?? player];
+    }
     case 'eachOpponent':
       return opponentsOf(s, player);
     case 'randomOpponent': {

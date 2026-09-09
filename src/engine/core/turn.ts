@@ -18,7 +18,7 @@
 
 import type { AuraInstance, GameState, PlayerId } from '@engine/types';
 import { tickDelayed } from '@engine/systems';
-import { auraStartOfTurn } from '@engine/meta';
+import { auraStartOfTurn, questProgress, questStartOfTurn } from '@engine/meta';
 import { appendLog } from './log.js';
 import {
   clearTriggerCounters,
@@ -116,6 +116,14 @@ export function resetTurnStats(state: GameState, player: PlayerId): void {
   p.playedThisTurn = [];
   p.cardsGainedThisTurn = 0;
   p.buysUsedThisTurn = 0;
+  // Per-turn player counters. `PlayerState.counters` is otherwise cumulative
+  // for the whole game; a `turn:` prefix opts a key into being cleared here, so
+  // "one Ricochet per turn" and "if you trashed a Felinor this turn" have
+  // somewhere to live. An instance counter cannot express either: it is per
+  // card, so a second copy of the card would not see the first one's mark.
+  for (const key of Object.keys(p.counters)) {
+    if (key.startsWith('turn:')) delete p.counters[key];
+  }
   // Prophet is deliberately untouched (B60).
 }
 
@@ -154,6 +162,14 @@ export function startTurn(state: GameState): GameState {
   // 3. Aura triggers (B80): after the reset, before card triggers.
   try {
     s = auraStartOfTurn(s, player) ?? s;
+  } catch {
+    /* meta slice unavailable */
+  }
+  // B.4's In Too Deep quest advances off ordinary play, so the engine has to
+  // drive it. Nothing called the quest module at all, which is why every floor
+  // sat unfinished and the four Celestial rewards were unreachable.
+  try {
+    s = questStartOfTurn(s, player) ?? s;
   } catch {
     /* meta slice unavailable */
   }
@@ -199,6 +215,23 @@ export function endTurn(state: GameState): GameState {
   if (!p) return s;
 
   appendLog(s, 'endTurn', player, { turn: s.turn });
+
+  // B.4 floor 4c: "End a turn with (12)+ unspent Money." Read before the reset.
+  // Floor 2b's trash count is reconciled from the tally `trashInstance` keeps,
+  // because a trash can happen deep inside the effects layer, which must not
+  // import `meta`.
+  try {
+    if (p.money >= 12) s = questProgress(s, player, 'endTurnMoney12', 1) ?? s;
+    const total = p.counters['trashedTotal'] ?? 0;
+    const seen = p.counters['questTrashSeen'] ?? 0;
+    if (total > seen) {
+      s = questProgress(s, player, 'trash', total - seen) ?? s;
+      const live = s.players[player];
+      if (live) live.counters['questTrashSeen'] = total;
+    }
+  } catch {
+    /* meta slice unavailable */
+  }
 
   // 1. End-of-turn triggers, then delayed end-of-turn effects.
   s = fireOwnedTriggers(s, 'endOfTurn', player, 0);

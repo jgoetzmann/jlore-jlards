@@ -11,6 +11,8 @@
  * B72/B73 Big Action N costs N Actions and cannot be played with fewer.
  */
 
+import { makeRng } from '@engine/rng';
+import { applyBuff } from '@engine/systems/buff.js';
 import type {
   EffectNode,
   GameState,
@@ -31,6 +33,7 @@ import {
   runEffects,
 } from './triggers.js';
 import { defOfInstance, drawCards, moveInstance, safeDef, trashInstance } from './zones.js';
+import { questProgress } from '@engine/meta';
 
 export interface PlayOptions {
   /** Skip the Action cost (Play on Draw, Play on Buy, replay effects). */
@@ -116,6 +119,14 @@ export function applyStats(
     const n = stats.cards * mult('cards');
     if (n > 0) {
       const drawn = drawCards(s, player, n);
+      // B.4 floors 3a and 4a count cards drawn (cumulative and per turn).
+      if (drawn.length > 0) {
+        try {
+          s = questProgress(s, player, 'draw', drawn.length) ?? s;
+        } catch {
+          /* meta slice unavailable */
+        }
+      }
       s = resolvePlayOnDraw(s, player, drawn, depth + 1);
     }
   }
@@ -130,9 +141,11 @@ interface ResolvedMods {
   multiplier: number;
   multiplyStats?: StatKey[];
   grantKeywords: Keyword[];
+  grantSubtypes: string[];
   appendEffects: EffectNode[];
   buffTimes: number;
   nerfTimes: number;
+  buffStat: StatKey | null;
   absorbInto: InstanceId | null;
   bind: NextCardMod['bind'] | null;
 }
@@ -141,9 +154,11 @@ function emptyMods(): ResolvedMods {
   return {
     multiplier: 1,
     grantKeywords: [],
+    grantSubtypes: [],
     appendEffects: [],
     buffTimes: 0,
     nerfTimes: 0,
+    buffStat: null,
     absorbInto: null,
     bind: null,
   };
@@ -169,9 +184,11 @@ export function consumePlayMods(state: GameState, player: PlayerId): ResolvedMod
       if (mod.multiplyStats) out.multiplyStats = [...(out.multiplyStats ?? []), ...mod.multiplyStats];
     }
     if (mod.grantKeyword) out.grantKeywords.push(mod.grantKeyword);
+    if (mod.grantSubtype) out.grantSubtypes.push(mod.grantSubtype);
     if (mod.appendEffects) out.appendEffects.push(...mod.appendEffects);
     if (mod.buffTimes) out.buffTimes += mod.buffTimes;
     if (mod.nerfTimes) out.nerfTimes += mod.nerfTimes;
+    if (mod.buffStat) out.buffStat = mod.buffStat;
     if (mod.absorbInto) out.absorbInto = mod.absorbInto;
     if (mod.bind) out.bind = mod.bind;
     const uses = (mod.uses ?? 1) - 1;
@@ -244,6 +261,12 @@ export function playCard(
   inst.playedOnTurn = s.turn; // B9
   p.playedThisTurn.push(iid);
   p.combo += 1; // B71
+  // B.4 floor 2a counts plays.
+  try {
+    s = questProgress(s, player, 'play', 1) ?? s;
+  } catch {
+    /* meta slice unavailable */
+  }
   p.playCounts[inst.defId] = (p.playCounts[inst.defId] ?? 0) + 1; // B64
   inst.counters['playCount'] = (inst.counters['playCount'] ?? 0) + 1;
   const variant = s.variants[inst.defId];
@@ -261,6 +284,26 @@ export function playCard(
   const mods = consumePlayMods(s, player);
   for (const kw of mods.grantKeywords) {
     if (!inst.addedKeywords.includes(kw)) inst.addedKeywords.push(kw);
+  }
+  // A granted subtype — RCT CN makes the next card played a CN card, which is
+  // a tribe, not a keyword.
+  for (const sub of mods.grantSubtypes) {
+    if (!inst.addedSubtypes) inst.addedSubtypes = [];
+    if (!inst.addedSubtypes.includes(sub)) inst.addedSubtypes.push(sub);
+  }
+  // `buffTimes` / `nerfTimes` were collected here and then never applied, so
+  // Performance Enhancing Cookie and Crumb, Shining Kit and Quick Patch all
+  // resolved to their stat lines and no buff. Applied BEFORE the stat step, so
+  // the buff this card just received is part of what it pays out.
+  if (mods.buffTimes > 0 || mods.nerfTimes > 0) {
+    const rng = makeRng(s.seed, s.rngCursor);
+    for (let k = 0; k < mods.buffTimes; k += 1) {
+      s = applyBuff(s, 'instance', iid, 1, mods.buffStat ?? null, rng);
+    }
+    for (let k = 0; k < mods.nerfTimes; k += 1) {
+      s = applyBuff(s, 'instance', iid, -1, mods.buffStat ?? null, rng);
+    }
+    s.rngCursor = rng.cursor();
   }
   // B74/B75: a printed stat line is produced here, not by `{op:'gain'}`, so the
   // Five Elements multiplier has to be composed in at this point or a card whose

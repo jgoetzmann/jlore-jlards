@@ -14,7 +14,7 @@ import type {
   PromptOption,
   QueuedEffect,
 } from '@engine/types';
-import { log } from '../runtime';
+import { log, resolveWho } from '../runtime';
 import { evalAmount } from '../evaluate';
 import {
   commitRng,
@@ -174,10 +174,35 @@ export function opChoose(s: GameState, item: QueuedEffect, q: QueuedEffect[], pr
     return 'ok';
   }
 
+  // "Each opponent chooses" is one prompt PER opponent. Picking a single
+  // chooser meant a card that taxes the table taxed one random seat, and
+  // `chosenOpponent` was random too rather than the highest-VP opponent
+  // `resolveWho` defines. Expanded here into one framed node each, with the
+  // `who` dropped so the copies do not expand again.
+  if (node.who === 'eachOpponent') {
+    const rngWho = takeRng(s);
+    const opponents = resolveWho(s, 'eachOpponent', item.player, rngWho, item.sourceIid);
+    commitRng(s, rngWho);
+    if (opponents.length === 0) return 'ok';
+    if (opponents.length > 1) {
+      const built: QueuedEffect[] = opponents.map((pid) => ({
+        node: { ...node, who: 'self' },
+        player: pid,
+        sourceIid: item.sourceIid,
+        depth: item.depth + 1,
+        multiplier: item.multiplier,
+        vars: { ...item.vars },
+      }));
+      q.unshift(...built);
+      return 'ok';
+    }
+  }
+
   const rng = takeRng(s);
-  const chooser = node.who === 'eachOpponent' || node.who === 'randomOpponent' || node.who === 'chosenOpponent'
-    ? pickChooser(s, item, rng)
-    : item.player;
+  const chooser =
+    node.who === 'eachOpponent' || node.who === 'randomOpponent' || node.who === 'chosenOpponent'
+      ? (resolveWho(s, node.who, item.player, rng, item.sourceIid)[0] ?? item.player)
+      : item.player;
   if (node.who === 'randomOpponent') commitRng(s, rng);
 
   const prompt: Prompt = {

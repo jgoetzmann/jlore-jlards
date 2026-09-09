@@ -2,9 +2,17 @@
  * Counter, plague, keyword and game-state ops.
  */
 import type { GameState, InstanceId, QueuedEffect } from '@engine/types';
-import { bumpCounter, log } from '../runtime';
+import { bumpCounter, log, resolveWho } from '../runtime';
 import { evalAmount } from '../evaluate';
-import { ctxFor, resolvePiles, resolveTargets, type OpResult, type Pre } from '../opkit';
+import {
+  commitRng,
+  ctxFor,
+  resolvePiles,
+  resolveTargets,
+  takeRng,
+  type OpResult,
+  type Pre,
+} from '../opkit';
 import { isPileSelector } from '../select';
 import { fireEvent } from '../triggers';
 import { resetComboInPlace } from '@engine/systems/combo.js';
@@ -78,6 +86,23 @@ export function opAddCounter(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   if (node.op !== 'addCounter') return 'ok';
   const ctx = ctxFor(item);
   const amount = Math.round(evalAmount(s, node.amount, ctx));
+
+  // A player-scoped counter, for marks that belong to the seat rather than to a
+  // card: "one Ricochet per turn" has to stop a *different* Ricochet too, so an
+  // instance counter cannot express it. A `turn:` prefix clears at start of turn.
+  if (node.scope === 'player') {
+    const rng = takeRng(s);
+    const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
+    commitRng(s, rng);
+    for (const pid of players) {
+      const p = s.players[pid];
+      if (!p) continue;
+      p.counters[node.key] = (p.counters[node.key] ?? 0) + amount;
+      log(s, 'addPlayerCounter', { key: node.key, amount, value: p.counters[node.key] }, pid);
+    }
+    return 'ok';
+  }
+
   const targets = resolveTargets(s, item, q, node.target, pre, 'Add a counter');
   if (targets === null) return 'suspend';
   const iids = targets.length > 0 ? targets : item.sourceIid ? [item.sourceIid] : [];

@@ -33,7 +33,7 @@ export function opDelayed(s: GameState, item: QueuedEffect): OpResult {
   if (node.effects.length === 0) return 'ok';
 
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
 
   const timing = resolveWhen(s, node.when);
@@ -80,7 +80,7 @@ export function opEndTurn(s: GameState, item: QueuedEffect): OpResult {
   const node = item.node;
   if (node.op !== 'endTurn') return 'ok';
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
   for (const pid of players) {
     const p = s.players[pid];
@@ -97,7 +97,7 @@ export function opExtraTurn(s: GameState, item: QueuedEffect): OpResult {
   const node = item.node;
   if (node.op !== 'extraTurn') return 'ok';
   const rng = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rng);
+  const players = resolveWho(s, node.who, item.player, rng, item.sourceIid);
   commitRng(s, rng);
   for (const pid of players) {
     const p = s.players[pid];

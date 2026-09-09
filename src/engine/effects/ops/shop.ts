@@ -8,10 +8,11 @@ import type {
   GameState,
   PileId,
   PileLock,
+  InstanceId,
   PlayerId,
   QueuedEffect,
 } from '@engine/types';
-import { costOf } from '@engine/shop';
+import { costOf, costModExpiryFor, expiryTurnFor, pileDefId } from '@engine/shop';
 import { log, opponentsOf, tryGetCard } from '../runtime';
 import { evalAmount } from '../evaluate';
 import { commitRng, ctxFor, resolvePiles, takeRng, type OpResult, type Pre } from '../opkit';
@@ -20,7 +21,13 @@ import { fireEvent, trashWithTrigger } from '../triggers';
 import { pileCost } from '../select';
 import { resolveDefIdSpec } from '../pools';
 
-/** Turn index a duration expires on, or null for permanent. (B51 / B56) */
+/**
+ * @deprecated Locks and cost mods use OPPOSITE conventions for
+ * `expiresOnTurn` — a lock's names the first turn it is gone, a cost mod's the
+ * last turn it bites — and this single helper could only be right for one of
+ * them. Use `expiryTurnFor` (locks) or `costModExpiryFor` (cost mods).
+ * Retained only because it is exported.
+ */
 export function expiryTurn(s: GameState, duration: Duration | undefined): number | null {
   const around = Math.max(1, s.playerOrder.length);
   if (duration === undefined || duration === 'permanent') return null;
@@ -53,7 +60,12 @@ export function opLockPile(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     const lock: PileLock = {
       by: item.player,
       duration: node.duration,
-      expiresOnTurn: expiryTurn(s, node.duration),
+      // A lock's `expiresOnTurn` names the first turn it is already GONE
+      // (`lockIsActive` tests `turn < expiresOnTurn`), while a CostMod's names
+      // the last turn it still bites. One helper was serving both, so it was
+      // right for cost mods and one turn short for locks — every
+      // `duration:'turn'` lock in the catalog was inert the instant it applied.
+      expiresOnTurn: node.duration === undefined ? null : expiryTurnFor(s, node.duration),
     };
     if (typeof node.duration === 'object' && 'untilDiscarded' in node.duration) {
       lock.unlockOnDiscardedCost = node.duration.untilDiscarded;
@@ -89,7 +101,8 @@ export function opModifyCost(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   const delta = node.delta === undefined ? undefined : Math.round(evalAmount(s, node.delta, ctx));
   const setTo = node.setTo === undefined ? undefined : Math.round(evalAmount(s, node.setTo, ctx));
   const floor = typeof node.floor === 'number' ? node.floor : 0;
-  const expires = expiryTurn(s, node.duration);
+  // Cost-mod convention: the last turn the modifier still applies.
+  const expires = node.duration === undefined ? null : costModExpiryFor(s, node.duration);
 
   const make = (source: string, onlyFor?: PlayerId): CostMod => {
     const mod: CostMod = {
@@ -103,6 +116,34 @@ export function opModifyCost(s: GameState, item: QueuedEffect, q: QueuedEffect[]
     if (onlyFor) mod.onlyFor = onlyFor;
     return mod;
   };
+
+  // A modifyCost carrying neither `delta` nor `setTo` is a CLEAR — Cloud Nine
+  // removes every cost change in play. Expressed as a mod it could only ever
+  // add another entry to the stack it is trying to empty.
+  if (delta === undefined && setTo === undefined) {
+    const scope = node.scope;
+    if (scope === 'pile') {
+      const piles = resolvePiles(s, item, q, node.target, pre, 'Clear pile costs');
+      if (piles === null) return 'suspend';
+      for (const pileId of piles) {
+        const pile = s.shop.piles[pileId];
+        if (!pile) continue;
+        pile.costMods = [];
+        delete pile.costOverride;
+      }
+      log(s, 'clearCostMods', { scope, piles: piles.length }, item.player);
+      return 'ok';
+    }
+    for (const pileId of Object.keys(s.shop.piles)) {
+      const pile = s.shop.piles[pileId];
+      if (!pile) continue;
+      pile.costMods = [];
+      delete pile.costOverride;
+    }
+    s.shop.globalCostMods = [];
+    log(s, 'clearCostMods', { scope: scope ?? 'allShops' }, item.player);
+    return 'ok';
+  }
 
   if (node.scope === 'nextBuy' || node.scope === 'nextBuyOpponent') {
     const who: PlayerId[] = node.scope === 'nextBuy' ? [item.player] : opponentsOf(s, item.player);
@@ -170,8 +211,12 @@ export function opReplenishPile(s: GameState, item: QueuedEffect, q: QueuedEffec
     if (pile.cards.length > 0) {
       const top = s.instances[pile.cards[0]];
       if (top) defId = top.defId;
-    } else if (tryGetCard(pileId)) {
-      defId = pileId;
+    } else {
+      // An emptied pile still knows what it was, but only through `pileDefId`:
+      // a pile id is `<shop>:<defId>`, so `tryGetCard(pileId)` never resolved
+      // and "fully replenish a Draft pile" could not reach an empty one — the
+      // exact case the card exists for.
+      defId = pileDefId(s, pileId);
     }
     if (!defId) continue;
     const need = Math.max(0, pile.startingSize - pile.cards.length);
@@ -263,22 +308,46 @@ export function opMergePiles(s: GameState, item: QueuedEffect, q: QueuedEffect[]
   if (piles === null) return 'suspend';
   if (piles.length < 2) return 'ok';
 
-  const targetId = piles[0];
-  const target = s.shop.piles[targetId];
-  if (!target) return 'ok';
+  // A.9 892: "Shuffle two piles together and SPLIT THEM EVENLY between the
+  // slots." Pouring one pile into the other instead emptied a Draft slot, which
+  // counts toward `emptyPileAbsolute` / `emptyPileFraction` — so a (3) card
+  // could push the game a quarter of the way to over.
+  const ids = piles.filter((id) => !!s.shop.piles[id]);
+  if (ids.length < 2) return 'ok';
 
-  for (let k = 1; k < piles.length; k += 1) {
-    const src = s.shop.piles[piles[k]];
-    if (!src || src.id === targetId) continue;
-    for (const iid of src.cards) {
-      const i = s.instances[iid];
-      if (i) i.pileId = targetId;
-      target.cards.push(iid);
-    }
-    target.startingSize += src.startingSize;
-    src.cards = [];
-    log(s, 'mergePiles', { into: targetId, from: src.id }, item.player);
-    fireEvent(s, q, item, 'onPileEmpty', null, item.player);
+  const pooled: InstanceId[] = [];
+  let totalStarting = 0;
+  for (const id of ids) {
+    const pile = s.shop.piles[id];
+    if (!pile) continue;
+    pooled.push(...pile.cards);
+    totalStarting += pile.startingSize;
+    pile.cards = [];
+  }
+
+  const rng = takeRng(s);
+  const shuffled = rng.shuffle(pooled);
+  commitRng(s, rng);
+
+  // Deal round-robin so the slots differ by at most one card.
+  shuffled.forEach((iid, idx) => {
+    const destId = ids[idx % ids.length] as PileId;
+    const dest = s.shop.piles[destId];
+    if (!dest) return;
+    const inst = s.instances[iid];
+    if (inst) inst.pileId = destId;
+    dest.cards.push(iid);
+  });
+
+  const share = Math.max(1, Math.round(totalStarting / ids.length));
+  for (const id of ids) {
+    const pile = s.shop.piles[id];
+    if (pile) pile.startingSize = share;
+  }
+
+  log(s, 'mergePiles', { piles: ids, dealt: shuffled.length }, item.player);
+  for (const id of ids) {
+    if (s.shop.piles[id]?.cards.length === 0) fireEvent(s, q, item, 'onPileEmpty', null, item.player);
   }
   return 'ok';
 }
