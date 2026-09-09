@@ -205,8 +205,8 @@ test.describe('visual record', () => {
         console.log(`shot: ${OUT}/22-mp-waiting.png`);
       }
     } finally {
-      await hostCtx.close();
-      await guestCtx.close();
+      await hostCtx.close().catch(() => undefined);
+      await guestCtx.close().catch(() => undefined);
     }
   });
 });

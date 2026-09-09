@@ -37,6 +37,35 @@ async function roomCodeOf(page: Page): Promise<string> {
   return new URL(page.url()).hash.replace(/^#/, '');
 }
 
+/**
+ * Answer a pending prompt so play can continue.
+ *
+ * `end-turn` is disabled while `view.pending` is set, so an unanswered prompt
+ * stops the table dead — which is exactly what made this suite flaky once the
+ * engine started actually delivering prompts instead of dropping them.
+ */
+async function clearPrompt(page: Page): Promise<boolean> {
+  if ((await page.getByTestId('prompt').count()) === 0) return false;
+  const dflt = page.getByTestId('prompt-default');
+  if ((await dflt.count()) > 0 && (await dflt.first().isEnabled())) {
+    await dflt.first().click().catch(() => undefined);
+    return true;
+  }
+  const opt = page.getByTestId('prompt-option');
+  if ((await opt.count()) > 0) await opt.first().click().catch(() => undefined);
+  const confirm = page.getByTestId('prompt-confirm');
+  if ((await confirm.count()) > 0 && (await confirm.first().isEnabled())) {
+    await confirm.first().click().catch(() => undefined);
+    return true;
+  }
+  const skip = page.getByTestId('prompt-skip');
+  if ((await skip.count()) > 0) {
+    await skip.first().click().catch(() => undefined);
+    return true;
+  }
+  return false;
+}
+
 async function statValue(page: Page, stat: string): Promise<number> {
   const el = page.getByTestId(`stat-${stat}-value`).first();
   const txt = await el.textContent();
@@ -63,17 +92,33 @@ test.describe('two chromium players over the relay', () => {
       await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
 
       // Both are in the same match: same turn number.
+      // Read both inside the poll. Snapshotting the host's number as the
+      // expected value races: the host keeps advancing while the guest is
+      // converging, so the guest ends up agreeing with a number the host has
+      // already left behind. This asserts the two browsers agree with *each
+      // other*, which is the actual property, rather than with a stale reading.
       await expect
-        .poll(async () => guest.page.getByTestId('turn-number').textContent(), { timeout: 30_000 })
-        .toBe(await host.page.getByTestId('turn-number').textContent());
+        .poll(
+          async () => {
+            const h = (await host.page.getByTestId('turn-number').textContent())?.trim();
+            const g = (await guest.page.getByTestId('turn-number').textContent())?.trim();
+            return h !== undefined && h === g ? h : null;
+          },
+          { timeout: 30_000, message: 'both browsers should converge on the same turn' },
+        )
+        .not.toBeNull();
 
       // They hold different seats.
       const hostId = await host.page.getByTestId('you-are').getAttribute('data-you-id');
       const guestId = await guest.page.getByTestId('you-are').getAttribute('data-you-id');
       expect(hostId).not.toBe(guestId);
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 
@@ -99,8 +144,12 @@ test.describe('two chromium players over the relay', () => {
       await expect(hostSeesOpp).toHaveAttribute('data-hand-count', '5');
       await expect(hostSeesOpp.getByTestId('card')).toHaveCount(0);
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 
@@ -158,8 +207,12 @@ test.describe('two chromium players over the relay', () => {
       const oppCards = await host.page.getByTestId('opponent').first().getByTestId('card').count();
       expect(oppCards, 'host renders no opponent hand cards').toBe(0);
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 
@@ -203,8 +256,12 @@ test.describe('two chromium players over the relay', () => {
         )
         .toBeLessThan(5);
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 
@@ -223,8 +280,11 @@ test.describe('two chromium players over the relay', () => {
 
       const startTurn = Number(await host.page.getByTestId('turn-number').textContent());
 
-      // Whichever seat can end its turn, does — three times.
+      // Whichever seat can end its turn, does — three times. Clear any prompt
+      // first: end-turn is disabled while one is pending, so an unanswered
+      // prompt stalls the table and no turn ever advances.
       for (let i = 0; i < 3; i += 1) {
+        for (const seat of [host, guest]) await clearPrompt(seat.page);
         for (const seat of [host, guest]) {
           const btn = seat.page.getByTestId('end-turn');
           if (await btn.isEnabled().catch(() => false)) {
@@ -234,6 +294,7 @@ test.describe('two chromium players over the relay', () => {
         }
         await host.page.waitForTimeout(1500); // one poll interval
       }
+      for (const seat of [host, guest]) await clearPrompt(seat.page);
 
       // The turn counter moved, and both browsers agree on it.
       await expect
@@ -242,12 +303,28 @@ test.describe('two chromium players over the relay', () => {
         })
         .toBeGreaterThan(startTurn);
 
+      // Read both inside the poll. Snapshotting the host's number as the
+      // expected value races: the host keeps advancing while the guest is
+      // converging, so the guest ends up agreeing with a number the host has
+      // already left behind. This asserts the two browsers agree with *each
+      // other*, which is the actual property, rather than with a stale reading.
       await expect
-        .poll(async () => guest.page.getByTestId('turn-number').textContent(), { timeout: 30_000 })
-        .toBe(await host.page.getByTestId('turn-number').textContent());
+        .poll(
+          async () => {
+            const h = (await host.page.getByTestId('turn-number').textContent())?.trim();
+            const g = (await guest.page.getByTestId('turn-number').textContent())?.trim();
+            return h !== undefined && h === g ? h : null;
+          },
+          { timeout: 30_000, message: 'both browsers should converge on the same turn' },
+        )
+        .not.toBeNull();
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 
@@ -273,8 +350,12 @@ test.describe('two chromium players over the relay', () => {
         .poll(async () => guest.page.getByTestId('you-are').getAttribute('data-you-id'), { timeout: 30_000 })
         .toBe(seatBefore);
     } finally {
-      await host.ctx.close();
-      await guest.ctx.close();
+      // Teardown must not fail a passing test. Under memory pressure the
+      // context can already be gone by the time we get here, and `close()`
+      // throwing "Target page, context or browser has been closed" was
+      // reporting green assertions as failures.
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
     }
   });
 });
