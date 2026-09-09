@@ -33,6 +33,7 @@ import {
   opCreateCard,
   opGainCard,
   opMoveTo,
+  opFuse,
   opRecruit,
   opReveal,
   opShuffle,
@@ -130,6 +131,8 @@ function applyNode(s: GameState, item: QueuedEffect, q: QueuedEffect[], pre?: Pr
       return opTransform(s, item, q, pre);
     case 'recruit':
       return opRecruit(s, item, q);
+    case 'fuse':
+      return opFuse(s, item, q, pre);
     case 'shuffle':
       return opShuffle(s, item, q);
     case 'sortLibraryByCost':
@@ -296,11 +299,19 @@ function runQueue(s: GameState, q: QueuedEffect[], depthCap: number): GameState 
 
     s.nodesResolvedThisTurn += 1;
 
+    // `{ifPrevious: true}` reads `__previousDidSomething`, which nothing ever
+    // wrote — the clause was always false. Ops do not report whether they did
+    // anything, but every op that does logs it, so the log growing across one
+    // node is the signal. Written onto the next node in the same sequence,
+    // which is what "the previous op" means.
+    const logBefore = s.logSeq;
     const result = applyNode(s, item, q);
     if (result === 'suspend') {
       s.queue = q.concat(s.queue);
       return s;
     }
+    const next = q[0];
+    if (next) next.vars = { ...next.vars, __previousDidSomething: s.logSeq > logBefore ? 1 : 0 };
   }
 
   // Nothing left of ours: drain anything parked earlier, if we can.

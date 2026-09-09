@@ -45,7 +45,7 @@ export function opManifestAura(s: GameState, item: QueuedEffect, q: QueuedEffect
   if (node.op !== 'manifestAura') return 'ok';
 
   const rngWho = takeRng(s);
-  const players = resolveWho(s, node.who, item.player, rngWho);
+  const players = resolveWho(s, node.who, item.player, rngWho, item.sourceIid);
   commitRng(s, rngWho);
 
   if (pre && pre.keys && pre.keys.length > 0) {

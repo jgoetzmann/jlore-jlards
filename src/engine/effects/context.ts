@@ -11,10 +11,27 @@ import {
   defCost,
   instanceCost,
   opponentsOf,
+  tryGetCard,
 } from './runtime';
+import { statOf } from '@engine/systems/index.js';
 import { NAMED_FILTERS, matchesFilter, zoneIds } from './select';
 
 const COUNT_ZONES: Zone[] = ['hand', 'library', 'gy', 'play', 'shop', 'trash'];
+
+/** A player counter may never shadow one of the frozen expression variables. */
+const FROZEN_VAR_NAMES: ReadonlySet<string> = new Set<string>(EXPR_VARS);
+
+/**
+ * Instance counters the engine keeps for itself. `selfCounter` is meant to be
+ * "this card's own tally", so these must not be summed into it.
+ */
+const BOOKKEEPING_COUNTERS: ReadonlySet<string> = new Set([
+  'playCount',
+  'podChain',
+  'trashSurvivals',
+  'promptTurn',
+  'promptsThisTurn',
+]);
 
 function deckOf(state: GameState, player: PlayerId): InstanceId[] {
   const p = state.players[player];
@@ -147,6 +164,62 @@ export function buildVars(
   // ... (X)". That is a property of the deck's cost set, not a card count, so
   // no CardFilter can express it and `count(longestCostRun)` silently read 0.
   vars.longestCostRun = longestCostRunIn(costs);
+  vars.buysUsedThisTurn = p.buysUsedThisTurn;
+
+  // Opponent shape. `madOfOpponentDeck` is a cost dispersion, not a size, and
+  // The Biggest The Largest was subtracting it from its own deck size — paying
+  // out ~9 Money from a (1) card on turn one. These are the real comparisons.
+  let largestOpponentDeck = 0;
+  let tallestOpponentLibrary = 0;
+  for (const oid of opponents) {
+    const o = state.players[oid];
+    if (!o) continue;
+    const size = o.library.length + o.hand.length + o.gy.length + o.play.length;
+    if (size > largestOpponentDeck) largestOpponentDeck = size;
+    if (o.library.length > tallestOpponentLibrary) tallestOpponentLibrary = o.library.length;
+  }
+  vars.largestOpponentDeck = largestOpponentDeck;
+  vars.tallestOpponentLibrary = tallestOpponentLibrary;
+
+  // VP actually sitting in hand, printed plus accrued — the two terms final
+  // scoring adds. No `count()` can express a sum, only a tally of cards.
+  let vpInHand = 0;
+  let cheapestInHand = 0;
+  let sawHand = false;
+  for (const iid of p.hand) {
+    vpInHand += statOf(state, iid, 'vp') + (state.instances[iid]?.counters['vp'] ?? 0);
+    const c = instanceCost(state, iid);
+    if (!sawHand || c < cheapestInHand) {
+      cheapestInHand = c;
+      sawHand = true;
+    }
+  }
+  vars.vpInHand = vpInHand;
+  vars.cheapestInHand = cheapestInHand;
+
+  // The deepest single Relic upgrade in the deck — Monumental Works pays the
+  // highest, never the sum, so a total across Relics would double count.
+  let maxRelicUpgrades = 0;
+  for (const iid of deck) {
+    const inst = state.instances[iid];
+    if (!inst) continue;
+    const def = tryGetCard(inst.defId);
+    if (!def || def.types.indexOf('Relic') < 0) continue;
+    const up = inst.counters['upgrades'] ?? 0;
+    if (up > maxRelicUpgrades) maxRelicUpgrades = up;
+  }
+  vars.maxRelicUpgrades = maxRelicUpgrades;
+
+  let draftTotal = 0;
+  let draftSeen = 0;
+  for (const pileId of state.shop.order.draft) {
+    const pile = state.shop.piles[pileId];
+    const top = pile?.cards[0];
+    if (!top) continue;
+    draftTotal += instanceCost(state, top);
+    draftSeen += 1;
+  }
+  vars.avgDraftPileCost = draftSeen > 0 ? draftTotal / draftSeen : 0;
 
   if (sourceIid) {
     const src = state.instances[sourceIid];
@@ -159,8 +232,14 @@ export function buildVars(
       for (const key of Object.keys(src.counters)) {
         const v = src.counters[key];
         if (typeof v !== 'number') continue;
+        // The engine keeps its own bookkeeping on instances — playCount is
+        // bumped before a card's body runs, trigger budgets live under `trg:`.
+        // Summing those into `selfCounter` made Juhan Wet Market draw its own
+        // play count and Plague Charger score it, while the card text printed
+        // `{plague}` alone, so the printed and the paid numbers disagreed.
+        if (BOOKKEEPING_COUNTERS.has(key) || key.startsWith('trg:')) continue;
         counterTotal += v;
-        if (key === 'counter' || key === 'uses' || key === 'charges') {
+        if (key === 'counter' || key === 'uses' || key === 'charges' || key === 'plague') {
           named = v;
           sawNamed = true;
         }
@@ -168,6 +247,19 @@ export function buildVars(
       vars.selfCounter = sawNamed ? named : counterTotal;
       vars.selfCost = instanceCost(state, sourceIid);
     }
+  }
+
+  // Player counters are readable by their own key, so a card that writes
+  // `turn:ricochetUsed` can gate on `turn:ricochetUsed` — minus the colon,
+  // which the expression grammar has no room for, so the prefix is dropped and
+  // the name is what the card reads. A key that collides with a frozen var name
+  // never wins.
+  for (const key of Object.keys(p.counters)) {
+    const name = key.startsWith('turn:') ? key.slice(5) : key;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    if (FROZEN_VAR_NAMES.has(name)) continue;
+    const v = p.counters[key];
+    if (typeof v === 'number' && Number.isFinite(v)) vars[name] = v;
   }
 
   vars.x = 0;

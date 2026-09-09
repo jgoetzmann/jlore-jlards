@@ -19,6 +19,7 @@
 import type { CostMod, Duration, GameState, PileId, PlayerId } from '@engine/types';
 import { pileDefId, safeGetCard } from './util';
 import { expiryTurnFor } from './locks';
+import { dynamicPriceFor } from './dynamic';
 
 /** Floors default to 0 unless a card names its own ("Minimum (1)", "minimum 0"). */
 export const DEFAULT_COST_FLOOR = 0;
@@ -95,6 +96,13 @@ export function costOf(state: GameState, pileId: PileId, buyer: PlayerId): numbe
   const def = safeGetCard(defId);
 
   let cost = def?.cost.money ?? 0;
+
+  // A few cards print a price that is a reading of the board rather than a
+  // number — "costs (0) if your hand is empty", Lead's per-turn reroll. Those
+  // replace the printed cost here, ahead of the modifier stack, so an ordinary
+  // discount still applies on top of them.
+  const dynamic = dynamicPriceFor(state, defId, buyer);
+  if (dynamic !== null) cost = dynamic;
 
   const variant = state.variants[defId];
   if (variant) cost += variant.costDelta ?? 0;

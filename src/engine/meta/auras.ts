@@ -32,6 +32,8 @@ import { pushLog, withPlayer } from './util.js';
 
 /** Timed aura: Outstanding Debt runs for four turns (§9.2). */
 export const OUTSTANDING_DEBT_ID: AuraId = 'outstanding_debt';
+/** B.4: manifesting this aura starts the In Too Deep quest. */
+export const IN_TOO_DEEP_ID: AuraId = 'in_too_deep';
 export const OUTSTANDING_DEBT_TURNS = 4;
 /** Bound aura: Infini Scepter's Oathbound Memory: [Card]. */
 export const OATHBOUND_MEMORY_ID: AuraId = 'oathbound_memory';
@@ -123,6 +125,13 @@ export function manifestAura(
   }
 
   p.field.push(newInstance(player, auraId, boundDefId));
+  // B.4: In Too Deep IS the quest, so manifesting it starts the descent. Without
+  // this `p.quest` stays null and every `questProgress` call returns early —
+  // which is one of the two reasons no floor ever completed.
+  if (auraId === IN_TOO_DEEP_ID && p.quest === null) {
+    p.quest = { floor: '1', progress: {}, completedFloors: [] };
+    pushLog(state, 'questStarted', { floor: '1' }, player);
+  }
   return pushLog(state, 'auraManifested', { auraId, tier: realTier }, player);
 }
 

@@ -65,6 +65,7 @@ export const KNOWN_OPS: string[] = [
   'copyCard',
   'transform',
   'recruit',
+  'fuse',
   'shuffle',
   'sortLibraryByCost',
   'reveal',
