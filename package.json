@@ -22,8 +22,9 @@
     "art:status": "tsx tools/art-status.ts",
     "replay": "tsx tools/replay.ts",
     "relay:check": "tsx tools/relay-check.ts",
-    "e2e": "playwright test",
-    "e2e:headed": "playwright test --headed"
+    "e2e": "playwright test --grep-invert \"visual record\"",
+    "e2e:headed": "playwright test --grep-invert \"visual record\" --headed",
+    "shots": "playwright test e2e/screenshots.spec.ts"
   },
   "dependencies": {
     "@upstash/redis": "1.34.3",

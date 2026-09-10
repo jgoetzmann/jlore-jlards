@@ -7,9 +7,15 @@
  * art fight the frame, can you tell whose turn it is, does a prompt overlay
  * obscure the thing it is asking about.
  *
- *   npx playwright test e2e/screenshots.spec.ts
+ *   npm run shots
  *
  * Output lands in `shots/`, numbered in the order a player would meet them.
+ *
+ * Deliberately excluded from `npm run e2e` and therefore from CI: it plays 26
+ * turns and takes about a quarter of an hour, and it asserts almost nothing —
+ * gating a build on a documentation tool buys nothing and cost a CI timeout.
+ * The suites that do assert (hotseat, multiplayer, art) run in about two
+ * minutes together.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -139,16 +145,23 @@ test.describe('visual record', () => {
       }
 
       await clearPrompt(page);
-      // Prefer a pile whose card mentions Discover/choose, so the run actually
-      // reaches a prompt overlay instead of buying Coppers forever.
-      const buy = page.locator('[data-testid="pile"][data-buyable="true"]');
-      const promptish = page.locator(
-        '[data-testid="pile"][data-buyable="true"]:has([data-card-name]):below(:text("DRAFT SHOP"))',
-      );
-      const target = (await promptish.count()) > 0 ? promptish : buy;
-      if ((await target.count()) > 0) {
-        const idx = Math.min((await target.count()) - 1, turn % Math.max(1, await target.count()));
-        await target.nth(idx).getByTestId('buy').click().catch(() => undefined);
+      // Cycle through the buyable draft piles so the run buys varied cards and
+      // eventually reaches a prompt, rather than buying Copper forever.
+      //
+      // Scoped to the Draft Shop by test id, not by a positional `:below()`
+      // selector: positional selectors resolve against rendered geometry, which
+      // differs between a local run and CI's font metrics, and there it picked
+      // piles whose Buy button was overlapped.
+      const draftBuyable = page
+        .getByTestId('shop-draft')
+        .locator('[data-testid="pile"][data-buyable="true"]');
+      const anyBuyable = page.locator('[data-testid="pile"][data-buyable="true"]');
+      const target = (await draftBuyable.count()) > 0 ? draftBuyable : anyBuyable;
+      const n = await target.count();
+      if (n > 0) {
+        const btn = target.nth(turn % n).getByTestId('buy');
+        await btn.scrollIntoViewIfNeeded().catch(() => undefined);
+        await btn.click({ timeout: 15_000 }).catch(() => undefined);
         await page.waitForTimeout(100);
       }
       await clearPrompt(page);

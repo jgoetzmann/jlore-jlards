@@ -251,6 +251,12 @@ test.describe('two chromium players over the relay', () => {
       const copper = mover.page.getByTestId('hand').locator('[data-card-id="copper"]').first();
       await expect(copper).toBeVisible({ timeout: 20_000 });
       const before = await statValue(mover.page, 'money');
+      // Capture the watcher's view of the mover's hand before the play, so the
+      // "it dropped" assertion is relative. Pinning it below 5 assumed a 5-card
+      // opening hand, which an anomaly may legitimately change (B85).
+      const handBefore = Number(
+        await watcher.page.getByTestId('opponent').first().getAttribute('data-hand-count'),
+      );
       await copper.click();
 
       // The mover sees their own money rise.
@@ -264,7 +270,7 @@ test.describe('two chromium players over the relay', () => {
             Number(await watcher.page.getByTestId('opponent').first().getAttribute('data-hand-count')),
           { timeout: 20_000 },
         )
-        .toBeLessThan(5);
+        .toBeLessThan(handBefore);
     } finally {
       // Teardown must not fail a passing test. Under memory pressure the
       // context can already be gone by the time we get here, and `close()`
