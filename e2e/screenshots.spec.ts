@@ -115,8 +115,15 @@ test.describe('visual record', () => {
     }
 
     // 8. Play on into later turns, catching a prompt if one appears.
+    //
+    // Bounded by wall clock, not just turn count. A late-game turn resolves far
+    // more than an early one, so a fixed turn budget ran past the test timeout
+    // and lost the later-turn shots entirely — the most interesting ones, since
+    // they show a grown deck and a full graveyard.
+    const deadline = Date.now() + 6 * 60 * 1000;
     let promptShot = false;
     for (let turn = 0; turn < 26; turn += 1) {
+      if (Date.now() > deadline) break;
       if (await page.getByTestId('game-over').isVisible().catch(() => false)) break;
       await focusSeatToMove(page);
 
@@ -127,6 +134,7 @@ test.describe('visual record', () => {
       await clearPrompt(page);
 
       for (let i = 0; i < 6; i += 1) {
+        if (Date.now() > deadline) break;
         if (await clearPrompt(page)) {
           if (!promptShot && (await page.getByTestId('prompt').count()) > 0) {
             await shot(page, 'prompt-overlay');
@@ -136,7 +144,7 @@ test.describe('visual record', () => {
         }
         const playable = hand.locator('[data-clickable="true"]');
         if ((await playable.count()) === 0) break;
-        await playable.first().click();
+        await playable.first().click({ timeout: 10_000 }).catch(() => undefined);
         await page.waitForTimeout(80);
         if (!promptShot && (await page.getByTestId('prompt').count()) > 0) {
           await shot(page, 'prompt-overlay');
@@ -168,7 +176,7 @@ test.describe('visual record', () => {
 
       const end = page.getByTestId('end-turn');
       if (await end.isEnabled().catch(() => false)) {
-        await end.click();
+        await end.click({ timeout: 10_000 }).catch(() => undefined);
         await page.waitForTimeout(150);
       }
     }

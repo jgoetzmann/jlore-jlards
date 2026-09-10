@@ -58,14 +58,34 @@ const INTERNAL_COUNTER_PREFIXES = ['trg:', 'podChain'];
  * governs only the chips.
  */
 const BOOKKEEPING_COUNTERS = new Set([
+  // resolution bookkeeping
   'playCount',
   'pricePaid',
-  'questTrashSeen',
-  'trashedTotal',
-  'turnsTaken',
   'promptsThisTurn',
   'promptTurn',
+  'questTrashSeen',
+  'trashedTotal',
+  'trashSpared',
+  'turnsTaken',
+  'wouldTrash',
+  // hand adjacency (Loaf of Bread, Brownie, Feel so Clean)
+  'handEdge',
+  'handIndex',
+  'handSizeAtPlay',
+  'sandwich',
+  // Pointer bindings
+  'pointerPair',
+  'pointerPlaying',
 ]);
+
+/**
+ * The counters a player is meant to read off a card: plague tokens, VP accrued
+ * onto the instance, and Relic upgrades (which Monumental Works scores). Every
+ * other key above is bookkeeping. Kept as a comment rather than an allowlist
+ * because B24 makes counters public by default — a test plants an arbitrary
+ * counter name and requires the opponent to see it — so anything new added for
+ * bookkeeping must be named in the set above or it renders on the card face.
+ */
 
 // ---------------------------------------------------------------------------
 // Card text
