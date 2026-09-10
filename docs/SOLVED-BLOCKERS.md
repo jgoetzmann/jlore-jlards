@@ -901,3 +901,37 @@ output of the thing the harness was built for. All **REVISIT**.
 Caveat: these come from the greedy bot, which buys the most expensive affordable
 card and does not build archetypes. Read it as "which cards are reachable and
 obviously good", not as human play.
+
+### SB-63. The player's hand sits below the fold — **UNRESOLVED**
+
+The one entry in this file that is *not* solved. Recorded so it is not
+rediscovered from scratch.
+
+**The problem.** The Prophet Shop holds all 23 cards every match (SB-14: they
+are threshold-gated, not supply-gated), and the table grows to fit its tallest
+column. At a 1600×1000 viewport the page runs about **3740px**, so IN PLAY and
+the hand sit roughly 2700px below the fold. A player cannot see their own cards
+and the shop at the same time, which is most of what playing consists of.
+
+**Two fixes tried, both reverted, both worse than the problem:**
+
+| Attempt | Why it failed |
+|---|---|
+| Pin the table to `100vh`, give each shop column its own scroll | Clipping a column leaves a clipped pile's Buy button at layout coordinates outside the visible area — under IN PLAY, where no click reaches it. The button reports visible, enabled and stable while another element takes the pointer. |
+| Keep the page tall, make `.hand` `position: sticky; bottom: 0` | A sticky footer covers whatever is at the viewport bottom, so the hand swallowed clicks aimed at the board beneath it. |
+
+Both traded a layout that is *visible but awkward* for one that is *invisibly
+unclickable*, which is strictly worse — the first costs a scroll, the second
+costs a move the player cannot make and cannot diagnose.
+
+**What it actually needs:** a real two-pane design — a board region that owns its
+own scroll and a hand region outside that region, as siblings, rather than CSS
+bolted onto a single-column table from the outside. That is a component change
+in `App.tsx`'s `Table`, not a stylesheet change, and it wants doing by whoever
+owns the UI.
+
+**If you attempt it, the regression test already exists:** `npm run e2e` catches
+both failure modes. The clipping version fails `B5` on an unreachable Buy button;
+the sticky version fails the screenshot run with `<div class="hand"> intercepts
+pointer events`. Neither shows up in the unit suite, and neither is visible in a
+screenshot — the layout looks *better* in both broken versions.
