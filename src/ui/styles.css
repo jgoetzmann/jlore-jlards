@@ -622,11 +622,13 @@ h3 {
   display: none;
 }
 
+/* Flex items shrink by default, so a 13-card graveyard in a 320px panel
+   squeezed every card to a sliver and wrapped its name one character per line —
+   "T i x", "C o p p e r". Cards keep their width; the row scrolls. */
 .playarea-row > .card,
 .playarea-row .card {
   flex: 0 0 auto;
 }
-
 
 /* ------------------------------------------------------------------- hand */
 
@@ -636,20 +638,7 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px;
-  /* Your hand is the most-read thing on screen and must never scroll away.
-     The Prophet Shop always holds 23 piles, which made the page ~3700px tall
-     against a 1000px viewport and left the hand thousands of pixels below the
-     fold — you could not see your own cards and the shop at the same time.
-
-     Sticky rather than a fixed-height table with independently scrolling
-     regions: that version clipped the board, and a pile clipped outside its
-     column had a Buy button at coordinates no click could reach. Sticky keeps
-     the whole board laid out and clickable, and floats the hand over it. */
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
 }
-
 
 .hand-head {
   display: flex;
@@ -715,9 +704,6 @@ h3 {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  /* Flex items shrink by default, so a 13-card graveyard in a 320px panel
-     squeezed every card to a sliver and wrapped its name one character per
-     line — "T i x", "C o p p e r". Cards keep their width; the row scrolls. */
   scrollbar-width: thin;
 }
 

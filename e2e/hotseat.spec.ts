@@ -51,8 +51,15 @@ test.describe('hotseat — a game you can actually play', () => {
     await page.goto(HOTSEAT);
     await expect(page.getByTestId('table')).toBeVisible();
 
-    // B1: opening hand is 5.
-    await expect(page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
+    // B1: opening hand is 5 — absent an anomaly. B85 lets a stat anomaly change
+    // the per-turn draw (Extra/Less Cards! by one, Adrenaline by three), and
+    // anomalies roll at 0.3, so pinning 5 unconditionally fails against a
+    // correct engine about a third of the time.
+    if ((await page.getByTestId('anomaly-banner').count()) === 0) {
+      await expect(page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
+    } else {
+      await expect(page.getByTestId('hand').getByTestId('card')).not.toHaveCount(0);
+    }
 
     // B44: the fixed shops are always present.
     await expect(page.getByTestId('shop-resource')).toBeVisible();
@@ -187,9 +194,17 @@ test.describe('hotseat — a game you can actually play', () => {
       )
       .not.toBe(firstSeat);
 
-    // B7: the hand is redrawn to 5 at end of turn.
+    // B7: the hand is redrawn at end of turn. Five is the baseline, but an
+    // anomaly legitimately changes it — Adrenaline grants +3 Cards a turn, and
+    // Extra/Less Cards! shift it by one — so pin 5 only when none rolled.
     await focusSeatToMove(page);
-    await expect(page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
+    if ((await page.getByTestId('anomaly-banner').count()) === 0) {
+      await expect(page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
+    } else {
+      await expect
+        .poll(async () => page.getByTestId('hand').getByTestId('card').count())
+        .toBeGreaterThan(0);
+    }
   });
 
   test('each seat sees its own hand, and the opponent only as a count', async ({ page }) => {
@@ -207,11 +222,18 @@ test.describe('hotseat — a game you can actually play', () => {
     const seat1You = await page.getByTestId('you-are').getAttribute('data-you-id');
 
     expect(seat0You).not.toBe(seat1You);
-    expect(seat0Hand).toBe(5);
 
-    // The opponent panel reports a count, never a card list.
+    // Opening hand is 5 absent an anomaly; Adrenaline draws 8, Extra/Less
+    // Cards! shift it by one.
+    const anomalous = (await page.getByTestId('anomaly-banner').count()) > 0;
+    if (!anomalous) expect(seat0Hand).toBe(5);
+    else expect(seat0Hand).toBeGreaterThan(0);
+
+    // The point of this test regardless: the opponent panel reports a count,
+    // and never a card list. The count must match whatever the hand actually is.
     const opponent = page.getByTestId('opponent').first();
-    await expect(opponent).toHaveAttribute('data-hand-count', '5');
+    const reported = Number(await opponent.getAttribute('data-hand-count'));
+    expect(reported).toBe(seat0Hand);
     await expect(opponent.getByTestId('card')).toHaveCount(0);
   });
 

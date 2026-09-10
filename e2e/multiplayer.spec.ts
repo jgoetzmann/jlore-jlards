@@ -135,13 +135,23 @@ test.describe('two chromium players over the relay', () => {
       await guest.page.goto(`/#${code}`);
       await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
 
-      // B1: five cards each, seen only by their owner.
-      await expect(host.page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
-      await expect(guest.page.getByTestId('hand').getByTestId('card')).toHaveCount(5);
+      // B1: five cards each, seen only by their owner — absent an anomaly, which
+      // may legitimately change the draw (B85).
+      const anomalous = (await host.page.getByTestId('anomaly-banner').count()) > 0;
+      const hostHand = await host.page.getByTestId('hand').getByTestId('card').count();
+      const guestHand = await guest.page.getByTestId('hand').getByTestId('card').count();
+      if (!anomalous) {
+        expect(hostHand).toBe(5);
+        expect(guestHand).toBe(5);
+      } else {
+        expect(hostHand).toBeGreaterThan(0);
+        expect(guestHand).toBeGreaterThan(0);
+      }
 
-      // B22: the opponent panel carries a count and renders no cards.
+      // B22: the opponent panel carries a count, never a card list, and the
+      // count is whatever that player's hand actually holds.
       const hostSeesOpp = host.page.getByTestId('opponent').first();
-      await expect(hostSeesOpp).toHaveAttribute('data-hand-count', '5');
+      expect(Number(await hostSeesOpp.getAttribute('data-hand-count'))).toBe(guestHand);
       await expect(hostSeesOpp.getByTestId('card')).toHaveCount(0);
     } finally {
       // Teardown must not fail a passing test. Under memory pressure the
@@ -171,7 +181,7 @@ test.describe('two chromium players over the relay', () => {
         .getByTestId('hand')
         .getByTestId('card')
         .evaluateAll((els) => els.map((e) => e.getAttribute('data-iid')).filter(Boolean) as string[]);
-      expect(guestHandIids.length).toBe(5);
+      expect(guestHandIids.length, 'the guest holds a hand to leak').toBeGreaterThan(0);
 
       // Everything the host's document actually contains.
       const hostDom = await host.page.content();
@@ -200,7 +210,7 @@ test.describe('two chromium players over the relay', () => {
         .getByTestId('hand')
         .getByTestId('card')
         .count();
-      expect(guestSawOwnHandInDom, 'the guest can see its own hand').toBe(5);
+      expect(guestSawOwnHandInDom, 'the guest can see its own hand').toBe(guestHandIids.length);
 
       // And the host's opponent panel is a count, not a card list — the actual
       // mechanism by which the DOM stays clean.
