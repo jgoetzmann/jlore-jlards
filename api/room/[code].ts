@@ -13,7 +13,7 @@ import {
   makeMemoryStore,
   MAX_BODY_BYTES,
   type RoomStore,
-} from '../../src/relay/roomHandler';
+} from '../../src/relay/roomHandler.js';
 
 /** Minimal structural shape of a Vercel Node request/response. */
 interface VercelLikeRequest {
@@ -31,8 +31,27 @@ interface VercelLikeResponse {
   end(body?: string): void;
 }
 
-const REST_URL = process.env.UPSTASH_REDIS_REST_URL ?? '';
-const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
+/**
+ * Read a credential from the environment, tolerating a pasted value that still
+ * has its quotes on.
+ *
+ * A dashboard value of `"https://x.upstash.io"` is truthy, so it slips past the
+ * "are these configured" check and reaches `new Redis()`, which rejects it with
+ * UrlError — an uncaught throw at request time, which the platform reports as
+ * an opaque FUNCTION_INVOCATION_FAILED with no hint that the cause is a pair of
+ * quote characters. Copying straight out of a .env file does exactly this.
+ */
+function readEnv(name: string): string {
+  const raw = process.env[name] ?? '';
+  return raw.trim().replace(/^['"]|['"]$/g, '');
+}
+
+const REST_URL = readEnv('UPSTASH_REDIS_REST_URL');
+const REST_TOKEN = readEnv('UPSTASH_REDIS_REST_TOKEN');
+
+/** Which store answered. Surfaced as a response header so a deployment can be
+ *  diagnosed with curl instead of a dashboard log hunt. */
+let storeKind: 'redis' | 'memory' = 'memory';
 
 const fallbackStore = makeMemoryStore();
 
@@ -40,11 +59,21 @@ let cachedStore: RoomStore | null = null;
 
 function getStore(): RoomStore {
   if (cachedStore) return cachedStore;
-  if (!REST_URL || !REST_TOKEN) {
+  // Anything that is not a usable https REST url falls back rather than
+  // throwing. A degraded room that still serves hotseat beats a 500 on every
+  // request, and the header says which one you got.
+  if (!REST_URL || !REST_TOKEN || !REST_URL.startsWith('https://')) {
     cachedStore = fallbackStore;
     return cachedStore;
   }
-  const redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+  let redis: Redis;
+  try {
+    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
+  } catch {
+    cachedStore = fallbackStore;
+    return cachedStore;
+  }
+  storeKind = 'redis';
   cachedStore = {
     async rpush(key, value) {
       return (await redis.rpush(key, value)) as number;
@@ -97,6 +126,9 @@ export default async function handler(
   res: VercelLikeResponse,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
+  // Populate `storeKind` before reporting it.
+  getStore();
+  res.setHeader('x-jlore-store', storeKind);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'content-type');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
