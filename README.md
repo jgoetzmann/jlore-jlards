@@ -61,6 +61,19 @@ still works, multiplayer does not. Check it with:
 
 ```bash
 npm run relay:check    # drives the real handler against your live Redis
+npm run smoke          # is the *deployed* site actually playable?
+```
+
+`npm run smoke` is the one that catches a half-configured deployment. Missing
+credentials still serve the app, still return 200 from the relay, and still pass
+a casual `curl` — sequential requests reuse one warm serverless instance. Two
+real players do not: their `hello` and the host's poll land on different
+instances with different memory, so the host never sees the join and the second
+player sits on "Joining…" forever. The relay reports which store answered in an
+`x-jlore-store` response header, so you can check without guessing:
+
+```bash
+curl -sI -X POST https://jlore-jlards.vercel.app/api/room/CHECK   -H 'content-type: application/json' | grep -i x-jlore-store
 ```
 
 ```bash
