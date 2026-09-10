@@ -8,6 +8,5 @@
       "memory": 128,
       "maxDuration": 10
     }
-  },
-  "rewrites": [{ "source": "/api/room/:code", "destination": "/api/room/[code]" }]
+  }
 }

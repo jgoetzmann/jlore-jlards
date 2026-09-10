@@ -27,9 +27,35 @@ npm install
 npm run dev            # http://localhost:5173 — click Hotseat to play immediately
 ```
 
-Hotseat needs no network and no backend. For multiplayer, copy `.env.example` to
-`.env`, fill in Upstash credentials, and deploy to Vercel; the host shares the
-`#ROOMCODE` link and everyone clicks it.
+Hotseat needs no network and no backend: two players, two hands, one browser.
+`npm run dev` also mounts the relay, so you can open two windows and play a real
+multiplayer game locally.
+
+## Deploying
+
+The whole backend is one serverless function over a Redis list. Import the repo
+at [vercel.com/new](https://vercel.com/new) — `vercel.json` already sets the
+build command, output directory and function limits, and `api/room/[code].ts`
+becomes `/api/room/:code` through Vercel's own file-based routing.
+
+Set two environment variables from the Upstash console's **REST** credentials:
+
+```
+UPSTASH_REDIS_REST_URL     https://<your-db>.upstash.io
+UPSTASH_REDIS_REST_TOKEN   <token>
+```
+
+Paste the raw values — no surrounding quotes. The Upstash client rejects a
+quoted URL with `UrlError`, and use the REST url rather than the `redis://`
+connection string.
+
+Without those two, the relay falls back to an in-process store. That is fine
+locally but not on serverless, where invocations do not share memory: hotseat
+still works, multiplayer does not. Check it with:
+
+```bash
+npm run relay:check    # drives the real handler against your live Redis
+```
 
 ```bash
 npm run relay:check    # confirms the credentials and the live backend actually work
