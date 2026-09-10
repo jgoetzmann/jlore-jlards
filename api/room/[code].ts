@@ -129,6 +129,20 @@ export default async function handler(
   // Populate `storeKind` before reporting it.
   getStore();
   res.setHeader('x-jlore-store', storeKind);
+  // Temporary deployment diagnostic. Reports whether the credentials are
+  // visible to the function and how long they are — never their values — plus
+  // any UPSTASH-ish names that ARE present, which distinguishes "not set" from
+  // "set on the wrong environment" from "set under a different name".
+  {
+    const names = Object.keys(process.env)
+      .filter((k) => /UPSTASH|REDIS/i.test(k))
+      .sort()
+      .join(',');
+    res.setHeader(
+      'x-jlore-env',
+      `urlLen=${REST_URL.length},tokenLen=${REST_TOKEN.length},https=${REST_URL.startsWith('https://')},seen=${names || 'none'}`,
+    );
+  }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'content-type');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
