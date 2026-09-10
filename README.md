@@ -1,7 +1,13 @@
 # Jlore Jlards
 
+### ▶ [Play it](https://jlore-jlards.vercel.app)
+
 A digital deck-builder in the Dominion lineage, for 2–4 people in different
 houses who are already in a Discord call.
+
+Click **Hotseat** to play immediately — two players, two hands, one browser, no
+account and no setup. **Create a room** gives you a `#ROOMCODE` link to paste
+into a call.
 
 Three things make it not-Dominion:
 
