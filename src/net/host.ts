@@ -1,14 +1,16 @@
 /**
- * The host runs the engine. It is the only place a full `GameState` exists.
+ * Two hosts.
  *
- * Loop: poll for `intent` messages, run `reduce`, then compute `viewFor` for
- * every seat and post one `view` message each (B109). A `hello` claims a seat,
- * records that seat's codex into match state, and gets a fresh view back
- * (B110). A `snapshot` goes out each turn so another client could take over.
+ * `startLobbyHost` is what the app runs: a room with people in it and no
+ * cards yet. It speaks the same relay with no new message kind — see the lobby
+ * wire format in `relay.ts` — and hands the deal to the lockstep session
+ * (`lockstep.ts`), after which every browser runs the engine itself (SB-65).
  *
- * `startLobbyHost` is the phase before any of that: a room with people in it
- * and no cards yet. It speaks the same relay with no new message kind — see
- * the lobby wire format in `relay.ts`.
+ * `startHost` is the original view-publishing host: it alone holds a
+ * `GameState`, polls for `intent` messages, runs `reduce`, and posts one
+ * filtered `view` per seat (B109); a `hello` claims a seat and gets a fresh
+ * view (B110). The app no longer uses it. It is kept working, and tested,
+ * because the lobby suite drives it and a spectator or bot seat could.
  */
 
 import { reduce, legalActions } from '@engine/index';
@@ -23,6 +25,7 @@ import type {
 } from '@engine/types';
 import {
   clampSeatCap,
+  isLocalRelay,
   startPolling,
   LOBBY_KEEPALIVE_MS,
   LOBBY_PRESENCE_TIMEOUT_MS,
@@ -73,6 +76,9 @@ function isAction(payload: unknown): payload is GameAction {
     typeof (payload as { type?: unknown }).type === 'string'
   );
 }
+
+/** Action types `legalActions` never enumerates; the gate must not judge them. */
+const UNLISTED = new Set<GameAction['type']>(['resolve', 'reorderHand', 'concede']);
 
 /** Two actions are the same move if their type and every scalar field match. */
 function sameAction(a: GameAction, b: GameAction): boolean {
@@ -207,18 +213,24 @@ export function startHost(
     }:${current.ended ? 1 : 0}`;
   }
 
-  /** §8: a snapshot each turn, so another client could take over. */
+  /**
+   * A local save each turn, for the start screen's resume. Off the tick, and
+   * never posted: a full state on the relay cost every poller a download per
+   * turn and nothing ever read it (NET-6, HS-6).
+   */
   function maybeSnapshot(): void {
     if (current.turn === lastSnapshotTurn) return;
     lastSnapshotTurn = current.turn;
-    void relay
-      .post({ from: HOST_FROM, kind: 'snapshot', payload: current })
-      .catch(() => undefined);
-    try {
-      saveSnapshot(String(current.seed), loopRef ? loopRef.cursor() : 0, current);
-    } catch {
-      /* storage is a convenience for the host only */
-    }
+    if (isLocalRelay(relay)) return;
+    const snap = current;
+    const cursor = loopRef ? loopRef.cursor() : 0;
+    setTimeout(() => {
+      try {
+        saveSnapshot(String(snap.seed), cursor, snap);
+      } catch {
+        /* storage is a convenience for the host only */
+      }
+    }, 0);
   }
 
   function applyAction(action: GameAction, actor: PlayerId | null): boolean {
@@ -229,8 +241,11 @@ export function startHost(
 
     // B25: legalActions never offers something reduce would reject, so an
     // intent that is not in the list is a stale click. Skip it rather than
-    // republishing an identical view to every seat.
-    if (actor && bound.type !== 'resolve') {
+    // republishing an identical view to every seat. legalActions never lists
+    // reorderHand, concede or resolve, so those go straight to reduce, which
+    // validates them itself (HOST-1/TURN-5: this gate used to eat every
+    // reorder).
+    if (actor && !UNLISTED.has(bound.type)) {
       const legal = legalActions(current, actor);
       if (legal.length > 0 && !legal.some((a) => sameAction(a, bound))) return false;
     }
