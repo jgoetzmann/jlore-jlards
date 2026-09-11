@@ -24,8 +24,10 @@ import type { CardView, GameView, OpponentView, PileView, Prompt, SelfView } fro
 import { reduce } from '@engine/index';
 import { viewFor } from '@engine/view';
 import { KEY_HELP, digitIndex, digitLabel, keyIntent, type KeyContext } from '@ui/keys';
-import { promptBounds, promptReady, togglePick } from '@ui/prompt';
+import { allPiles, promptBounds, promptReady, togglePick } from '@ui/prompt';
 import {
+  addBuyFlight,
+  inFlightPiles,
   isInertPlay,
   isPlainResource,
   isUsefulPlay,
@@ -37,6 +39,9 @@ import { cardSignature, stabilizeView } from '@ui/viewcache';
 import { collapseLines } from '@ui/Log';
 import { artKeysIn, artThumbUrl, artUrl } from '@ui/art';
 import { seedMatch } from '@ui/useGame';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Board } from '@ui/Board';
 import { ensureRegistry } from '@net/bootstrap';
 
 ensureRegistry();
@@ -466,5 +471,35 @@ describe('art (ART-1)', () => {
     expect(new Set(keys).size).toBe(keys.length);
     for (const c of v.you.hand) if (c.art?.key) expect(keys).toContain(c.art.key);
     for (const p of v.shop.draft) if (p.top?.art?.key) expect(keys).toContain(p.top.art.key);
+  });
+});
+
+describe('buys in flight (TURN-8, UI-R2)', () => {
+  it('B1: every pile bought under one view stays guarded, not just the last', () => {
+    let f = addBuyFlight(null, 'a', 7);
+    f = addBuyFlight(f, 'b', 7);
+    // Clicking A again before a view lands must still find A in flight.
+    expect(inFlightPiles(f, 7).has('a')).toBe(true);
+    expect(inFlightPiles(f, 7).has('b')).toBe(true);
+    expect(addBuyFlight(f, 'a', 7)).toBe(f);
+  });
+
+  it('B1: a newer view clears the guard, and a buy under it starts afresh', () => {
+    const f = addBuyFlight(addBuyFlight(null, 'a', 7), 'b', 7);
+    expect(inFlightPiles(f, 8).size).toBe(0);
+    expect(addBuyFlight(f, 'c', 8)).toEqual({ ids: ['c'], revision: 8 });
+    expect(inFlightPiles(null, 8).size).toBe(0);
+  });
+
+  it('B1: the board turns off the Buy of every pile in flight', () => {
+    const s = seedMatch(2, 21);
+    const v = viewFor(s, s.activePlayer);
+    const withTop = allPiles(v).filter((p) => p.top !== null && p.count > 0);
+    expect(withTop.length).toBeGreaterThanOrEqual(2);
+    const ids = new Set([withTop[0]!.id, withTop[1]!.id]);
+    const html = renderToStaticMarkup(
+      React.createElement(Board, { view: v, onBuy: () => undefined, yourTurn: true, inFlightPiles: ids }),
+    );
+    expect(html.match(/title="Buying…"/g)?.length).toBe(2);
   });
 });

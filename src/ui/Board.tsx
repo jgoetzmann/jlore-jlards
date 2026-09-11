@@ -39,8 +39,8 @@ export interface BoardProps {
   yourTurn: boolean;
   /** Set while your own prompt asks you to pick piles. */
   pilePick?: PilePick | null;
-  /** A buy sent for this pile that no view has answered yet (TURN-8). */
-  inFlightPile?: PileId | null;
+  /** Piles with a buy sent that no view has answered yet (TURN-8). */
+  inFlightPiles?: ReadonlySet<PileId>;
 }
 
 const SHOP_TITLES: { key: keyof GameView['shop']; label: string }[] = [
@@ -233,7 +233,9 @@ export const PileTile = React.memo(PileTileImpl);
 /** Kept under its old name for anything that imported it. */
 export const PileColumn = PileTile;
 
-function BoardImpl({ view, onBuy, yourTurn, pilePick, inFlightPile = null }: BoardProps): JSX.Element {
+const NONE_IN_FLIGHT: ReadonlySet<PileId> = new Set<PileId>();
+
+function BoardImpl({ view, onBuy, yourTurn, pilePick, inFlightPiles = NONE_IN_FLIGHT }: BoardProps): JSX.Element {
   const { money, prophet, buys } = view.you;
   const blocked = view.pending !== null && view.pending !== undefined;
   return (
@@ -259,7 +261,7 @@ function BoardImpl({ view, onBuy, yourTurn, pilePick, inFlightPile = null }: Boa
                   blocked={blocked}
                   onBuy={onBuy}
                   pilePick={pilePick}
-                  inFlight={inFlightPile === pile.id}
+                  inFlight={inFlightPiles.has(pile.id)}
                 />
               ))}
             </div>

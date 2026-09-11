@@ -31,7 +31,7 @@ import { useKeyboard } from './useKeyboard';
 import { ANCHOR_DISCARD, ANCHOR_LIBRARY, MOTION_MS, planFlip } from './motion';
 import { FlipContext, FlipScope, createFlipRegistry, type FlipRegistry } from './useFlip';
 import { useIsoLayoutEffect, useOneShot, usePrefersReducedMotion } from './useMotion';
-import { isUsefulPlay, playMoneyPlan, submitsOnPick, turnDone } from './turnflow';
+import { addBuyFlight, inFlightPiles, isUsefulPlay, playMoneyPlan, submitsOnPick, turnDone, type BuyFlight } from './turnflow';
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
 
@@ -503,19 +503,29 @@ export function TableLayout({
   // --- buying (TURN-8) ----------------------------------------------------------
   // A buy is in flight until a newer view lands (then the pile's own state says
   // what happened) or the fallback timeout passes. While it is, that pile's Buy
-  // is off, so a double-click cannot buy twice.
-  const [buyFlight, setBuyFlight] = React.useState<{ pileId: PileId; revision: number } | null>(null);
-  const inFlightPile = buyFlight !== null && buyFlight.revision === revision ? buyFlight.pileId : null;
+  // is off, so a double-click cannot buy twice. Per pile: every pile bought
+  // under the same view stays guarded, not just the last one (UI-R2). The ref
+  // is the synchronous copy, so two clicks inside one frame are caught too.
+  const [buyFlight, setBuyFlight] = React.useState<BuyFlight | null>(null);
+  const buyFlightRef = React.useRef<BuyFlight | null>(null);
+  const inFlight = React.useMemo(() => inFlightPiles(buyFlight, revision), [buyFlight, revision]);
   React.useEffect(() => {
     if (buyFlight === null) return;
-    const t = setTimeout(() => setBuyFlight(null), BUY_INFLIGHT_TIMEOUT_MS);
+    const t = setTimeout(() => {
+      buyFlightRef.current = null;
+      setBuyFlight(null);
+    }, BUY_INFLIGHT_TIMEOUT_MS);
     return () => clearTimeout(t);
   }, [buyFlight]);
 
   const onBuy = React.useCallback(
     (pileId: PileId) => {
       const v = viewRef.current;
-      setBuyFlight({ pileId, revision: viewRevision(v) });
+      const rev = viewRevision(v);
+      if (inFlightPiles(buyFlightRef.current, rev).has(pileId)) return;
+      const next = addBuyFlight(buyFlightRef.current, pileId, rev);
+      buyFlightRef.current = next;
+      setBuyFlight(next);
       send({ type: 'buy', player: v.you.id, pileId });
     },
     [send],
@@ -705,7 +715,7 @@ export function TableLayout({
                 </p>
               </div>
             )}
-            <Board view={view} onBuy={onBuy} yourTurn={yourTurn} pilePick={pilePick} inFlightPile={inFlightPile} />
+            <Board view={view} onBuy={onBuy} yourTurn={yourTurn} pilePick={pilePick} inFlightPiles={inFlight} />
           </main>
 
           {placement === 'panel' && (

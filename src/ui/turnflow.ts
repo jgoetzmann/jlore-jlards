@@ -10,7 +10,7 @@
  * Every rule here is UI-only. None of it changes what the engine allows.
  */
 
-import type { CardView, GameView, InstanceId, Prompt } from '@engine/types';
+import type { CardView, GameView, InstanceId, PileId, Prompt } from '@engine/types';
 import { getCard, hasCard } from '@engine/registry';
 import { canAfford } from './Board';
 import { HEROIC_ACTIVATION_COST } from './Field';
@@ -163,4 +163,33 @@ export function submitsOnPick(prompt: Pick<Prompt, 'type' | 'min' | 'max'>): boo
   const min = typeof prompt.min === 'number' ? prompt.min : 1;
   const max = typeof prompt.max === 'number' ? prompt.max : Math.max(min, 1);
   return min === 1 && max === 1;
+}
+
+// ---------------------------------------------------------------------------
+// Buys in flight (TURN-8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Buys sent since the view at `revision`. Every pile bought under the same
+ * revision is kept, so buying A, then B, then A again before a view lands
+ * still finds A in flight. A newer view makes the whole record stale.
+ */
+export interface BuyFlight {
+  ids: readonly PileId[];
+  revision: number;
+}
+
+const NO_PILES: ReadonlySet<PileId> = new Set<PileId>();
+
+/** The record after a buy of `pileId` sent while the view was at `revision`. */
+export function addBuyFlight(prev: BuyFlight | null, pileId: PileId, revision: number): BuyFlight {
+  if (prev === null || prev.revision !== revision) return { ids: [pileId], revision };
+  if (prev.ids.includes(pileId)) return prev;
+  return { ids: [...prev.ids, pileId], revision };
+}
+
+/** The piles whose Buy is off right now: none once a newer view has landed. */
+export function inFlightPiles(flight: BuyFlight | null, revision: number): ReadonlySet<PileId> {
+  if (flight === null || flight.revision !== revision || flight.ids.length === 0) return NO_PILES;
+  return new Set(flight.ids);
 }
