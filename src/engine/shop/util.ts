@@ -14,6 +14,7 @@ import type {
 } from '@engine/types';
 import { getCard } from '@engine/registry';
 import { deepClone } from '@engine/core/clone.js';
+import { makeLogEntry } from '@engine/core/log.js';
 
 /** Pile ids are built as `<shop>:<defId>`. Nothing outside this slice parses them. */
 export const PILE_ID_SEP = ':';
@@ -70,7 +71,7 @@ export function appendLog(
   player: PlayerId | null = null,
 ): GameState {
   const seq = state.logSeq + 1;
-  const entry: LogEntry = { seq, turn: state.turn, player, kind, detail };
+  const entry = makeLogEntry(seq, state.turn, player, kind, detail);
   return { ...state, log: [...state.log, entry], logSeq: seq };
 }
 

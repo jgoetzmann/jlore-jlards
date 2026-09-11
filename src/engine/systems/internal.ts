@@ -27,6 +27,7 @@ import type {
   Zone,
 } from '@engine/types';
 import { getCard } from '@engine/registry';
+import { makeLogEntry } from '@engine/core/log';
 
 /** Every stat key, including prophet. Buff never picks prophet — see BUFFABLE_STATS. */
 export const ALL_STAT_KEYS: readonly StatKey[] = ['money', 'buys', 'actions', 'cards', 'vp', 'prophet'];
@@ -126,7 +127,7 @@ export function pushLog(
   detail: Record<string, unknown>,
 ): GameState {
   const seq = state.logSeq + 1;
-  const entry: LogEntry = { seq, turn: state.turn, player, kind, detail };
+  const entry = makeLogEntry(seq, state.turn, player, kind, detail);
   return { ...state, log: [...state.log, entry], logSeq: seq };
 }
 
