@@ -97,6 +97,13 @@ export const LAUNCH_TIMEOUT_MS = 2500;
  * pointer is still sitting on, and the new card was never launched, so the
  * second click of a double-click plays it. That is a wrong-action bug: every
  * browser agrees on the result, it just is not the action the player took.
+ *
+ * Only arrivals are guarded, deliberately. The neighbour that *slides* into the
+ * freed slot was already in the hand and on screen, and clicking one spot over
+ * and over is how a player dumps Coppers. Guarding the vacated slot as well was
+ * tried and reverted: it ate the second Copper of every rapid burst and failed
+ * three specs that play the hand exactly that way (hotseat B5 and both SB-63
+ * layout cases). A double-click there plays two cards, and that is the gesture.
  */
 export const HAND_SETTLE_MS = 300;
 
