@@ -120,12 +120,14 @@ const STRIP_ATTRS = ['data-testid', 'data-iid', 'data-card-id', 'data-card-name'
  * A copy of a card face for a ghost. Every attribute a test or the app finds
  * cards by is removed, so a ghost is never counted, clicked or queried as a card.
  */
-function makeGhost(src: HTMLElement, box: Rect): HTMLElement {
+function makeGhost(src: HTMLElement, box: Rect, kind: FlipStep['kind']): HTMLElement {
   const g = src.cloneNode(true) as HTMLElement;
   for (const el of [g, ...Array.from(g.querySelectorAll('*'))]) {
     for (const a of STRIP_ATTRS) el.removeAttribute(a);
   }
   g.classList.add('motion-ghost');
+  // Which flight this is (fly / deal / exit), for the browser specs.
+  g.setAttribute('data-flight', kind);
   const s = g.style;
   s.position = 'fixed';
   s.left = `${box.x}px`;
@@ -184,7 +186,7 @@ export type FlipSnapshot = { plan: FlipPlan; before: Map<string, Before> } | nul
 export function measureBefore(registry: FlipRegistry, plan: FlipPlan): Map<string, Before> {
   const out = new Map<string, Before>();
   for (const step of plan.steps) {
-    if (step.kind !== 'slide' && step.kind !== 'fly') continue;
+    if (step.kind !== 'slide' && step.kind !== 'fly' && step.kind !== 'exit') continue;
     const ghost = registry.live.get(step.key)?.ghost ?? null;
     const node = ghost && ghost.isConnected ? ghost : registry.get(step.key);
     if (!node || !node.isConnected) continue;
@@ -233,7 +235,7 @@ export function runFlip(registry: FlipRegistry, plan: FlipPlan, before: Map<stri
     if (step.kind === 'fly') {
       const b = before.get(step.key);
       if (!b || !target) continue;
-      const ghost = makeGhost(b.node, b.rect);
+      const ghost = makeGhost(b.node, b.rect, 'fly');
       motionLayer().appendChild(ghost);
       const t = fitTransform(b.rect, target);
       const toSelf = step.target === 'self';
@@ -256,13 +258,32 @@ export function runFlip(registry: FlipRegistry, plan: FlipPlan, before: Map<stri
       continue;
     }
 
+    if (step.kind === 'exit') {
+      // The card is gone from every drawn zone. A ghost of its last face fades
+      // and shrinks about its own centre, where it stood.
+      const b = before.get(step.key);
+      if (!b) continue;
+      const ghost = makeGhost(b.node, b.rect, 'exit');
+      ghost.style.transformOrigin = '50% 50%';
+      motionLayer().appendChild(ghost);
+      const a = ghost.animate(
+        [
+          { transform: 'none', opacity: 1 },
+          { transform: 'scale(0.9)', opacity: 0 },
+        ],
+        { ...timing, fill: 'both' },
+      );
+      track(registry, step.key, [a], ghost);
+      continue;
+    }
+
     if (step.kind === 'deal') {
       if (!el || !self || typeof el.animate !== 'function') continue;
       if (!source) {
         track(registry, step.key, [el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], timing)], null);
         continue;
       }
-      const ghost = makeGhost(el, self);
+      const ghost = makeGhost(el, self, 'deal');
       motionLayer().appendChild(ghost);
       const t = fitTransform(self, source);
       const hide = el.animate([{ opacity: 0 }, { opacity: 0, offset: 0.9 }, { opacity: 1 }], {

@@ -30,6 +30,7 @@ import {
   ANCHOR_DISCARD,
   ANCHOR_LIBRARY,
   ANIM_PRESETS,
+  anchorFan,
   MOTION_MS,
   animPresetOf,
   cardCues,
@@ -257,7 +258,7 @@ describe('motion / timing', () => {
   });
 
   it('M10: every card motion is snappy — 200ms or less — and the banner is 600ms (MOT-9)', () => {
-    for (const k of ['quick', 'move', 'beat', 'play', 'buy', 'draw', 'discard', 'reorder'] as const) {
+    for (const k of ['quick', 'move', 'beat', 'play', 'buy', 'draw', 'discard', 'reorder', 'trash'] as const) {
       expect(MOTION_MS[k]).toBeLessThanOrEqual(200);
     }
     expect(MOTION_MS.turn).toBe(600);
@@ -333,9 +334,37 @@ describe('motion / planFlip', () => {
     expect(steps).toContainEqual({ key: 'h2', kind: 'fly', ms: MOTION_MS.discard, delay: 0, target: ANCHOR_DISCARD });
   });
 
-  it('F5: a card that left for a zone the table never draws (trash, library) just leaves', () => {
+  it('F5: a card trashed from hand fades out where it stood (MOT-15)', () => {
     const plan = planFlip(view({ you: self({ hand: [card('t1')] }) }), view({ you: self({ hand: [] }) }));
-    expect(plan).toBeNull();
+    expect(plan?.steps).toEqual([{ key: 't1', kind: 'exit', ms: MOTION_MS.trash, delay: 0 }]);
+    // A card that played itself into the trash leaves from in play the same way.
+    const fromPlay = planFlip(view({ you: self({ play: [card('f1')] }) }), view({ you: self({ play: [] }) }));
+    expect(fromPlay?.steps).toEqual([{ key: 'f1', kind: 'exit', ms: MOTION_MS.trash, delay: 0 }]);
+  });
+
+  it('F5: a card put back on the deck flies to the library, not out', () => {
+    const plan = planFlip(
+      view({ you: self({ hand: [card('t1')], libraryCount: 10 }) }),
+      view({ you: self({ hand: [], libraryCount: 11 }) }),
+    );
+    expect(plan?.steps).toEqual([{ key: 't1', kind: 'fly', ms: MOTION_MS.move, delay: 0, target: ANCHOR_LIBRARY }]);
+  });
+
+  it('F5: a pile top an opponent bought just leaves; the new top fades in', () => {
+    const plan = planFlip(
+      view({ shop: { resource: [], points: [], prophet: [], draft: [pile('x', 3, 'top1')] } }),
+      view({ shop: { resource: [], points: [], prophet: [], draft: [pile('x', 2, 'top2')] } }),
+    );
+    expect(plan?.steps).toEqual([{ key: 'top2', kind: 'fade', ms: MOTION_MS.tick, delay: 0 }]);
+  });
+
+  it('F9: an opponent\'s new play deals from their hand fan, 160ms (MOT-15)', () => {
+    const plan = planFlip(
+      view({ others: [opponent({ play: [card('o1')] })] }),
+      view({ others: [opponent({ play: [card('o1'), card('o2')], handCount: 4 })] }),
+    );
+    expect(plan?.steps).toEqual([{ key: 'o2', kind: 'deal', ms: 160, delay: 0, source: anchorFan('p2') }]);
+    expect(MOTION_MS.play).toBe(160);
   });
 
   it('F6: a view that moved no card plans nothing (a stat tick, a log line)', () => {

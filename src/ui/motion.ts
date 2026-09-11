@@ -299,6 +299,8 @@ export const MOTION_MS = {
   discard: 180,
   /** a card sliding along its own row */
   reorder: 120,
+  /** a card that left for the trash: a fade and shrink where it stood */
+  trash: 140,
   /** the gap between dealt cards, and its cap */
   stagger: 25,
   staggerCap: 125,
@@ -340,6 +342,11 @@ export function settleMs(events: readonly MotionEvent[]): number {
 export const ANCHOR_LIBRARY = 'anchor:library';
 export const ANCHOR_DISCARD = 'anchor:discard';
 
+/** An opponent's hand fan: their plays fly out of it into their tableau. */
+export function anchorFan(player: string): string {
+  return `anchor:fan:${player}`;
+}
+
 /**
  *   slide  the same card, still in its row, moved: translate in place.
  *   fly    the card changed zones: a ghost of its old face flies from where it
@@ -347,8 +354,10 @@ export const ANCHOR_DISCARD = 'anchor:discard';
  *   deal   the card arrived from a hidden zone: a ghost of its new face flies
  *          in from the `source` anchor.
  *   fade   the card arrived with nowhere to fly from: a short fade in place.
+ *   exit   the card left for a zone the table never draws (the trash, set
+ *          aside): a ghost of its old face fades and shrinks where it stood.
  */
-export type FlipKind = 'slide' | 'fly' | 'deal' | 'fade';
+export type FlipKind = 'slide' | 'fly' | 'deal' | 'fade' | 'exit';
 
 export interface FlipStep {
   key: string;
@@ -432,12 +441,40 @@ export function planFlip(prev: GameView | null, next: GameView): FlipPlan | null
   }
 
   // Cards that went into the graveyard underneath its new top card: they fly
-  // to the discard pile and are gone. Anything else that left the table (to the
-  // library, the trash, aside) simply leaves.
+  // to the discard pile and are gone.
   const gyNow = new Set(next.you.gy.map((c) => c.iid));
   for (const [key, from] of before) {
     if (after.has(key) || !gyNow.has(key)) continue;
     steps.push({ key, kind: 'fly', ms: flightMs(from, ANCHOR_DISCARD), delay: 0, target: ANCHOR_DISCARD });
+  }
+
+  // Your cards that left your hand or play for somewhere the table never draws.
+  // The view has no trash zone, so the library count tells the two apart: if it
+  // grew, the card went back on the deck and flies there; otherwise it was
+  // trashed or set aside and fades out where it stood (MOT-15). Pile tops that
+  // leave without landing here (an opponent's buy) just leave; the new top
+  // fades in.
+  const libraryGrew = next.you.libraryCount > prev.you.libraryCount;
+  for (const [key, from] of before) {
+    if (after.has(key) || gyNow.has(key)) continue;
+    if (from !== 'hand' && from !== 'play') continue;
+    if (libraryGrew) steps.push({ key, kind: 'fly', ms: MOTION_MS.move, delay: 0, target: ANCHOR_LIBRARY });
+    else steps.push({ key, kind: 'exit', ms: MOTION_MS.trash, delay: 0 });
+  }
+
+  // An opponent's new plays fly out of their hand fan into their tableau
+  // (MOT-15). Both ends exist only while their seat is expanded; otherwise the
+  // step finds no element and does nothing, and the seat's last-move line cues
+  // the play instead (Opponents.tsx).
+  const prevOthers = new Map(prev.others.map((o) => [o.id, o]));
+  for (const o of next.others) {
+    const was = prevOthers.get(o.id);
+    if (!was) continue;
+    const had = new Set(was.play.map((c) => c.iid));
+    for (const c of o.play) {
+      if (had.has(c.iid)) continue;
+      steps.push({ key: c.iid, kind: 'deal', ms: MOTION_MS.play, delay: 0, source: anchorFan(o.id) });
+    }
   }
 
   return steps.length > 0 ? { steps } : null;

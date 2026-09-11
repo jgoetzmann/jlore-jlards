@@ -32,6 +32,9 @@ import React from 'react';
 import type { CardView, GameView, LogEntry, OpponentView } from '@engine/types';
 import { hidePreview, showPreview } from './preview';
 import { artPlaceholder, artThumbUrl } from './art';
+import { EASE_OUT, MOTION_MS, anchorFan } from './motion';
+import { useOneShot } from './useMotion';
+import { useFlipRef } from './useFlip';
 import './opponents.css';
 
 // ---------------------------------------------------------------------------
@@ -231,8 +234,12 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
   const key = card.art?.key;
   const iid = card.iid;
   React.useEffect(() => () => hidePreview(iid), [iid]);
+  // FLIP registration by instance id, through a ref: nothing in this panel
+  // carries a data-iid attribute, so the DOM still shows no card identities.
+  const flipRef = useFlipRef(iid);
   return (
     <div
+      ref={flipRef}
       className={`seat-card rarity-${card.rarity}${latest ? ' seat-card-top' : ''}`}
       data-testid="seat-card"
       data-card-id={card.defId}
@@ -271,7 +278,9 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
  * Their hand, as it looks from across the table: a fan of backs you can count.
  * Drawn purely from `handCount`; deliberately no `data-iid` on anything.
  */
-function HandFan({ count }: { count: number }): JSX.Element {
+function HandFan({ count, player }: { count: number; player: string }): JSX.Element {
+  // Their plays fly out of here into the tableau (motion.ts anchorFan).
+  const anchorRef = useFlipRef(anchorFan(player));
   const shown = Math.max(0, Math.min(count, 7));
   const backs: JSX.Element[] = [];
   for (let i = 0; i < shown; i++) {
@@ -279,7 +288,7 @@ function HandFan({ count }: { count: number }): JSX.Element {
     backs.push(<span className="seat-back" key={i} style={{ ['--rot']: rot } as React.CSSProperties} />);
   }
   return (
-    <span className="seat-fan" aria-hidden="true">
+    <span className="seat-fan" aria-hidden="true" ref={anchorRef}>
       {backs}
       {count > shown && <span className="seat-fan-more">+{count - shown}</span>}
       {count === 0 && <span className="seat-fan-empty" />}
@@ -334,6 +343,20 @@ const Seat = React.memo(function Seat({
 }): JSX.Element {
   const hue = hueOf(o.name || o.id);
 
+  // A collapsed seat draws no tableau for their plays to fly into, so each new
+  // play nudges the last-move line instead: 160ms, in from the left (MOT-15).
+  const lastRef = React.useRef<HTMLSpanElement>(null);
+  useOneShot(
+    o.play.length,
+    lastRef,
+    [
+      { opacity: 0.3, transform: 'translateX(-8px)' },
+      { opacity: 1, transform: 'none' },
+    ],
+    { duration: MOTION_MS.play, easing: EASE_OUT },
+    (n) => typeof n === 'number' && n > 0,
+  );
+
   const classes = ['opponent', 'seat', 'seat-strip'];
   if (active) classes.push('seat-active');
   if (deciding) classes.push('seat-deciding');
@@ -382,7 +405,7 @@ const Seat = React.memo(function Seat({
           {won && <span className="seat-badge seat-badge-won">winner</span>}
           {o.eliminated && <span className="opponent-elim seat-badge seat-badge-out">eliminated</span>}
         </span>
-        <span className={`seat-last${lastTone ? ` seat-beat-${lastTone}` : ''}`} data-testid="seat-last">
+        <span className={`seat-last${lastTone ? ` seat-beat-${lastTone}` : ''}`} data-testid="seat-last" ref={lastRef}>
           {lastText ?? 'no moves yet'}
           {o.play.length > 0 && <span className="seat-last-play"> · {o.play.length} in play</span>}
         </span>
@@ -445,7 +468,7 @@ function SeatDetail({
 
       <div className="seat-detail-block seat-stacks">
         <div className="seat-stack" title={`${o.handCount} cards in hand — face down to you`}>
-          <HandFan count={o.handCount} />
+          <HandFan count={o.handCount} player={o.id} />
           <span className="seat-stack-label">
             <b>{o.handCount}</b> hand
           </span>
