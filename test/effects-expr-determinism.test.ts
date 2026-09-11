@@ -54,7 +54,8 @@ describe('B28 - expressions are engine-independent', () => {
   test('D2: log agrees with the true natural logarithm to the snap precision', () => {
     const xs = [1e-300, 1e-9, 0.001, 0.3, 0.5, 0.9, 1.0001, 1.5, 2, Math.E, 3, 7, 10, 42, 99.5, 1e3, 12345.678, 1e15, 1e300];
     for (const x of xs) {
-      const got = evaluateExpr(`log(${x})`, {});
+      // Through a variable: the DSL's number literals have no exponent form.
+      const got = evaluateExpr('log(x)', { x });
       expect(Math.abs(got - Math.log(x))).toBeLessThanOrEqual(1e-9);
     }
   });
