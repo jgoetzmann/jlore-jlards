@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import type { GameAction, GameState, GameView, InstanceId, PileId, PlayerId } from '@engine/types';
+import type { CardView, GameAction, GameState, GameView, InstanceId, PileId, PlayerId } from '@engine/types';
 import { makeRoomCode } from '@net/relay';
 import { getSeatId, getSettings, setSettings, loadSnapshot, clearSnapshot } from '@net/storage';
 import { useGame, type GameMode } from './useGame';
@@ -30,7 +30,7 @@ import { KEY_HELP, type KeyIntent } from './keys';
 import { useKeyboard } from './useKeyboard';
 import { ANCHOR_DISCARD, ANCHOR_LIBRARY, MOTION_MS, planFlip } from './motion';
 import { FlipContext, FlipScope, createFlipRegistry, type FlipRegistry } from './useFlip';
-import { useOneShot, usePrefersReducedMotion } from './useMotion';
+import { useIsoLayoutEffect, useOneShot, usePrefersReducedMotion } from './useMotion';
 import { isUsefulPlay, playMoneyPlan, submitsOnPick, turnDone } from './turnflow';
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
@@ -308,6 +308,28 @@ function TurnBanner({
         {label}
         <span className="turn-banner-turn"> · turn {view.turn}</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The in-play chips. They scroll inside their own box, so a long turn can't
+ * spill them over the hand status, and the newest play is scrolled into view.
+ * The scroll happens in this component's layout effect, which runs before the
+ * table's FlipScope measures, so a card flying into play lands on its chip.
+ */
+function StripCards({ cards, registry }: { cards: CardView[]; registry: FlipRegistry }): JSX.Element {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const count = cards.length;
+  useIsoLayoutEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [count]);
+  return (
+    <div className="strip-cards" data-testid="in-play" ref={ref}>
+      {cards.map((c) => (
+        <Card key={c.iid} card={c} variant="chip" elementRef={registry.register(c.iid)} />
+      ))}
     </div>
   );
 }
@@ -789,11 +811,7 @@ export function TableLayout({
                   <span className="strip-label">
                     In play <b>{view.you.play.length}</b>
                   </span>
-                  <div className="strip-cards" data-testid="in-play">
-                    {view.you.play.map((c) => (
-                      <Card key={c.iid} card={c} variant="chip" elementRef={registry.register(c.iid)} />
-                    ))}
-                  </div>
+                  <StripCards cards={view.you.play} registry={registry} />
                   <span
                     className={`hand-status${yourTurn ? ' hand-status-yours' : ''}`}
                     data-testid="hand-status"

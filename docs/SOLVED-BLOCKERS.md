@@ -958,7 +958,7 @@ dock at the bottom of the screen. The page itself never scrolls at laptop sizes.
 | 1366×768 | 2580 | 606–760 | 61 | 720–760 | 2832 → 768 |
 | 1440×900 | 2573 | 738–892 | 61 | 852–892 | 2826 → 900 |
 | 1920×1080 | 1520 | 918–1072 | 61 | 1032–1072 | 1772 → 1080 |
-| 390×844 | 2885 (a hand card was covered by `.table-body`, unclickable) | 240–394, page scrolls | 183 | 474–514 | stacked, nothing overlaps |
+| 390×844 | 2885 (a hand card was covered by `.table-body`, unclickable) | 240–394, page scrolls | 183 | 510–550 (Play money above it since UI-2) | stacked, nothing overlaps |
 
 **What it was.** The table was one normal-flow column: board, then IN PLAY, then
 the hand, with End turn in a turn bar at the top. The page grew to fit the
@@ -1004,7 +1004,11 @@ chip opened, a seat expanded) squeezes it.
 3. **Nothing over anything clickable.** No `position: sticky/fixed/absolute`
    over the board or the dock. The hover preview is `pointer-events: none` and
    sits on the far side of the screen; a prompt panel covers the board region
-   only; somebody else's prompt is a chip, not an overlay; the drawer is a
+   only, and so does the key sheet; somebody else's prompt is a chip, not an
+   overlay. The turn banner and the card-flight layer (`.motion-layer`, UI-2)
+   are fixed but `pointer-events: none`, and a flight ghost is a clone with
+   every `data-testid` / `data-iid` stripped, so it is never hit-tested,
+   clicked or counted as a card (`e2e/interaction.spec.ts`). The drawer is a
    grid column. `.drawer[hidden] { display: none }` must stay: the drawer's own
    `display: flex` beats the browser's `[hidden]` rule and would leave a closed
    drawer holding its 320px column.

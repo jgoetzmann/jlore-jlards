@@ -219,17 +219,21 @@ export function PromptOverlay({
     />
   ));
 
+  // A one-click prompt has nothing to confirm: its options submit themselves,
+  // so a Confirm that could never light up is left out rather than advertised.
   const actions = (
     <div className="prompt-actions">
-      <button
-        type="button"
-        className="prompt-confirm"
-        data-testid="prompt-confirm"
-        disabled={prompt.options.length > 0 && !ready}
-        onClick={() => submit(picked)}
-      >
-        Confirm
-      </button>
+      {(!oneClick || prompt.options.length === 0) && (
+        <button
+          type="button"
+          className="prompt-confirm"
+          data-testid="prompt-confirm"
+          disabled={prompt.options.length > 0 && !ready}
+          onClick={() => submit(picked)}
+        >
+          Confirm
+        </button>
+      )}
       {min === 0 && (
         <button type="button" className="prompt-skip" data-testid="prompt-skip" onClick={() => submit([])}>
           Skip

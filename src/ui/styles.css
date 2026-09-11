@@ -760,6 +760,14 @@ h3 {
   gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
+  /* Its own scroller: a long turn's chips must not spill over the status. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.strip-cards::-webkit-scrollbar {
+  display: none;
 }
 
 .dock-strip .hand-status {
