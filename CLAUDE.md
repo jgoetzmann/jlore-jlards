@@ -7,7 +7,7 @@ Jlore Jlards is a browser deck-builder (Dominion lineage) for 2–4 friends. The
 ## Commands
 
 ```bash
-npm run dev                 # http://localhost:5173; the relay middleware is mounted, so two windows can play multiplayer locally with no Upstash
+npm run dev                 # http://localhost:5173; the relay middleware is mounted, so two browser profiles can play multiplayer locally with no Upstash (one profile shares the jlore_seat cookie, so use e.g. a normal and a private window)
 npm test                    # vitest run (test/**/*.test.ts). Node environment, no DOM: UI tests use renderToStaticMarkup or pure functions
 npx vitest run test/core-view.test.ts      # one file
 npx vitest run -t "B111"                   # tests whose name matches
@@ -23,10 +23,10 @@ npm run replay -- --in=telemetry/bug.json --turn=14                # replay a re
 npm run relay:check         # hit the real Upstash backend using .env credentials
 ```
 
-With `--seed` and no `--turn`, `replay` re-runs the log and exits 1 if the two final states differ, which makes it a live B119 check.
+Without `--in` or `--turn`, `replay` replays the recorded log twice and exits 1 if the two results differ. That checks that replay is self-consistent. It does not compare against the original bot run.
 
 Not in CI:
-- `npm run shots` (`e2e/screenshots.spec.ts`) plays 26 turns, takes about 15 minutes, and writes PNGs into `shots/`.
+- `npm run shots` (`e2e/screenshots.spec.ts`) plays up to 26 turns, takes about 15 minutes, and writes PNGs into `shots/`.
 - `npm run smoke` (`e2e/smoke.spec.ts`) runs against the live deployment (`SMOKE_URL=…` for a preview). It is the only check that catches a deploy missing its Upstash vars.
 - `art:generate` and `art:status` are described under Cards.
 
@@ -69,17 +69,17 @@ B117–B119 and "reject leaves state unchanged" are tested. The import boundary,
 - **Card identity has three levels:** `CardDefinition` (the printed card, in the registry) → per-match variant overrides (Buff/Nerf, elements) → `CardInstance`. Instances live in a central `state.instances` registry, and each records its own `zone`. Player library/hand/gy/play and shop piles hold ordered `InstanceId[]`. There is no trash or aside array: readers scan `state.instances` by zone (`core/zones.ts` `zoneList` returns null for those zones). `field` holds `AuraInstance[]` (SB-32).
 - **Effects are a typed node tree** interpreted by `src/engine/effects/index.ts`. The 55 ops are dispatched from `applyNode`, and implementations live in `effects/ops/*.ts`. Nodes resolve FIFO off a queue, never the JS call stack. Hard limits: `config.effectNodeBudget` nodes per turn, `config.recursionDepth` nesting, and `PROMPT_BUDGET_PER_TURN` (60) in `core/resume.ts` for prompt chains. Hitting any limit fizzles and logs; it never hangs or throws. An unknown op is logged and skipped, so a missing `applyNode` case still compiles.
 - **`{ifPrevious: true}` is inferred from the log.** `runQueue` marks the next queued node as "previous did something" if `state.logSeq` grew while the previous node ran. An op that changes state must log it, or any `ifPrevious` after it reads false.
-- **Two `triggers.ts` files.** `core/triggers.ts` `runEffects` is the one place engine code hands nodes to the interpreter: it applies the depth and budget gates and catches throws. Inside ops, trash, discard and shuffle go through the `effects/triggers.ts` wrappers (`trashWithTrigger`, `discardWithTrigger`, `shuffleWithTrigger`, `fireEvent`), which queue triggers behind the current queue. `core/zones.ts` moves cards without firing anything.
+- **Two `triggers.ts` files.** `core/` code enters the interpreter through `core/triggers.ts` `runEffects`, which adds the depth and budget gates and a try/catch. Meta, systems and effects code call `resolveEffects` directly, so only `reduce`'s catch covers them. Inside ops, trash, discard and shuffle go through the `effects/triggers.ts` wrappers (`trashWithTrigger`, `discardWithTrigger`, `shuffleWithTrigger`, `fireEvent`), which queue triggers behind the current queue. `onWouldTrash` is the exception and resolves immediately. `core/zones.ts` moves cards without firing anything.
 - **Prompts are state:** an op that needs a choice sets `state.pending` and parks the rest of the queue on `state.queue`. The answer comes back as a `resolve` action and `core/resume.ts` continues from there. While `pending` is set, `reduce` rejects every other action type.
-- **Expression strings** (`"floor(uniqueCardsInDeck / 3)"`) go through the recursive-descent evaluator in `engine/expr.ts`. It knows the frozen `EXPR_VARS` list plus what the context supplies: loop vars like `x`, and every player counter by its key, with any `turn:` prefix dropped (`effects/context.ts` `buildVars`). No `eval`. At the table a bad expression reads 0 or false. Every `count(x)`/`countIn(zone, x)` name must be in `NAMED_FILTERS` (`effects/select.ts`): an unknown name silently reads 0, and only `cards:validate` catches it.
-- **Shop (`src/engine/shop/`).** A match offers `config.prophetPileCount` Prophet piles (default 4), sampled one per threshold band from `PROPHET_SHOP_CARD_IDS` in `shop/prophet.ts`. Prophet buys cost no Money and no Buy, only the threshold. A price that reads live state goes in `DYNAMIC_PRICES` (`shop/dynamic.ts`) and must be pure, because `costOf` also runs during rendering and in `legalActions`.
+- **Expression strings** (`"floor(uniqueCardsInDeck / 3)"`) go through the recursive-descent evaluator in `engine/expr.ts`. It knows the frozen `EXPR_VARS` list plus what the context supplies: loop vars like `x`, and every player counter by its key, with any `turn:` prefix dropped (`effects/context.ts` `buildVars`). No `eval`. At the table a bad expression reads 0 or false. Every `count(x)`/`countIn(zone, x)` name must be in `NAMED_FILTERS` (`effects/select.ts`): an unknown name silently reads 0. `cards:validate` and the SB-52 test in `test/audit-regressions.test.ts` catch it.
+- **Shop (`src/engine/shop/`).** A match offers `config.prophetPileCount` Prophet piles (default 4), sampled one per threshold band from `PROPHET_SHOP_CARD_IDS` in `shop/prophet.ts`. Prophet buys cost no Money and no Buy. They need `threshold` Prophet banked, then drain `cost.prophet.drain`. A price that reads live state goes in `DYNAMIC_PRICES` (`shop/dynamic.ts`) and must be pure, because `costOf` also runs during rendering and in `legalActions`.
 - **`src/engine/types.ts` is the shared type surface.** Its header calls it frozen, but new fields and ops are added there. It imports nothing. By convention (not a test), no other file redeclares a name that appears in it.
 
 ### Hidden information
 
 `engine/view.ts` `viewFor(state, player)` decides what each seat is given to render. Libraries (including your own) and opponents' hands appear only as counts. A pending prompt's options go only to the player who must choose. **B111** (in `test/net-host.test.ts`) serializes every published view and asserts no hidden instance id leaks. If you add a field to `GameState` that could carry card identities, decide how `viewFor` treats it. The client (`net/client.ts`) deliberately ignores `snapshot` messages and never holds a `GameState`. The UI (`useGame.ts`) only keeps `GameView`s in React state.
 
-- `secret` values reach only their owner, and only on card faces. Instance `counters` are public to every seat (B24). The log scrub replaces only strings that are hidden instance ids, so any other detail you log reaches every seat. Never log a secret value or a hidden random-branch pick. Today `scoreOnCard` with `secret: true` logs its amount and `random` logs its branch index, which exposes Ascendant Spread's secret VP.
+- `secret` values reach only their owner, and only on card faces. Instance `counters` are public to every seat (B24). The log scrub replaces strings that are hidden instance ids and blanks `defId` on entries that mention one. Any other detail you log reaches every seat. Never log a secret value or a hidden random-branch pick. Today `scoreOnCard` with `secret: true` logs its amount and `random` logs its branch index, which exposes Ascendant Spread's secret VP.
 - `viewFor` limits what a seat renders, not what the relay carries. A GET returns every message regardless of `to`, and the host posts the full `GameState` as a `snapshot` each turn. ARCHITECTURE.md §6 and §8 accept this. B111 audits only `view` messages, so don't write a test that expects the queue itself to be clean.
 - `vp` in `GameView` (`you.vp`, `others[].vp`) is `player.vp`, which holds only VP granted by effects. Printed and accrued card VP is counted only by the scorers (`core/scoring.ts`, and `meta/scoring.ts` `liveVp` for win conditions), so the VP stat in the UI is not the score. Don't publish a scorer's total for opponents as-is: it sums their hidden library and hand plus `secret` VP.
 
@@ -95,13 +95,13 @@ Messages use the envelope `{seq, from, to?, kind: 'intent'|'view'|'hello'|'snaps
   - Presence is a `hello` that clients repeat every 4s. The host drops a seat after 20s of silence.
   - The roster is a broadcast `view` (no `to`) carrying a `LobbyPayload`. `isLobbyPayload` and the client's `isView` must stay mutually exclusive (`test/net-lobby.test.ts`).
   - `startHost(relay, state, {seats, since})` binds seats to `playerOrder` before it reads any message, then polls from the lobby's cursor.
-- **Seat identity** is the token in the `jlore_seat` cookie. It is the `from` of every message, and the host maps it to a `PlayerId`, so a refresh reclaims the same seat. Whether `#CODE` hosts or joins is decided per tab: `App.tsx` hosts only when this tab's sessionStorage `jlore_open_lobbies` lists the code, and that entry is dropped once cards are dealt. So a host who reloads mid-match comes back as a joiner. They must resume from the snapshot on the start screen, which opens a new room code.
+- **Seat identity** is the token in the `jlore_seat` cookie. It is the `from` of every client message, and the host maps it to a `PlayerId`, so a refresh reclaims the same seat. Whether `#CODE` hosts or joins is decided per tab: `App.tsx` hosts only when this tab's sessionStorage `jlore_open_lobbies` lists the code, and that entry is dropped once cards are dealt. So a host who reloads mid-match comes back as a joiner. They must resume from the snapshot on the start screen, which opens a new room code.
 - **The memory-fallback trap.** The relay falls back to an in-memory store when the Upstash vars are missing, when the URL is not `https://`, or when `new Redis()` throws. That's why e2e and dev need no credentials, and why a green test suite proves nothing about the live backend. On Vercel it silently breaks multiplayer, because serverless instances don't share memory, yet every request still returns 200. Diagnose it three ways:
   - the `x-jlore-store: redis|memory` response header, which says which store answered
   - `relay:check`, which checks the credentials
   - `npm run smoke`, which checks the deployment
 
-  Use the Upstash **REST** URL (`https://…`), not the `redis://` one, and paste env values without quotes (a quoted URL throws `UrlError`). The Redis `RoomStore` adapter is copy-pasted in `api/room/[code].ts`, `src/relay/devMiddleware.ts`, and `tools/relay-check.ts`, so change all three together.
+  Use the Upstash **REST** URL (`https://…`), not the `redis://` one. The function and `relay:check` strip pasted quotes, but `devMiddleware` does not: a quoted URL there silently drops to the memory store. The Redis `RoomStore` adapter is copy-pasted in `api/room/[code].ts`, `src/relay/devMiddleware.ts`, and `tools/relay-check.ts`, so change all three together.
 
 ### Cards
 
@@ -117,7 +117,7 @@ Keep plain stat lines in `stats` (`{money, buys, actions, cards, vp, prophet}`) 
 - `KNOWN_OPS` in `tools/validate-cards.ts`
 - `IMPLEMENTED_OPS` in `test/catalog-integrity.test.ts` (B96)
 
-**Art.** Write every card's art slot exactly as `art: { key: '<id>', status: 'placeholder' }`. The art tools work like this:
+**Art.** Give a new card `art: { key: '<id>', status: 'placeholder' }`. `art:status` rewrites it to `final` with an artist credit once the jpg exists. Existing slots may also carry `anim`. The art tools work like this:
 - `npm run art:generate` builds one prompt per card and aura from catalog data plus a fixed house style (`tools/gen-art.ts`). No prompt is hand-written. `tools/art_render.py` then renders locally with Python and torch/diffusers (CUDA, or very slowly on CPU; `$PYTHON` picks the interpreter) into `public/art/<key>.jpg`. It renders only keys with no file unless you pass `--force`. Seeds are a hash of the key. `--reroll=<key>` bumps that key's salt in `tools/art-seeds.json`, so commit the bump with the jpg.
 - `npm run art:status` does a literal text replace across `src/cards/**`, turning `placeholder` into `final` with an artist credit. It writes nothing while any key lacks a jpg; `--check` only verifies.
 
