@@ -20,6 +20,7 @@
     "art:manifest": "tsx tools/art-manifest.ts",
     "art:generate": "tsx tools/gen-art.ts",
     "art:status": "tsx tools/art-status.ts",
+    "art:thumbs": "python tools/art_thumbs.py",
     "replay": "tsx tools/replay.ts",
     "relay:check": "tsx tools/relay-check.ts",
     "e2e": "playwright test --grep-invert \"visual record|production smoke|latency probe\"",
