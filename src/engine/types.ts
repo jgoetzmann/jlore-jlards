@@ -759,6 +759,15 @@ export interface WinConditionConfig {
 export interface MatchConfig {
   playerCount: number;
   draftPileCount: number;
+  /**
+   * How many Prophet Shop piles a match offers. The catalog holds 23
+   * purchasable Prophet cards and a match samples this many, so the Prophet
+   * track is a board you read rather than a menu you scroll.
+   *
+   * Optional so existing configs keep working; the shop builder supplies the
+   * default.
+   */
+  prophetPileCount?: number;
   /** Chance an anomaly rolls at match start. */
   anomalyChance: number;
   winCondition: WinConditionConfig;
