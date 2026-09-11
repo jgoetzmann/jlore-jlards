@@ -946,47 +946,85 @@ Caveat: these come from the greedy bot, which buys the most expensive affordable
 card and does not build archetypes. Read it as "which cards are reachable and
 obviously good", not as human play.
 
-### SB-63. The player's hand sits below the fold — **UNRESOLVED**
+### SB-63. The player's hand sits below the fold — **RESOLVED**
 
-The one entry in this file that is *not* solved. Recorded so it is not
-rediscovered from scratch.
+**Resolved** in the smooth-play UI pass: the table is one viewport-bound grid,
+and the hand, the Money / Buys / Actions readout and End turn sit together in a
+dock at the bottom of the screen. The page itself never scrolls at laptop sizes.
 
-**The problem.** The Prophet Shop holds all 23 cards every match (SB-14: they
-are threshold-gated, not supply-gated), and the table grows to fit its tallest
-column. At a 1600×1000 viewport the page runs about **3740px**, so IN PLAY and
-the hand sit roughly 2700px below the fold. A player cannot see their own cards
-and the shop at the same time, which is most of what playing consists of.
+| viewport | hand top, before (d820ca0) | hand, after | End turn, before | End turn, after | page height before → after |
+|---|---|---|---|---|---|
+| 1280×720 | (not measured; ≈ as 1366) | 558–712 | 61 | 672–712 | → 720 |
+| 1366×768 | 2580 | 606–760 | 61 | 720–760 | 2832 → 768 |
+| 1440×900 | 2573 | 738–892 | 61 | 852–892 | 2826 → 900 |
+| 1920×1080 | 1520 | 918–1072 | 61 | 1032–1072 | 1772 → 1080 |
+| 390×844 | 2885 (a hand card was covered by `.table-body`, unclickable) | 240–394, page scrolls | 183 | 474–514 | stacked, nothing overlaps |
 
-**Update:** SB-14 has since been re-decided — the Prophet Shop now offers **4
-sampled piles**, not all 23 — so the tallest column is the 10-pile Draft Shop
-and the measurement above no longer describes the page. That removes the *cause*
-of the overflow, and quite possibly the symptom, but it does not make the layout
-correct: a 10-pile column at a short viewport still pushes the hand down, and
-the two-pane fix below is still the right shape. **Re-measure before doing any
-of it** — the numbers in this entry are from the 23-pile board.
+**What it was.** The table was one normal-flow column: board, then IN PLAY, then
+the hand, with End turn in a turn bar at the top. The page grew to fit the
+tallest shop column. The entry used to blame the 23-pile Prophet Shop; after
+SB-14 cut it to 4 piles the real cause was the **10-pile Draft column at one
+pile per row** (132px piles in 220–239px columns, ≈2270px tall below a ~1573px
+viewport).
 
-**Two fixes tried, both reverted, both worse than the problem:**
+**Why the two earlier attempts failed** (corrected diagnosis). The idea was
+never wrong; the budget was.
 
-| Attempt | Why it failed |
+| Attempt | What actually broke |
 |---|---|
-| Pin the table to `100vh`, give each shop column its own scroll | Clipping a column leaves a clipped pile's Buy button at layout coordinates outside the visible area — under IN PLAY, where no click reaches it. The button reports visible, enabled and stable while another element takes the pointer. |
-| Keep the page tall, make `.hand` `position: sticky; bottom: 0` | A sticky footer covers whatever is at the viewport bottom, so the hand swallowed clicks aimed at the board beneath it. |
+| bb23919: `100vh`, each shop column scrolls | About 530–700px of *rigid* content (head, turn bar, a 206px IN PLAY row, a ≈230px hand) shared a 720px viewport with a shrinkable board, leaving the shop columns 0–90px tall. Once the Coppers were played IN PLAY grew and the Buy buttons sat under it. |
+| 0745fb7: `.hand { position: sticky; bottom: 0 }` | A sticky footer over the board swallowed clicks aimed at the piles beneath it. |
 
-Both traded a layout that is *visible but awkward* for one that is *invisibly
-unclickable*, which is strictly worse — the first costs a scroll, the second
-costs a move the player cannot make and cannot diagnose.
+**What the layout is.** `src/ui/App.tsx` `TableLayout`:
 
-**What it actually needs:** a real two-pane design — a board region that owns its
-own scroll and a hand region outside that region, as siblings, rather than CSS
-bolted onto a single-column table from the outside. That is a component change
-in `App.tsx`'s `Table`, not a stylesheet change, and it wants doing by whoever
-owns the UI.
+```
+.table  height 100dvh; grid
+  top     auto            topbar: brand, seat switch, whose turn, clock, anomaly chip, waiting chip, drawer toggle
+  seats   auto            opponents strip; a seat expands its tableau in flow
+  board   minmax(0, 1fr)  .board-region, the ONLY scroll container for piles
+  dock    auto            deck/discard | in-play strip (or prompt bar) + hand | stats, Play money, End turn
+  drawer  right column    graveyard + log; closed by default below 1600px wide
+```
 
-**If you attempt it, the regression test already exists:** `npm run e2e` catches
-both failure modes. The clipping version fails `B5` on an unreachable Buy button;
-the sticky version fails the screenshot run with `<div class="hand"> intercepts
-pointer events`. Neither shows up in the unit suite, and neither is visible in a
-screenshot — the layout looks *better* in both broken versions.
+Shop piles are 98px `mini` tiles in wrapping flex rows, so at 1280–1366 the
+Resource, Points and Prophet shops share one row and the Draft shop takes a
+second; the board region scrolls internally only when something (an anomaly
+chip opened, a seat expanded) squeezes it.
+
+**Rules that keep it resolved.**
+
+1. **Budget the rigid rows.** Topbar + opponents strip + dock must leave the
+   board region room for at least one whole shop row (tile + heading), at
+   1280×720. Today that is 44 + 66 + 210 against 720. The dock's height is set
+   by its 142px dock cards: new controls go into the strip row or the stat
+   cluster, never a new dock row.
+2. **One scroll container for piles.** Every pile is an in-flow descendant of
+   `.board-region` (a `minmax(0, 1fr)` row), with no `overflow: hidden` between
+   them and no per-shop scrolling.
+3. **Nothing over anything clickable.** No `position: sticky/fixed/absolute`
+   over the board or the dock. The hover preview is `pointer-events: none` and
+   sits on the far side of the screen; a prompt panel covers the board region
+   only; somebody else's prompt is a chip, not an overlay; the drawer is a
+   grid column. `.drawer[hidden] { display: none }` must stay: the drawer's own
+   `display: flex` beats the browser's `[hidden]` rule and would leave a closed
+   drawer holding its 320px column.
+4. **Shops are wrapping flex, not `repeat(auto-fill, …)`.** An auto-fill grid
+   has no definite width during intrinsic sizing, so each `flex: 0 1 auto` shop
+   collapses to one tile wide and the Draft column is 10 rows tall again.
+5. **Each `stat-*` test id exists once** (only `StatCluster` renders a `Stat`).
+6. **Phone width (< 700px)** stacks the regions and lets the page scroll —
+   still with nothing overlaid.
+
+**The regression tests.** `e2e/layout.spec.ts` (part of `npm run e2e`): at
+1280×720 and 1366×768 the page does not scroll; the hand, every hand card, the
+three stats and End turn are inside the viewport and hit-testable; every pile's
+Buy is hit-testable with `document.elementFromPoint` after scrolling the board
+region — at the start of the turn, after the Coppers are played and after a buy
+(both reverted attempts only broke once IN PLAY had grown); the row budget is
+checked against measured `boundingBox()` heights; the hover preview and the
+open drawer take no pointer; and at 390px the regions stack without
+overlapping and every Buy is reachable. `test/ui-layout.test.ts` pins the pure
+parts (prompt placement, every region and stat rendered once).
 
 ---
 

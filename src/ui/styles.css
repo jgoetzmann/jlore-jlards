@@ -1001,6 +1001,12 @@ h3 {
   border-left: 1px solid var(--line);
 }
 
+/* `display: flex` above beats the UA's `[hidden] { display: none }`, which
+   would leave a closed drawer holding its 320px column. */
+.drawer[hidden] {
+  display: none;
+}
+
 .drawer-count {
   color: var(--ink);
 }
@@ -1452,6 +1458,11 @@ h3 {
   display: none;
 }
 
+/* An unaffordable tile is still a card you are reading. */
+.card-mini.card-disabled {
+  opacity: 0.78;
+}
+
 .card-mini .card-name {
   font-size: 11px;
   line-height: 1.2;
@@ -1497,8 +1508,9 @@ h3 {
   text-overflow: ellipsis;
 }
 
-/* preview: the hover layer (LAY-6). Never takes the pointer. */
-.card-preview {
+/* preview: the hover layer (LAY-6). Never takes the pointer. The layer is
+   `.card-preview-layer`; `.card-preview` is the Card variant inside it. */
+.card-preview-layer {
   position: fixed;
   z-index: 50;
   width: 250px;
@@ -1507,7 +1519,7 @@ h3 {
   filter: drop-shadow(0 14px 30px rgb(0 0 0 / 60%));
 }
 
-.card-preview .card {
+.card-preview-layer .card {
   width: 100%;
   padding: 10px;
   gap: 6px;
@@ -1515,40 +1527,40 @@ h3 {
   border-color: #46506a;
 }
 
-.card-preview .card-name {
+.card-preview-layer .card-name {
   font-size: 15px;
 }
 
-.card-preview .card-cost {
+.card-preview-layer .card-cost {
   font-size: 15px;
 }
 
-.card-preview .card-art {
+.card-preview-layer .card-art {
   height: 140px;
 }
 
-.card-preview .card-typeline {
+.card-preview-layer .card-typeline {
   font-size: 11.5px;
 }
 
-.card-preview .card-stats {
+.card-preview-layer .card-stats {
   font-size: 13px;
 }
 
-.card-preview .card-text {
+.card-preview-layer .card-text {
   font-size: 12.5px;
   line-height: 1.4;
   max-height: none;
   overflow: visible;
 }
 
-.card-preview .keyword-chip,
-.card-preview .counter-chip {
+.card-preview-layer .keyword-chip,
+.card-preview-layer .counter-chip {
   font-size: 11px;
 }
 
 @media (hover: none) {
-  .card-preview {
+  .card-preview-layer {
     display: none;
   }
 }

@@ -17,7 +17,10 @@ export function CardPreview(): JSX.Element | null {
     maxHeight: `calc(100dvh - ${Math.round(state.top) + 12}px)`,
   };
   return (
-    <div className={`card-preview card-preview-${state.side}`} aria-hidden="true" style={style}>
+    // `card-preview-layer`, not `card-preview`: the inner Card's `preview`
+    // variant already carries `card-preview`, and sharing the class made the
+    // face itself `position: fixed`.
+    <div className={`card-preview-layer card-preview-${state.side}`} aria-hidden="true" style={style}>
       <Card card={state.card} variant="preview" testId="card-preview" />
     </div>
   );
