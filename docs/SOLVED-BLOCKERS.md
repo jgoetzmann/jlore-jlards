@@ -958,7 +958,7 @@ dock at the bottom of the screen. The page itself never scrolls at laptop sizes.
 | 1366×768 | 2580 | 606–760 | 61 | 720–760 | 2832 → 768 |
 | 1440×900 | 2573 | 738–892 | 61 | 852–892 | 2826 → 900 |
 | 1920×1080 | 1520 | 918–1072 | 61 | 1032–1072 | 1772 → 1080 |
-| 390×844 | 2885 (a hand card was covered by `.table-body`, unclickable) | 240–394, page scrolls | 183 | 510–550 (Play money above it since UI-2) | stacked, nothing overlaps |
+| 390×844 | 2885 (a hand card was covered by `.table-body`, unclickable) | 240–394, page scrolls | 183 | 476–516 (UI-2: Play money above it; an anomaly chip that wraps the topbar pushes it down ~35px) | stacked, nothing overlaps |
 
 **What it was.** The table was one normal-flow column: board, then IN PLAY, then
 the hand, with End turn in a turn bar at the top. The page grew to fit the
