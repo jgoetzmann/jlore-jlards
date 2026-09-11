@@ -308,6 +308,8 @@ export interface LobbyHostOptions {
   /** The host's own seat token. It is member one, and it is never pruned. */
   hostSeat: string;
   hostName: string;
+  /** The host's own codex, carried into the deal like everyone else's. */
+  hostCodex?: CardDefId[];
   seatCap?: number;
   /** Called with every roster the host publishes, including the first. */
   onRoster?: (roster: LobbyPayload) => void;
@@ -321,6 +323,12 @@ export interface LobbyHandoff {
   seats: string[];
   /** Their names, same order. */
   names: string[];
+  /**
+   * Their codexes, same order, from the first hello each of them sent. The
+   * lockstep deal needs every seat's own codex up front: nobody gets to fold
+   * one in afterwards, because there is no host state to fold it into.
+   */
+  codexes: CardDefId[][];
   /** Relay cursor the match's host should start polling from. */
   since: number;
 }
@@ -341,6 +349,23 @@ interface LobbyMemberRecord {
   name: string;
   host: boolean;
   seen: number;
+  codex: CardDefId[];
+}
+
+/** A hello's codex, if it carried one: strings only, bounded. */
+function helloCodex(payload: unknown): CardDefId[] | null {
+  if (payload === null || typeof payload !== 'object') return null;
+  const codex = (payload as HelloPayload).codex;
+  if (!Array.isArray(codex)) return null;
+  const out: CardDefId[] = [];
+  const seen = new Set<string>();
+  for (const id of codex) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 64 || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= 4000) break;
+  }
+  return out;
 }
 
 function helloName(payload: unknown): string {
@@ -371,7 +396,13 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
   let frozenSeats: string[] = [];
 
   const members: LobbyMemberRecord[] = [
-    { seat: options.hostSeat, name: hostName, host: true, seen: now() },
+    {
+      seat: options.hostSeat,
+      name: hostName,
+      host: true,
+      seen: now(),
+      codex: (options.hostCodex ?? []).slice(),
+    },
   ];
 
   /** Seats the room had no room for, and when each last asked. */
@@ -432,9 +463,11 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       if (typeof seat !== 'string' || seat.length === 0 || seat === HOST_FROM) continue;
 
       const name = helloName(msg.payload);
+      const codex = helloCodex(msg.payload);
       const existing = members.find((m) => m.seat === seat);
       if (existing) {
         existing.seen = now();
+        if (codex && codex.length > 0) existing.codex = codex;
         if (name && existing.name !== name) {
           existing.name = name;
           changed = true;
@@ -450,7 +483,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
         continue;
       }
       turnedAway.delete(seat);
-      members.push({ seat, name: name || 'Navigator', host: false, seen: now() });
+      members.push({ seat, name: name || 'Navigator', host: false, seen: now(), codex: codex ?? [] });
       changed = true;
     }
 
@@ -496,6 +529,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       started = true;
       frozenSeats = seated.map((m) => m.seat);
       const names = seated.map((m) => m.name);
+      const codexes = seated.map((m) => m.codex.slice());
       // The last thing the room hears from the lobby. A browser that opens the
       // link from here on reads this and knows the match is already dealt, and
       // whether it was dealt with them in it.
@@ -504,7 +538,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       clearTimers();
       loop.stop();
       stopped = true;
-      return { seats: frozenSeats.slice(), names, since };
+      return { seats: frozenSeats.slice(), names, codexes, since };
     },
   };
 }

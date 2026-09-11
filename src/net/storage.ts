@@ -131,33 +131,72 @@ function writeJson(key: string, value: unknown): void {
   }
 }
 
+/**
+ * The codex lives in memory once read. It used to be parsed out of
+ * localStorage twice for every view that arrived (STORE-1); now a seen card is
+ * a Set insert, and the write-back is debounced and happens off the click path.
+ */
+let codexList: CardDefId[] | null = null;
+let codexSet: Set<string> | null = null;
+let codexFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let codexListening = false;
+export const CODEX_FLUSH_MS = 2000;
+
+function loadCodex(): { list: CardDefId[]; set: Set<string> } {
+  if (codexList && codexSet) return { list: codexList, set: codexSet };
+  const raw = readJson<unknown>(CODEX_KEY, []);
+  const list: CardDefId[] = [];
+  const set = new Set<string>();
+  if (Array.isArray(raw)) {
+    for (const id of raw) {
+      if (typeof id !== 'string' || set.has(id)) continue;
+      set.add(id);
+      list.push(id);
+    }
+  }
+  codexList = list;
+  codexSet = set;
+  return { list, set };
+}
+
+/** Write the in-memory codex out now. Also runs on pagehide. */
+export function flushCodex(): void {
+  if (codexFlushTimer) clearTimeout(codexFlushTimer);
+  codexFlushTimer = null;
+  if (codexList) writeJson(CODEX_KEY, codexList);
+}
+
+function scheduleCodexFlush(): void {
+  if (!codexListening && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    codexListening = true;
+    window.addEventListener('pagehide', flushCodex);
+  }
+  if (codexFlushTimer) return;
+  codexFlushTimer = setTimeout(flushCodex, CODEX_FLUSH_MS);
+}
+
 /** The set of card ids this device has ever seen. Feeds Known Universe pools. */
 export function getCodex(): CardDefId[] {
-  const raw = readJson<unknown>(CODEX_KEY, []);
-  if (!Array.isArray(raw)) return [];
-  const out: CardDefId[] = [];
-  const seen = new Set<string>();
-  for (const id of raw) {
-    if (typeof id !== 'string' || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
+  return loadCodex().list.slice();
+}
+
+/** Record cards as seen. Cheap: a Set insert, and a debounced write. */
+export function noteSeenCards(ids: CardDefId | CardDefId[]): void {
+  const incoming = Array.isArray(ids) ? ids : [ids];
+  const { list, set } = loadCodex();
+  let changed = false;
+  for (const id of incoming) {
+    if (typeof id !== 'string' || id.length === 0 || set.has(id)) continue;
+    set.add(id);
+    list.push(id);
+    changed = true;
   }
-  return out;
+  if (changed) scheduleCodexFlush();
 }
 
 export function addToCodex(ids: CardDefId | CardDefId[]): CardDefId[] {
-  const incoming = Array.isArray(ids) ? ids : [ids];
-  const current = getCodex();
-  const seen = new Set(current);
-  let changed = false;
-  for (const id of incoming) {
-    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
-    seen.add(id);
-    current.push(id);
-    changed = true;
-  }
-  if (changed) writeJson(CODEX_KEY, current);
-  return current;
+  noteSeenCards(ids);
+  return getCodex();
 }
 
 export function getSettings(): Settings {
