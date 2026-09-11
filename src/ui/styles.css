@@ -1577,8 +1577,8 @@ h3 {
 }
 
 .prompt-bar .prompt-title {
-  flex: 0 1 auto;
-  max-width: 280px;
+  flex: 0 0 auto;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;
@@ -1594,9 +1594,14 @@ h3 {
   color: var(--ink-dim);
 }
 
+/* One line: the strip row is 36px, so the chips scroll sideways instead of
+   wrapping onto a second line that would spill over the hand. */
 .prompt-bar .prompt-options {
   display: flex;
   flex: 1 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  margin: 0;
   min-width: 0;
   gap: 4px;
   overflow-x: auto;
