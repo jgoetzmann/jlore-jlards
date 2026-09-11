@@ -23,7 +23,13 @@
  *   snapshot  jlore-check/1   the authority's checksum at a turn boundary.
  *   snapshot  jlore-resync/1  "my state disagrees, send me yours".
  *   snapshot  jlore-state/1   the authority's state, for one client that could
- *                             not rebuild its way back into agreement.
+ *                             not rebuild its way back into agreement. Whole
+ *                             when it fits one post, else in parts.
+ *
+ * A client that replays the room (a reload) holds its own posts until it has
+ * read up to where the room ended when it started, then drops the ones the
+ * list already holds: no checksum for a past turn, no second answer to a
+ * resync (NET-R2).
  *
  * Optimistic apply: `propose` reduces the action onto the predicted state right
  * away and returns the payload to post. When that intent comes back in order
@@ -66,6 +72,14 @@ export const MAX_BATCH = 64;
 
 /** The relay caps a message at 256KB; a state we post must fit under it. */
 const MAX_STATE_POST_CHARS = 240 * 1024;
+/**
+ * A state too big for one post goes in parts of this many characters of its
+ * JSON. The part is itself a JSON string inside the envelope, so its escaping
+ * roughly doubles it at worst: still well under the relay's cap.
+ */
+const STATE_CHUNK_CHARS = 64 * 1024;
+/** More parts than this (about 2MB of state) is not a state worth posting. */
+const MAX_STATE_PARTS = 32;
 
 export interface StartPlayer {
   id: PlayerId;
@@ -114,7 +128,12 @@ export interface StatePayload {
   tag: typeof STATE_TAG;
   /** The state is the fold of every message with seq < at. */
   at: number;
-  state: GameState;
+  /** The whole state, when it fits in one post. */
+  state?: GameState;
+  /** Otherwise part `part` (0-based) of `parts` slices of its JSON. */
+  part?: number;
+  parts?: number;
+  data?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +347,16 @@ export interface CoreOptions {
   reduce?: ReduceFn;
   /** Where a loud desync report goes. Defaults to console.error. */
   report?: (message: string) => void;
+  /**
+   * Messages with seq <= this were in the room before this client started
+   * reading it. Anything this client would post in answer to them (a checksum
+   * for a past turn, an answer to a resync someone already got) is history and
+   * is not posted again (NET-R2). `null` means "not known yet": outgoing posts
+   * are held until `setHistoryThrough` says where history ends. Default 0.
+   */
+  historyThrough?: number | null;
+  /** Tests: the largest state posted whole; bigger ones go in parts. */
+  maxStatePostChars?: number;
 }
 
 const KEEP_SUMS = 64;
@@ -338,6 +367,18 @@ export class LockstepCore {
   private readonly checks: boolean;
   private readonly noncePrefix: string;
   private readonly report: (message: string) => void;
+  private readonly maxStatePostChars: number;
+
+  /** See `CoreOptions.historyThrough`. */
+  private historyThrough: number | null;
+  /** Outgoing posts held while history is still being replayed. */
+  private held: Outgoing[] = [];
+  /** RESYNC seqs the authority has already answered with a STATE in the list. */
+  private readonly answered = new Set<number>();
+  /** Checksums at or below this seq were evicted: a CHECK for one is unknowable. */
+  private sumsFloor = 0;
+  /** A state arriving in parts, by its `at`. */
+  private readonly stateParts = new Map<number, (string | undefined)[]>();
 
   private start: StartPayload | null = null;
   /** Relay seq of the start message, or 0 while it is only known locally. */
@@ -371,6 +412,92 @@ export class LockstepCore {
       ((m: string) => {
         console.error(m);
       });
+    this.historyThrough = opts.historyThrough === undefined ? 0 : opts.historyThrough;
+    this.maxStatePostChars = opts.maxStatePostChars ?? MAX_STATE_POST_CHARS;
+  }
+
+  /** Seq of the last message this core has read. */
+  lastSeen(): number {
+    return this.lastSeq;
+  }
+
+  /** Waiting for the authority to send its state. */
+  awaiting(): boolean {
+    return this.awaitingState;
+  }
+
+  /**
+   * Where the room's history ends (its length when this client started). Posts
+   * held until now are released, minus the ones history already contains.
+   */
+  setHistoryThrough(seq: number): Outgoing[] {
+    this.historyThrough = seq > 0 ? seq : 0;
+    return this.release([]);
+  }
+
+  /** Still waiting on a state: ask again (the authority may have been away). */
+  nudge(): Outgoing[] {
+    if (!this.awaitingState) return [];
+    return this.release([{ kind: 'snapshot', payload: { tag: RESYNC_TAG, at: this.lastSeq } }]);
+  }
+
+  private release(out: Outgoing[]): Outgoing[] {
+    if (this.historyThrough === null || this.lastSeq < this.historyThrough) {
+      for (const o of out) this.held.push(o);
+      return [];
+    }
+    const all = this.held.length > 0 ? this.held.concat(out) : out;
+    this.held = [];
+    return all.length > 0 ? this.prune(all) : all;
+  }
+
+  /**
+   * Drop what the list already has. A CHECK for a turn boundary inside history
+   * was posted when that turn happened. A STATE goes only to a RESYNC nobody
+   * has answered, and only the newest one per requester. A RESYNC goes only if
+   * this client is still waiting (a STATE in history may have settled it).
+   */
+  private prune(all: Outgoing[]): Outgoing[] {
+    const history = this.historyThrough ?? 0;
+    const newestFor = new Map<string, number>();
+    for (const o of all) {
+      if (o.payload.tag === STATE_TAG && o.to !== undefined) {
+        newestFor.set(o.to, Math.max(newestFor.get(o.to) ?? 0, o.payload.at));
+      }
+    }
+    const keep: Outgoing[] = [];
+    let resync = false;
+    for (const o of all) {
+      const p = o.payload;
+      if (p.tag === CHECK_TAG) {
+        if (p.at > history) keep.push(o);
+      } else if (p.tag === RESYNC_TAG) {
+        if (this.awaitingState && !resync) {
+          resync = true;
+          keep.push(o);
+        }
+      } else if (p.tag === STATE_TAG) {
+        if (this.answered.has(p.at)) continue;
+        if (o.to !== undefined && newestFor.get(o.to) !== p.at) continue;
+        keep.push(o);
+      }
+    }
+    return keep;
+  }
+
+  private recordSum(seq: number, sum: string): void {
+    this.sums.set(seq, sum);
+    while (this.sums.size > KEEP_SUMS) {
+      const oldest = this.sums.keys().next().value;
+      if (oldest === undefined) break;
+      this.sums.delete(oldest);
+      if (oldest > this.sumsFloor) this.sumsFloor = oldest;
+    }
+  }
+
+  private clearSums(): void {
+    this.sums.clear();
+    this.sumsFloor = 0;
   }
 
   // ---- reading ----
@@ -506,7 +633,7 @@ export class LockstepCore {
       this.lastSeq = msg.seq;
       this.one(msg, out);
     }
-    return out;
+    return this.release(out);
   }
 
   private one(msg: RelayMessage, out: Outgoing[]): void {
@@ -576,11 +703,7 @@ export class LockstepCore {
   private turnBoundary(seq: number, out: Outgoing[]): void {
     if (!this.confirmed) return;
     const sum = stateChecksum(this.confirmed);
-    this.sums.set(seq, sum);
-    if (this.sums.size > KEEP_SUMS) {
-      const oldest = this.sums.keys().next().value;
-      if (oldest !== undefined) this.sums.delete(oldest);
-    }
+    this.recordSum(seq, sum);
     if (this.checks && this.isAuthority()) {
       out.push({
         kind: 'snapshot',
@@ -626,6 +749,10 @@ export class LockstepCore {
       const p = msg.payload as Partial<CheckPayload>;
       if (typeof p.at !== 'number' || typeof p.sum !== 'string') return;
       if (p.at <= this.baseSeq || p.at <= this.startSeq) return;
+      // A boundary whose checksum was evicted (KEEP_SUMS) cannot be compared.
+      // It is not evidence of drift; treating it as such rebuilt the whole
+      // match for every old check a reloading host re-posted (NET-R2).
+      if (p.at <= this.sumsFloor || p.at > this.lastSeq) return;
       const mine = this.sums.get(p.at);
       if (mine === p.sum) return;
       this.mismatch(p.at, p.sum, out);
@@ -634,24 +761,81 @@ export class LockstepCore {
 
     if (tag === RESYNC_TAG) {
       if (!this.checks || !this.isAuthority() || msg.from === authority) return;
+      if (this.answered.has(msg.seq)) return;
       // Our confirmed state is exactly the fold of everything below this seq.
-      const state = trimForWire(this.confirmed);
-      const payload: StatePayload = { tag: STATE_TAG, at: msg.seq, state };
-      if (JSON.stringify(payload).length > MAX_STATE_POST_CHARS) {
-        this.report('lockstep: a client asked for the full state, and it is too large to post.');
-        return;
+      for (const payload of this.statePosts(msg.seq, trimForWire(this.confirmed))) {
+        out.push({ kind: 'snapshot', to: msg.from, payload });
       }
-      out.push({ kind: 'snapshot', to: msg.from, payload });
       return;
     }
 
     if (tag === STATE_TAG) {
-      if (msg.from !== authority || this.isAuthority()) return;
+      const p = msg.payload as Partial<StatePayload>;
+      if (msg.from !== authority || typeof p.at !== 'number') return;
+      this.answered.add(p.at);
+      if (this.isAuthority()) return;
       if (msg.to === undefined || !this.localSeats.has(msg.to)) return;
       if (!this.awaitingState) return;
-      const p = msg.payload as Partial<StatePayload>;
-      if (typeof p.at !== 'number' || !p.state || typeof p.state !== 'object') return;
-      this.adoptState(p.at, p.state);
+      if (p.state && typeof p.state === 'object') {
+        this.adoptState(p.at, p.state);
+        return;
+      }
+      const whole = this.collectPart(p);
+      if (whole) this.adoptState(p.at, whole);
+    }
+  }
+
+  /** One STATE post, or several parts when the state is too big for one. */
+  private statePosts(at: number, state: GameState): StatePayload[] {
+    const json = JSON.stringify(state);
+    if (json.length + 64 <= this.maxStatePostChars) {
+      return [{ tag: STATE_TAG, at, state }];
+    }
+    const chunk = Math.min(STATE_CHUNK_CHARS, Math.max(1024, Math.floor(this.maxStatePostChars / 2)));
+    const parts = Math.ceil(json.length / chunk);
+    if (parts > MAX_STATE_PARTS) {
+      this.report(
+        `lockstep: a client asked for the full state, and at ${json.length} characters it is too large to send even in parts.`,
+      );
+      return [];
+    }
+    const out: StatePayload[] = [];
+    for (let i = 0; i < parts; i++) {
+      out.push({ tag: STATE_TAG, at, part: i, parts, data: json.slice(i * chunk, (i + 1) * chunk) });
+    }
+    return out;
+  }
+
+  /** File one part; the whole state once every part is in. */
+  private collectPart(p: Partial<StatePayload>): GameState | null {
+    const at = p.at as number;
+    const parts = p.parts;
+    const part = p.part;
+    if (
+      typeof parts !== 'number' ||
+      typeof part !== 'number' ||
+      typeof p.data !== 'string' ||
+      parts < 1 ||
+      parts > MAX_STATE_PARTS ||
+      part < 0 ||
+      part >= parts
+    ) {
+      return null;
+    }
+    let slots = this.stateParts.get(at);
+    if (!slots || slots.length !== parts) {
+      slots = new Array<string | undefined>(parts).fill(undefined);
+      this.stateParts.set(at, slots);
+    }
+    slots[part] = p.data;
+    if (slots.some((s) => s === undefined)) return null;
+    this.stateParts.delete(at);
+    try {
+      const state = JSON.parse(slots.join('')) as GameState;
+      return state && typeof state === 'object' ? state : null;
+    } catch {
+      this.report('lockstep: the host\'s state arrived in parts that do not fit together.');
+      return null;
     }
   }
 
@@ -684,11 +868,11 @@ export class LockstepCore {
   rebuild(): boolean {
     if (!this.initial || this.baseSeq > 0) return false;
     let s = this.initial;
-    this.sums.clear();
+    this.clearSums();
     for (const entry of this.log) {
       const before = s.turn;
       s = applyActions(s, entry.actions, entry.pid, this.reduceFn);
-      if (s.turn !== before) this.sums.set(entry.seq, stateChecksum(s));
+      if (s.turn !== before) this.recordSum(entry.seq, stateChecksum(s));
     }
     this.confirmed = s;
     this.refold();
@@ -698,12 +882,12 @@ export class LockstepCore {
 
   private adoptState(at: number, state: GameState): void {
     let s = JSON.parse(JSON.stringify(state)) as GameState;
-    this.sums.clear();
+    this.clearSums();
     for (const entry of this.log) {
       if (entry.seq < at) continue;
       const before = s.turn;
       s = applyActions(s, entry.actions, entry.pid, this.reduceFn);
-      if (s.turn !== before) this.sums.set(entry.seq, stateChecksum(s));
+      if (s.turn !== before) this.recordSum(entry.seq, stateChecksum(s));
     }
     this.baseSeq = at;
     this.confirmed = s;
@@ -749,7 +933,14 @@ export interface SessionOptions {
   /** Tests. */
   reduce?: ReduceFn;
   heartbeatMs?: number;
+  /** How long a client waits for a requested state before asking again. */
+  resyncRetryMs?: number;
+  maxStatePostChars?: number;
 }
+
+/** A client still waiting on the host's state asks again this often, doubling. */
+export const RESYNC_RETRY_MS = 15_000;
+export const RESYNC_RETRY_MAX_MS = 120_000;
 
 export interface LockstepSession {
   readonly core: LockstepCore;
@@ -766,10 +957,18 @@ const POST_RETRIES = [300, 1000, 2500];
 
 export function startSession(relay: Relay, opts: SessionOptions): LockstepSession {
   const local = isLocalRelay(relay);
+  // A session that deals the match itself, or starts reading at the tail, has
+  // no history to replay. One that replays the room from index 0 (a reload, a
+  // rejoin) must learn where history ends before it posts anything, or it
+  // re-posts a checksum for every past turn and re-answers every old resync
+  // (NET-R2).
+  const replays = !opts.start && (opts.since ?? 0) <= 0 && typeof relay.tail === 'function';
   const core = new LockstepCore({
     localSeats: opts.localSeats,
     checks: opts.checks ?? !local,
     reduce: opts.reduce,
+    historyThrough: replays ? null : 0,
+    maxStatePostChars: opts.maxStatePostChars,
   });
   let stopped = false;
   let chain: Promise<void> = Promise.resolve();
@@ -839,19 +1038,37 @@ export function startSession(relay: Relay, opts: SessionOptions): LockstepSessio
     return true;
   }
 
+  // ---- a client waiting on the host's state asks again, backing off ----
+  let nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  let nudgeWait = opts.resyncRetryMs ?? RESYNC_RETRY_MS;
+  function watchResync(): void {
+    if (stopped || nudgeTimer || !core.awaiting()) return;
+    nudgeTimer = setTimeout(() => {
+      nudgeTimer = null;
+      if (stopped) return;
+      if (!core.awaiting()) {
+        nudgeWait = opts.resyncRetryMs ?? RESYNC_RETRY_MS;
+        return;
+      }
+      flush(core.nudge());
+      nudgeWait = Math.min(nudgeWait * 2, RESYNC_RETRY_MAX_MS);
+      watchResync();
+    }, nudgeWait);
+  }
+
   function handle(msgs: RelayMessage[]): void {
     if (stopped) return;
-    const game: RelayMessage[] = [];
     for (const m of msgs) {
       if (m && m.kind === 'view' && isLobbyPayload(m.payload)) {
         lastRoster = m.payload;
         if (opts.onLobby) opts.onLobby(m.payload);
-        continue;
       }
-      game.push(m);
     }
-    const out = core.ingest(game);
+    // Everything goes to the core, lobby views included (it ignores them), so
+    // its idea of how far it has read matches the relay's.
+    const out = core.ingest(msgs);
     flush(out);
+    watchResync();
     // A resumed match with an open seat: claim it now, not on the next beat.
     if (opts.hello && core.started() && !helloSentAfterStart && core.playerOf(mySeat) === null) {
       helloSentAfterStart = true;
@@ -902,6 +1119,27 @@ export function startSession(relay: Relay, opts: SessionOptions): LockstepSessio
     });
   }
 
+  if (replays && relay.tail) {
+    const tail = relay.tail.bind(relay);
+    const learn = (attempt: number): void => {
+      tail().then(
+        (n) => {
+          if (!stopped) flush(core.setHistoryThrough(n));
+        },
+        (err: unknown) => {
+          if (stopped) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          // An empty room has no history.
+          if (msg.includes('no_room')) flush(core.setHistoryThrough(0));
+          else if (attempt < 2) setTimeout(() => learn(attempt + 1), 1000);
+          // Out of retries: whatever has been read so far counts as history.
+          else flush(core.setHistoryThrough(core.lastSeen()));
+        },
+      );
+    };
+    learn(0);
+  }
+
   if (opts.hello) {
     sayHello(true);
     helloTimer = setInterval(() => {
@@ -934,6 +1172,8 @@ export function startSession(relay: Relay, opts: SessionOptions): LockstepSessio
       stopped = true;
       if (helloTimer) clearInterval(helloTimer);
       helloTimer = null;
+      if (nudgeTimer) clearTimeout(nudgeTimer);
+      nudgeTimer = null;
       if (unsubscribe) unsubscribe();
       if (loop) loop.stop();
     },

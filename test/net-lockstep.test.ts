@@ -24,7 +24,10 @@ import {
   parseIntent,
   startSession,
   stateChecksum,
+  CHECK_TAG,
+  RESYNC_TAG,
   START_TAG,
+  STATE_TAG,
   type LockstepSession,
   type StartPayload,
 } from '@net/lockstep';
@@ -410,6 +413,178 @@ describe('lockstep — sessions over a local relay', () => {
       expect(relay.messages().some((m) => (m.payload as { tag?: string })?.tag === 'jlore-state/1')).toBe(true);
       expect(stateChecksum(guest.core.confirmedState()!)).toBe(stateChecksum(host.core.confirmedState()!));
       expect(guest.core.desynced()).toBe(false);
+    } finally {
+      spy.mockRestore();
+      host.stop();
+      guest.stop();
+    }
+  });
+
+  const tagged = (relay: ReturnType<typeof makeLocalRelay>, tag: string) =>
+    relay.messages().filter((m) => (m.payload as { tag?: string } | null)?.tag === tag);
+
+  /** Two seats, checks on, no anomaly (so an endTurn always ends the turn). */
+  function checkedTable(seed: number) {
+    const relay = makeLocalRelay();
+    const seats = ['h', 'g'];
+    const start = makeStart({ ...dealSpec(2, seed, seats), config: CFG(2, { anomalyChance: 0 }) });
+    const sessions: LockstepSession[] = [
+      startSession(relay, { localSeats: ['h'], start, onChange: () => {}, checks: true }),
+      startSession(relay, { localSeats: ['g'], onChange: () => {}, checks: true }),
+    ];
+    const endTurn = async (): Promise<void> => {
+      const st = sessions[0]!.core.predicted()!;
+      const idx = st.playerOrder.indexOf(st.activePlayer);
+      sessions[idx]!.send(seats[idx]!, { type: 'endTurn', player: st.activePlayer });
+      await flush();
+    };
+    return { relay, seats, sessions, endTurn };
+  }
+
+  test('NET-R2: a host that reloads 70 turns in re-posts no checks for history, and the guest never rebuilds', async () => {
+    const { relay, sessions, endTurn } = checkedTable(5);
+    const warns: string[] = [];
+    const spy = vi.spyOn(console, 'warn').mockImplementation((m: string) => warns.push(String(m)));
+    try {
+      await flush();
+      for (let t = 0; t < 70; t++) await endTurn(); // more boundaries than KEEP_SUMS (64)
+      const checks = tagged(relay, CHECK_TAG).length;
+      expect(checks).toBe(70);
+      const total = relay.messages().length;
+
+      // The host's tab reloads: a fresh session replays the room from index 0.
+      sessions[0]!.stop();
+      sessions[0] = startSession(relay, { localSeats: ['h'], onChange: () => {}, checks: true });
+      await flush();
+      expect(sessions[0]!.core.isAuthority()).toBe(true);
+      expect(relay.messages().length).toBe(total); // nothing posted for history
+      expect(tagged(relay, STATE_TAG)).toHaveLength(0);
+
+      // Live checks resume at the next boundary, exactly one of them.
+      await endTurn();
+      expect(tagged(relay, CHECK_TAG).length).toBe(checks + 1);
+      expect(stateChecksum(sessions[0]!.core.confirmedState()!)).toBe(
+        stateChecksum(sessions[1]!.core.confirmedState()!),
+      );
+
+      // Even if an old check is re-posted (an older build), a guest whose sum
+      // for it was evicted does not treat that as drift.
+      const oldest = tagged(relay, CHECK_TAG)[0]!;
+      await relay.post({ from: 'h', kind: 'snapshot', payload: oldest.payload });
+      await flush();
+      expect(warns.filter((m) => m.includes('drifted'))).toEqual([]);
+      expect(sessions[1]!.core.desynced()).toBe(false);
+    } finally {
+      spy.mockRestore();
+      for (const s of sessions) s.stop();
+    }
+  });
+
+  test('NET-R2: a resync nobody answered is answered once after a reload; an answered one never again', async () => {
+    const { relay, sessions, endTurn } = checkedTable(6);
+    try {
+      await flush();
+      await endTurn();
+      // The host is away when the guest asks.
+      sessions[0]!.stop();
+      await relay.post({ from: 'g', kind: 'snapshot', payload: { tag: RESYNC_TAG, at: relay.messages().length } });
+      const reload = () => {
+        sessions[0]!.stop();
+        sessions[0] = startSession(relay, { localSeats: ['h'], onChange: () => {}, checks: true });
+      };
+      reload();
+      await flush();
+      const states = tagged(relay, STATE_TAG);
+      expect(states).toHaveLength(1);
+      expect(states[0]!.to).toBe('g');
+      // Reload again: that resync is history now, and so is its answer.
+      reload();
+      await flush();
+      expect(tagged(relay, STATE_TAG)).toHaveLength(1);
+      expect(tagged(relay, CHECK_TAG)).toHaveLength(1);
+    } finally {
+      for (const s of sessions) s.stop();
+    }
+  });
+
+  test('a state too big for one post goes in parts, and the desynced client adopts it', async () => {
+    const relay = makeLocalRelay();
+    const seats = ['h', 'g'];
+    const start = makeStart({ ...dealSpec(2, 5556, seats), config: CFG(2, { anomalyChance: 0 }) });
+    const skewed = (s: GameState, a: GameAction): GameState => {
+      const next = reduce(s, a);
+      return a.type === 'endTurn' ? { ...next, rngCursor: next.rngCursor + 1 } : next;
+    };
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = startSession(relay, {
+      localSeats: ['h'],
+      start,
+      onChange: () => {},
+      checks: true,
+      maxStatePostChars: 8000,
+    });
+    const guest = startSession(relay, { localSeats: ['g'], onChange: () => {}, checks: true, reduce: skewed });
+    try {
+      await flush();
+      const st = host.core.predicted()!;
+      const s = st.activePlayer === 'p1' ? host : guest;
+      s.send(st.activePlayer === 'p1' ? 'h' : 'g', { type: 'endTurn', player: st.activePlayer });
+      await flush();
+      await flush();
+      const parts = tagged(relay, STATE_TAG);
+      expect(parts.length).toBeGreaterThan(1);
+      for (const m of parts) {
+        expect(JSON.stringify(m.payload).length).toBeLessThan(8000 * 2);
+        expect((m.payload as { parts?: number }).parts).toBe(parts.length);
+      }
+      expect(guest.core.desynced()).toBe(false);
+      expect(stateChecksum(guest.core.confirmedState()!)).toBe(stateChecksum(host.core.confirmedState()!));
+    } finally {
+      spy.mockRestore();
+      host.stop();
+      guest.stop();
+    }
+  });
+
+  test('a client still waiting on the host state asks again instead of sitting desynced', async () => {
+    const relay = makeLocalRelay();
+    const seats = ['h', 'g'];
+    const start = makeStart({ ...dealSpec(2, 5557, seats), config: CFG(2, { anomalyChance: 0 }) });
+    const skewed = (s: GameState, a: GameAction): GameState => {
+      const next = reduce(s, a);
+      return a.type === 'endTurn' ? { ...next, rngCursor: next.rngCursor + 1 } : next;
+    };
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = startSession(relay, { localSeats: ['h'], start, onChange: () => {}, checks: true });
+    const guest = startSession(relay, {
+      localSeats: ['g'],
+      onChange: () => {},
+      checks: true,
+      reduce: skewed,
+      resyncRetryMs: 30,
+    });
+    try {
+      await flush();
+      // The host's tab goes away: nobody will answer the guest's first resync.
+      host.stop();
+      // Its core, driven by hand, still produces the turn and the checksum the
+      // guest will disagree with.
+      const hostCore = new LockstepCore({ localSeats: ['h'], checks: true });
+      hostCore.ingest(relay.messages());
+      const st = hostCore.confirmedState()!;
+      const seat = st.activePlayer === 'p1' ? 'h' : 'g';
+      const payload = { nonce: 'x.1', actions: [{ type: 'endTurn', player: st.activePlayer } as GameAction] };
+      await relay.post({ from: seat, kind: 'intent', payload });
+      const out = hostCore.ingest(relay.messages());
+      expect(out.some((o) => o.payload.tag === CHECK_TAG)).toBe(true);
+      for (const o of out) await relay.post({ from: 'h', kind: o.kind, payload: o.payload });
+      await flush();
+      expect(guest.core.desynced()).toBe(true);
+      expect(tagged(relay, RESYNC_TAG)).toHaveLength(1);
+      await new Promise((r) => setTimeout(r, 150));
+      await flush();
+      // It asked again rather than wait forever on a host that is not there.
+      expect(tagged(relay, RESYNC_TAG).length).toBeGreaterThanOrEqual(2);
     } finally {
       spy.mockRestore();
       host.stop();
