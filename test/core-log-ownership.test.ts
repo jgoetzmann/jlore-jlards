@@ -29,6 +29,44 @@ function reachableOutsideLog(s: GameState): Set<object> {
   return reachable(rest);
 }
 
+/**
+ * Replays bot match (pc, seed) and, after every reduce with action index in
+ * [from, to), checks the entries that reduce appended. Nothing in their `detail`
+ * may be an object that is also reachable from the new state, the previous
+ * state, or the dispatched action. This is the runtime scan that found
+ * nextCardModifier and gameEnd aliasing state.
+ */
+function scanMatch(
+  pc: number,
+  seed: number,
+  from: number,
+  to: number,
+): { offenders: string[]; kinds: Map<string, number> } {
+  const { actions } = simulateMatchDetailed(seed, pc);
+  let s = createMatch(simConfig(pc), simPlayers(pc), seed);
+  const offenders: string[] = [];
+  const kinds = new Map<string, number>();
+  for (let i = 0; i < Math.min(to, actions.length); i++) {
+    if (s.ended) break;
+    const action = actions[i]!;
+    const prev = s;
+    s = reduce(prev, action);
+    if (i < from) continue;
+    const fresh: LogEntry[] = s.log.slice(prev.log.length);
+    if (fresh.length === 0) continue;
+    const foreign = reachableOutsideLog(s);
+    for (const o of reachableOutsideLog(prev)) foreign.add(o);
+    for (const o of reachable(action)) foreign.add(o);
+    for (const e of fresh) {
+      kinds.set(e.kind, (kinds.get(e.kind) ?? 0) + 1);
+      for (const o of reachable(e.detail)) {
+        if (foreign.has(o)) offenders.push(`${e.kind} at action ${i} (${action.type})`);
+      }
+    }
+  }
+  return { offenders, kinds };
+}
+
 describe('ENG-R1: log entries never alias caller or state objects', () => {
   test('mutating a dispatched reorderHand array afterwards does not rewrite the log', () => {
     const s0 = createMatch(simConfig(2), simPlayers(2), 7);
@@ -51,38 +89,24 @@ describe('ENG-R1: log entries never alias caller or state objects', () => {
     expect((inS2.detail as { hand: unknown }).hand).not.toBe(hand);
   });
 
-  // Replays bot matches and, after every reduce, checks the entries that reduce
-  // appended: nothing in their `detail` may be an object that is also reachable
-  // from the new state, the previous state, or the dispatched action. This is the
-  // runtime scan that found nextCardModifier and gameEnd aliasing state.
-  test.each([
-    [2, 1],
-    [4, 2],
-  ])('no appended entry shares an object with state or action (%ip seed %i)', (pc, seed) => {
-    const { actions } = simulateMatchDetailed(seed, pc);
-    let s = createMatch(simConfig(pc), simPlayers(pc), seed);
-    const offenders: string[] = [];
-    let checkedEntries = 0;
+  test('no appended entry shares an object with state or action (2p seed 1, first 400 actions)', () => {
     // A prefix keeps this fast. Long enough to cover buys, plays, prompts and
     // several turn ends.
-    for (const action of actions.slice(0, 400)) {
-      if (s.ended) break;
-      const prev = s;
-      s = reduce(prev, action);
-      const fresh: LogEntry[] = s.log.slice(prev.log.length);
-      if (fresh.length === 0) continue;
-      const foreign = reachableOutsideLog(s);
-      for (const o of reachableOutsideLog(prev)) foreign.add(o);
-      for (const o of reachable(action)) foreign.add(o);
-      for (const e of fresh) {
-        checkedEntries += 1;
-        for (const o of reachable(e.detail)) {
-          if (o !== e.detail && foreign.has(o)) offenders.push(`${e.kind} (action ${action.type})`);
-        }
-        if (foreign.has(e.detail)) offenders.push(`${e.kind}.detail itself (action ${action.type})`);
-      }
-    }
-    expect(checkedEntries).toBeGreaterThan(100);
+    const { offenders, kinds } = scanMatch(2, 1, 0, 400);
+    const checked = [...kinds.values()].reduce((a, b) => a + b, 0);
+    expect(checked).toBeGreaterThan(100);
+    expect(offenders).toEqual([]);
+  });
+
+  test('nextCardModifier does not alias the mod it pushes onto nextCardMods (4p seed 2)', () => {
+    // The only nextCardModifier across 18 bot matches (2-4 players, seeds 1-6)
+    // is at action 1495 of this one. Before the fix, its detail.mod was the very
+    // object pushed onto players[x].nextCardMods. The replay before `from` is
+    // unscanned, so this stays cheap.
+    const { offenders, kinds } = scanMatch(4, 2, 1480, 1510);
+    // If the bots change and the modifier moves, fail loudly here, not by
+    // silently checking nothing.
+    expect(kinds.get('nextCardModifier') ?? 0).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 

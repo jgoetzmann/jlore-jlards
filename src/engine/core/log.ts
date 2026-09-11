@@ -8,7 +8,9 @@ import { deepClone } from '@engine/core/clone';
 
 /**
  * The one way a LogEntry is built. Every write path (appendLog here, meta/util.ts
- * pushLog, systems/internal.ts pushLog, shop/util.ts appendLog) goes through it.
+ * pushLog, systems/internal.ts pushLog, shop/util.ts appendLog, effects/runtime.ts
+ * log) goes through it. Enumerate them with `grep -a`: effects/runtime.ts holds a
+ * non-UTF-8 byte, so plain grep treats it as binary and skips it silently.
  *
  * `detail` is deep-copied. cloneState shares LogEntry objects between states
  * (ENGINE-1), so an entry must own everything it points at. Call sites routinely
