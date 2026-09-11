@@ -371,6 +371,30 @@ h3 {
   color: var(--ink-dim);
   white-space: nowrap;
   font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Above phone width the topbar is one row, always. Extra chips (a hotseat
+   "Pass to", a long anomaly) squeeze the anomaly chip and the "You are" text
+   instead of wrapping the Log toggle onto a second row, which pushed the
+   whole table down 30px whenever a prompt opened. Pinned in
+   e2e/fixtures.spec.ts. */
+@media (min-width: 701px) {
+  .topbar {
+    flex-wrap: nowrap;
+  }
+
+  .topbar > * {
+    flex-shrink: 0;
+  }
+
+  .topbar > .anomaly-chip,
+  .topbar > .who,
+  .topbar > .topbar-spacer {
+    flex-shrink: 1;
+  }
 }
 
 .drawer-toggle {
@@ -1628,8 +1652,10 @@ h3 {
 }
 
 .prompt-bar .prompt-title {
-  flex: 0 0 auto;
-  max-width: 240px;
+  flex: 0 1 auto;
+  min-width: 6em;
+  max-width: 420px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;

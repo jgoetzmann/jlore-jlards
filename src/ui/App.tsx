@@ -35,17 +35,27 @@ import { addBuyFlight, inFlightPiles, isUsefulPlay, playMoneyPlan, submitsOnPick
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
 
+/**
+ * Dev-only fixture tables. The condition is a build-time constant, so a
+ * production build drops the import and never ships the module.
+ */
+const LazyFixture = import.meta.env.DEV ? React.lazy(() => import('./Fixture')) : null;
+
 /** A room opens at the full table; the lobby narrows it if the host wants. */
 const MAX_ROOM_SEATS = 4;
 
 type Route =
   | { kind: 'start' }
   | { kind: 'hotseat'; players: number }
-  | { kind: 'room'; code: string };
+  | { kind: 'room'; code: string }
+  /** Dev only: a crafted table state (Fixture.tsx). Production shows the start screen. */
+  | { kind: 'fixture'; name: string };
 
 export function parseHash(hash: string): Route {
   const raw = (hash || '').replace(/^#/, '').trim();
   if (raw === '') return { kind: 'start' };
+  const fixture = /^fixture:([a-z-]+)$/i.exec(raw);
+  if (fixture) return { kind: 'fixture', name: fixture[1]!.toLowerCase() };
   const hot = /^hotseat(?::(\d))?$/i.exec(raw);
   if (hot) {
     const n = hot[1] ? Number(hot[1]) : 2;
@@ -1004,7 +1014,15 @@ export function App(): JSX.Element {
     window.location.hash = `#${code}`;
   }
 
-  if (route.kind === 'start') {
+  if (route.kind === 'fixture' && LazyFixture) {
+    return (
+      <React.Suspense fallback={null}>
+        <LazyFixture name={route.name} />
+      </React.Suspense>
+    );
+  }
+
+  if (route.kind === 'start' || route.kind === 'fixture') {
     return <StartScreen onHost={host} onResume={resume} />;
   }
 
