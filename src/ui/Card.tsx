@@ -139,11 +139,13 @@ export function Card(props: CardProps): JSX.Element {
   if (props.committed) classes.push('card-committed');
   if (props.cue) classes.push('card-cue', `card-cue-${props.cue}`);
 
-  // The cue is keyed so React replaces the node when the preset changes:
-  // re-adding a class to a live element does not restart its animation.
+  // No `key` on this element. Keying it on the cue would restart the keyframe,
+  // but it would also remount the node every time a cue expired — which drops
+  // the art and flickers, to fix a case that barely happens: a card that
+  // arrives somewhere is a freshly mounted node already, so its entrance
+  // animation runs on mount without any help.
   return (
     <div
-      key={props.cue ?? 'still'}
       ref={props.elementRef}
       className={classes.join(' ')}
       style={

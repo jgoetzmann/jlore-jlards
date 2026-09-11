@@ -59,11 +59,20 @@ export function useFlipGroup(signature: string, opts: FlipOptions = {}): FlipGro
   const positions = React.useRef(new Map<string, Point>());
   const running = React.useRef(new Map<string, Animation>());
 
+  // One callback per key, cached. A fresh closure each render would make React
+  // detach and reattach every card's ref on every render — which for a table
+  // that re-renders on each clock tick is a lot of churn for no gain.
+  const callbacks = React.useRef(new Map<string, (el: HTMLElement | null) => void>());
+
   const register = React.useCallback((key: string) => {
-    return (el: HTMLElement | null): void => {
+    const existing = callbacks.current.get(key);
+    if (existing) return existing;
+    const fn = (el: HTMLElement | null): void => {
       if (el) elements.current.set(key, el);
       else elements.current.delete(key);
     };
+    callbacks.current.set(key, fn);
+    return fn;
   }, []);
 
   React.useLayoutEffect(() => {

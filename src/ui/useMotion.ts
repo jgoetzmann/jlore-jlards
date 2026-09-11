@@ -14,6 +14,8 @@ import type { GameView, InstanceId } from '@engine/types';
 import {
   cardCues,
   diffViews,
+  drainedPiles,
+  emptiedPiles,
   settleMs,
   statPulses,
   type AnimPreset,
@@ -32,6 +34,8 @@ export interface MotionState {
   /** The keyframe to run on this card right now, or null. */
   cueFor: (iid: InstanceId) => AnimPreset | 'enter' | null;
   pulses: Partial<Record<TickStat, number>>;
+  drained: ReadonlySet<string>;
+  emptied: ReadonlySet<string>;
   turnFlash: TurnFlash | null;
   /** Changes exactly when the arrangement might have moved. Drives the FLIP group. */
   signature: string;
@@ -118,6 +122,9 @@ export function useMotion(view: GameView | null): MotionState {
     [events, reduced],
   );
 
+  const drained = React.useMemo(() => drainedPiles(events), [events]);
+  const emptied = React.useMemo(() => emptiedPiles(events), [events]);
+
   const turnFlash = React.useMemo<TurnFlash | null>(() => {
     for (const e of events) {
       if (e.kind === 'turnChange') return { to: e.to, turn: e.turn, yours: e.yours };
@@ -132,7 +139,7 @@ export function useMotion(view: GameView | null): MotionState {
     [cues],
   );
 
-  return { events, cueFor, pulses, turnFlash, signature, reduced };
+  return { events, cueFor, pulses, drained, emptied, turnFlash, signature, reduced };
 }
 
 export default useMotion;

@@ -7,17 +7,21 @@
  */
 
 import React from 'react';
-import type { CardView, GameAction, GameState, GameView, PlayerId } from '@engine/types';
+import type { CardView, GameAction, GameState, GameView, PlayerId, Prompt } from '@engine/types';
 import { makeRoomCode } from '@net/relay';
 import { getSeatId, getSettings, setSettings, loadSnapshot, clearSnapshot } from '@net/storage';
 import { useGame, type GameMode } from './useGame';
 import { Board } from './Board';
-import { Hand } from './Hand';
+import { Hand, moveInOrder } from './Hand';
 import { Field } from './Field';
 import { Log } from './Log';
 import { TurnBar } from './TurnBar';
-import { PromptOverlay } from './PromptOverlay';
+import { PromptOverlay, promptBounds, promptReady, togglePick } from './PromptOverlay';
 import { Card } from './Card';
+import { useMotion } from './useMotion';
+import { useFlipGroup } from './useFlip';
+import { useKeyboard } from './useKeyboard';
+import { KEY_HELP, type KeyIntent } from './keys';
 
 type Route =
   | { kind: 'start' }
@@ -203,17 +207,86 @@ function Opponents({ view }: { view: GameView }): JSX.Element {
   );
 }
 
-function PlayArea({ cards, label }: { cards: CardView[]; label: string }): JSX.Element {
+function PlayArea({
+  cards,
+  label,
+  testId,
+  cueFor,
+  flipRegister,
+}: {
+  cards: CardView[];
+  label: string;
+  testId?: string;
+  cueFor?: (iid: string) => Parameters<typeof Card>[0]['cue'];
+  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
+}): JSX.Element {
   return (
-    <div className="playarea">
+    <div className="playarea" data-testid={testId}>
       <h3>
         {label} <span className="playarea-count">{cards.length}</span>
       </h3>
       <div className="playarea-row">
         {cards.length === 0 && <div className="playarea-empty">nothing</div>}
-        {cards.map((c) => (
-          <Card key={c.iid} card={c} compact />
+        {cards.map((c, i) => (
+          <Card
+            key={c.iid}
+            card={c}
+            compact
+            index={i}
+            cue={cueFor?.(c.iid) ?? null}
+            elementRef={flipRegister?.(c.iid)}
+          />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The one moment worth interrupting the table for.
+ *
+ * A turn change replaces the whole board at once, and without a beat between
+ * the two states a player cannot tell "I drew a new hand" from "something
+ * happened to my hand". Nothing here is interactive and it never blocks input.
+ */
+function TurnBanner({ flash, names }: { flash: { to: string; turn: number; yours: boolean } | null; names: Record<PlayerId, string> }): JSX.Element | null {
+  if (!flash) return null;
+  return (
+    <div
+      className={`turn-banner${flash.yours ? ' turn-banner-yours' : ''}`}
+      data-testid="turn-banner"
+      aria-live="polite"
+    >
+      <div className="turn-banner-inner">
+        {flash.yours ? 'Your turn' : `${names[flash.to] ?? flash.to} to move`}
+        <span className="turn-banner-turn"> · turn {flash.turn}</span>
+      </div>
+    </div>
+  );
+}
+
+function KeyHelp({ onClose }: { onClose: () => void }): JSX.Element {
+  return (
+    <div className="prompt-overlay key-help-overlay" data-testid="key-help" onClick={onClose}>
+      <div className="prompt-card key-help" onClick={(e) => e.stopPropagation()}>
+        <h3 className="prompt-title">Keyboard</h3>
+        <dl className="key-help-list">
+          {KEY_HELP.map((row) => (
+            <React.Fragment key={row.keys}>
+              <dt>
+                {row.keys.split(/\s+/).map((k) => (
+                  <kbd key={k}>{k}</kbd>
+                ))}
+              </dt>
+              <dd>{row.what}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+        <div className="prompt-actions">
+          <button type="button" className="prompt-confirm" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -243,9 +316,164 @@ function Table({
     return out;
   }, [view]);
 
+  // ---- motion -------------------------------------------------------------
+  // Every hook runs before the early returns below, so the order is stable
+  // whether the table is connecting, fatal or live.
+  const motion = useMotion(view);
+  const flip = useFlipGroup(motion.signature, { enabled: !motion.reduced });
+
+  // ---- optimistic acknowledgement ----------------------------------------
+  // An intent takes up to a poll interval to come back as a view. Without a
+  // local mark the table looks like it ignored the click, and the player clicks
+  // again — which is how you play two cards when you meant one.
+  const [inFlight, setInFlight] = React.useState<Set<string>>(() => new Set());
+  React.useEffect(() => {
+    setInFlight((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [view]);
+
   const send = React.useCallback(
-    (action: GameAction) => session.send(action),
+    (action: GameAction) => {
+      if (action.type === 'play') {
+        setInFlight((prev) => new Set(prev).add(action.iid));
+      } else if (action.type === 'buy') {
+        setInFlight((prev) => new Set(prev).add(action.pileId));
+      } else if (action.type === 'endTurn' || action.type === 'resolve') {
+        setInFlight((prev) => new Set(prev).add(action.type));
+      }
+      session.send(action);
+    },
     [session],
+  );
+
+  // ---- keyboard -----------------------------------------------------------
+  const [cursor, setCursor] = React.useState(-1);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const [logOpen, setLogOpen] = React.useState(true);
+  const [picked, setPicked] = React.useState<string[]>([]);
+
+  const ownPrompt =
+    view && view.pending && typeof view.pending === 'object' && 'options' in view.pending
+      ? (view.pending as Prompt)
+      : null;
+  const ownPromptId = ownPrompt && ownPrompt.player === view?.you.id ? ownPrompt.id : null;
+
+  React.useEffect(() => {
+    setPicked([]);
+  }, [ownPromptId]);
+
+  // The cursor follows the hand: a card played out from under it would
+  // otherwise leave the highlight pointing at whatever slid into that slot.
+  const handSize = view ? view.you.hand.length : 0;
+  React.useEffect(() => {
+    setCursor((c) => (c >= handSize ? handSize - 1 : c));
+  }, [handSize]);
+
+  const activeSelf = Boolean(view && view.activePlayer === view.you.id && !view.ended);
+
+  const onKeyIntent = React.useCallback(
+    (intent: KeyIntent) => {
+      if (!view) return;
+      const me = view.you.id;
+
+      switch (intent.kind) {
+        case 'toggleHelp':
+          setHelpOpen((v) => !v);
+          return;
+        case 'toggleLog':
+          setLogOpen((v) => !v);
+          return;
+
+        case 'moveFocus': {
+          const n = view.you.hand.length;
+          if (n === 0) return;
+          setCursor((c) => {
+            if (c < 0) return intent.delta > 0 ? 0 : n - 1;
+            return ((c + intent.delta) % n + n) % n;
+          });
+          return;
+        }
+
+        case 'nudgeHand': {
+          const n = view.you.hand.length;
+          if (cursor < 0 || n < 2) return;
+          const to = cursor + intent.delta;
+          if (to < 0 || to >= n) return;
+          const iids = view.you.hand.map((c) => c.iid);
+          send({ type: 'reorderHand', player: me, hand: moveInOrder(iids, cursor, to) });
+          setCursor(to);
+          return;
+        }
+
+        case 'playHand': {
+          const card = view.you.hand[intent.index];
+          if (!card || card.playable === false) return;
+          setCursor(intent.index);
+          send({ type: 'play', player: me, iid: card.iid });
+          return;
+        }
+
+        case 'endTurn':
+          send({ type: 'endTurn', player: me });
+          return;
+
+        case 'pickOption': {
+          if (!ownPrompt || ownPrompt.player !== me) return;
+          const option = ownPrompt.options[intent.index];
+          if (!option) return;
+          const { ordering, max } = promptBounds(ownPrompt);
+          setPicked((prev) => togglePick(prev, option.key, { ordering, max }));
+          return;
+        }
+
+        case 'confirmPrompt': {
+          if (!ownPrompt || ownPrompt.player !== me) return;
+          if (!promptReady(ownPrompt, picked)) return;
+          send({ type: 'resolve', player: me, promptId: ownPrompt.id, keys: picked });
+          return;
+        }
+
+        case 'skipPrompt': {
+          if (!ownPrompt || ownPrompt.player !== me) return;
+          send({ type: 'resolve', player: me, promptId: ownPrompt.id, keys: [] });
+          return;
+        }
+
+        case 'takeDefault': {
+          if (!ownPrompt || ownPrompt.player !== me) return;
+          send({
+            type: 'resolve',
+            player: me,
+            promptId: ownPrompt.id,
+            keys: ownPrompt.defaultKeys,
+          });
+          return;
+        }
+
+        case 'clearSelection':
+          setPicked([]);
+          return;
+
+        default:
+          return;
+      }
+    },
+    [view, cursor, ownPrompt, picked, send],
+  );
+
+  const promptIsMine = Boolean(ownPrompt && view && ownPrompt.player === view.you.id);
+  useKeyboard(
+    {
+      yourTurn: activeSelf,
+      ended: Boolean(view?.ended),
+      handSize,
+      promptOpen: promptIsMine,
+      promptOptionCount: promptIsMine && ownPrompt ? ownPrompt.options.length : 0,
+      promptReady: promptIsMine && ownPrompt ? promptReady(ownPrompt, picked) : false,
+      promptCanSkip: promptIsMine && ownPrompt ? promptBounds(ownPrompt).min === 0 : false,
+      promptHasDefault: promptIsMine && ownPrompt ? ownPrompt.defaultKeys.length > 0 : false,
+    },
+    onKeyIntent,
+    Boolean(view),
   );
 
   if (session.status === 'error') {
@@ -323,6 +551,15 @@ function Table({
         <span className="who" data-testid="you-are" data-you-id={view.you.id}>
           You are <strong>{view.you.name}</strong>
         </span>
+        <button
+          type="button"
+          className="ghost help-btn"
+          data-testid="key-help-toggle"
+          title="Keyboard shortcuts (?)"
+          onClick={() => setHelpOpen((v) => !v)}
+        >
+          ?
+        </button>
       </header>
 
       <TurnBar
@@ -331,6 +568,7 @@ function Table({
         yourTurn={yourTurn}
         turnSeconds={session.turnSeconds}
         onAction={send}
+        pulses={motion.pulses}
       />
 
       {view.ended && (
@@ -343,16 +581,38 @@ function Table({
         </div>
       )}
 
-      <div className="table-body">
+      {/* One FLIP root over the whole table. A card moving hand -> play -> GY,
+          or shop -> GY on a buy, is the same DOM node measured in two places,
+          so the transition needs no per-zone bookkeeping. */}
+      <div className="table-body" ref={flip.rootRef}>
         <div className="table-main">
-          <Board view={view} onBuy={(pileId) => send({ type: 'buy', player: view.you.id, pileId })} yourTurn={yourTurn} />
-          <PlayArea cards={view.you.play} label="In play" />
+          <Board
+            view={view}
+            onBuy={(pileId) => send({ type: 'buy', player: view.you.id, pileId })}
+            yourTurn={yourTurn}
+            drained={motion.drained}
+            emptied={motion.emptied}
+            cueFor={motion.cueFor}
+            flipRegister={flip.register}
+          />
+          <PlayArea
+            cards={view.you.play}
+            label="In play"
+            testId="playarea-play"
+            cueFor={motion.cueFor}
+            flipRegister={flip.register}
+          />
           <Hand
             hand={view.you.hand}
             playerId={view.you.id}
             yourTurn={yourTurn}
             actions={view.you.actions}
             onAction={send}
+            cursorIndex={cursor}
+            onCursorChange={setCursor}
+            cueFor={motion.cueFor}
+            flipRegister={flip.register}
+            committed={inFlight}
           />
         </div>
 
@@ -365,12 +625,18 @@ function Table({
             yourTurn={yourTurn}
             onAction={send}
           />
-          <PlayArea cards={view.you.gy} label="Graveyard" />
+          <PlayArea
+            cards={view.you.gy}
+            label="Graveyard"
+            testId="playarea-gy"
+            cueFor={motion.cueFor}
+            flipRegister={flip.register}
+          />
           <div className="library-count">
             Library <strong>{view.you.libraryCount}</strong> cards — contents are never sent to
             any browser, including yours.
           </div>
-          <Log log={view.log} names={names} />
+          <Log log={view.log} names={names} open={logOpen} onOpenChange={setLogOpen} />
         </aside>
       </div>
 
@@ -379,7 +645,13 @@ function Table({
         playerId={view.you.id}
         names={names}
         onAction={send}
+        picked={picked}
+        onPickedChange={setPicked}
       />
+
+      <TurnBanner flash={motion.reduced ? null : motion.turnFlash} names={names} />
+      {helpOpen && <KeyHelp onClose={() => setHelpOpen(false)} />}
+      {inFlight.size > 0 && <div className="intent-bar" aria-hidden="true" />}
     </div>
   );
 }

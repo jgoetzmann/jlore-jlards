@@ -240,6 +240,30 @@ export function cardCues(events: readonly MotionEvent[]): CardCue[] {
   return out;
 }
 
+/** Piles that lost at least one card in this batch. */
+export function drainedPiles(events: readonly MotionEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of events) {
+    if (e.kind === 'pileDrained') out.add(e.pileId);
+  }
+  return out;
+}
+
+/**
+ * Piles that hit zero in this batch.
+ *
+ * Worth its own cue rather than folding into `drainedPiles`: four empty piles
+ * end the game, so the pile that just ran out is the single most consequential
+ * thing that can happen on the board.
+ */
+export function emptiedPiles(events: readonly MotionEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of events) {
+    if (e.kind === 'pileDrained' && e.emptied) out.add(e.pileId);
+  }
+  return out;
+}
+
 /** Signed stat deltas, for the flash on the turn bar. */
 export function statPulses(events: readonly MotionEvent[]): Partial<Record<TickStat, number>> {
   const out: Partial<Record<TickStat, number>> = {};

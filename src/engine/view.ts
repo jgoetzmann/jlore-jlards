@@ -347,7 +347,12 @@ export function viewFor(state: GameState, playerId: PlayerId): GameView {
         buys: me.buys,
         actions: me.actions,
         prophet: me.prophet,
-        vp: me.vp,
+        // Your live score, not `me.vp`. `me.vp` holds effect-granted VP only —
+        // printed VP is counted off the deck (scoring.ts) — so shipping it made
+        // the table read "VP 0" while you held three Tix, and made the Crown and
+        // Duel variants end on a number the player could never see coming. This
+        // is the same value `liveVp` gives the win-condition check.
+        vp: Meta.liveVp(state, playerId),
         combo: me.combo,
         delayedCount: me.delayed.length,
         quest: me.quest,
@@ -387,7 +392,10 @@ export function viewFor(state: GameState, playerId: PlayerId): GameView {
         const line = auraLine(a.auraId);
         return { auraId: a.auraId, name: line.name, tier: line.tier, text: line.text };
       }),
-      vp: p.vp,
+      // What an opponent is allowed to know: the live score minus any value a
+      // card is keeping secret (Ascendant Spread). B111 in aggregate form — a
+      // total that folded in a secret would leak it by arithmetic.
+      vp: Meta.publicVp(state, pid),
       prophet: p.prophet,
       eliminated: p.eliminated,
     });

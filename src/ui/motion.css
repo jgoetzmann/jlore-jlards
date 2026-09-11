@@ -492,6 +492,65 @@
   transform: translateY(-4px) scale(1.02);
 }
 
+/* An option that is a card renders as the card. The button becomes a frame
+   around a real face rather than a row of text, which is the whole point:
+   around 60 cards Discover, and you cannot weigh an option you cannot read. */
+.prompt-option-card {
+  padding: 6px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.prompt-option-card:hover {
+  border-color: var(--accent);
+}
+
+.prompt-option-card .card {
+  pointer-events: none;
+}
+
+/* The digit that picks this option. */
+.prompt-option-key {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.prompt-option {
+  position: relative;
+}
+
+.prompt-keyhint {
+  color: var(--ink-dim);
+}
+
+.prompt-keyhint kbd,
+.key-help kbd {
+  display: inline-block;
+  min-width: 15px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* The turn bar's floating delta is absolutely positioned against this. */
+.stat {
+  position: relative;
+}
+
 @keyframes option-in {
   from {
     opacity: 0;
@@ -507,6 +566,40 @@
 
 .log-entry {
   animation: log-in var(--t-quick) var(--e-out) both;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.log-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Tone is the whole reason the log is scannable: you find "who bought what"
+   by colour before you read a word of it. */
+.log-tone-play .log-text {
+  color: var(--ink);
+}
+.log-tone-buy .log-text {
+  color: var(--money);
+}
+.log-tone-gain .log-text {
+  color: var(--accent);
+}
+.log-tone-loss .log-text {
+  color: var(--danger);
+}
+.log-tone-turn .log-text {
+  color: var(--prophet);
+  font-weight: 700;
+}
+.log-tone-system .log-text {
+  color: var(--ink-dim);
+}
+.log-tone-reject .log-text {
+  color: var(--ink-dim);
+  font-style: italic;
 }
 
 @keyframes log-in {
@@ -564,6 +657,9 @@ button:active:not(:disabled) {
   pointer-events: none;
 }
 
+/* Held back a quarter second: in hotseat the view returns in about 30ms, and a
+   progress bar that flashes on every click is worse than no progress bar. It
+   only ever appears when the round trip is actually slow. */
 .intent-bar {
   position: fixed;
   top: 0;
@@ -572,7 +668,10 @@ button:active:not(:disabled) {
   width: 100%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   transform-origin: left;
-  animation: intent-sweep 1.1s var(--e-linear) infinite;
+  opacity: 0;
+  animation:
+    intent-sweep 1.1s var(--e-linear) infinite,
+    intent-appear var(--t-quick) var(--e-out) 250ms forwards;
   z-index: 60;
 }
 
@@ -583,6 +682,56 @@ button:active:not(:disabled) {
   to {
     transform: translateX(100%);
   }
+}
+
+@keyframes intent-appear {
+  to {
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------- the help sheet */
+
+.help-btn {
+  margin-left: 8px;
+  padding: 2px 9px;
+  font-weight: 800;
+  border-radius: 999px;
+}
+
+.key-help-overlay {
+  cursor: pointer;
+}
+
+.key-help {
+  cursor: default;
+  max-width: 480px;
+}
+
+.key-help-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  margin: 10px 0 14px;
+  align-items: baseline;
+}
+
+.key-help-list dt {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.key-help-list dd {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.turn-banner-turn {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-dim);
+  letter-spacing: 0;
 }
 
 /* -------------------------------------------------------- the help sheet */

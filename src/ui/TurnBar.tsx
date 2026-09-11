@@ -9,6 +9,7 @@
 
 import React from 'react';
 import type { GameAction, GameView, PlayerId } from '@engine/types';
+import type { TickStat } from './motion';
 
 export const TIME_FLAIL_DIVISOR = 2.5;
 export const DEFAULT_TURN_SECONDS = 90;
@@ -19,6 +20,8 @@ export interface TurnBarProps {
   yourTurn: boolean;
   turnSeconds?: number;
   onAction: (action: GameAction) => void;
+  /** Signed deltas from the last view, for the tick and the floating number. */
+  pulses?: Partial<Record<TickStat, number>>;
 }
 
 export function isTimeFlail(anomaly: GameView['anomaly']): boolean {
@@ -32,6 +35,19 @@ export function effectiveTurnSeconds(base: number, anomaly: GameView['anomaly'])
   return isTimeFlail(anomaly) ? Math.max(5, Math.round(seconds / TIME_FLAIL_DIVISOR)) : seconds;
 }
 
+/**
+ * Seconds left, from a deadline rather than an accumulator.
+ *
+ * The previous timer subtracted 1 from a counter once per `setInterval` tick,
+ * which loses time on every frame the browser is busy and stops entirely in a
+ * background tab — so a player coming back to the table saw a clock that
+ * claimed more time than they had. Reading the deadline against the wall clock
+ * is drift-free by construction and self-corrects after a throttled tab.
+ */
+export function remainingSeconds(deadlineMs: number, nowMs: number): number {
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+}
+
 export function formatClock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const m = Math.floor(s / 60);
@@ -39,11 +55,40 @@ export function formatClock(seconds: number): string {
   return `${m}:${r < 10 ? '0' : ''}${r}`;
 }
 
-function Stat({ label, value, hot }: { label: string; value: number; hot?: boolean }): JSX.Element {
+function Stat({
+  label,
+  value,
+  hot,
+  pulse = 0,
+}: {
+  label: string;
+  value: number;
+  hot?: boolean;
+  pulse?: number;
+}): JSX.Element {
+  const key = label.toLowerCase();
+  const cls = ['stat'];
+  if (hot) cls.push('stat-hot');
+  if (pulse > 0) cls.push('stat-pulse-up');
+  if (pulse < 0) cls.push('stat-pulse-down');
+
+  // Keyed on the pulse so a second change of the same size restarts the
+  // animation instead of leaving the first one to finish silently.
   return (
-    <div className={`stat${hot ? ' stat-hot' : ''}`} data-testid={`stat-${label.toLowerCase()}`}>
-      <span className="stat-value" data-testid={`stat-${label.toLowerCase()}-value`}>{value}</span>
+    <div className={cls.join(' ')} data-testid={`stat-${key}`} data-pulse={pulse || undefined}>
+      <span className="stat-value" data-testid={`stat-${key}-value`}>
+        {value}
+      </span>
       <span className="stat-label">{label}</span>
+      {pulse !== 0 && (
+        <span
+          key={`${value}:${pulse}`}
+          className={`stat-delta ${pulse > 0 ? 'stat-delta-up' : 'stat-delta-down'}`}
+          aria-hidden="true"
+        >
+          {pulse > 0 ? `+${pulse}` : pulse}
+        </span>
+      )}
     </div>
   );
 }
@@ -54,16 +99,19 @@ export function TurnBar({
   yourTurn,
   turnSeconds = DEFAULT_TURN_SECONDS,
   onAction,
+  pulses = {},
 }: TurnBarProps): JSX.Element {
   const limit = effectiveTurnSeconds(turnSeconds, view.anomaly);
   const [remaining, setRemaining] = React.useState(limit);
 
-  // Restart the clock whenever the turn or the active seat changes.
+  // Restart the clock whenever the turn or the active seat changes. Ticking at
+  // 250ms rather than 1000ms is not about precision — it is so the digit is
+  // right within a quarter second of a throttled tab waking up.
   React.useEffect(() => {
-    setRemaining(limit);
-    const id = setInterval(() => {
-      setRemaining((r) => (r <= 0 ? 0 : r - 1));
-    }, 1000);
+    const deadline = Date.now() + limit * 1000;
+    const tick = (): void => setRemaining(remainingSeconds(deadline, Date.now()));
+    tick();
+    const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [view.turn, view.activePlayer, limit]);
 
@@ -85,12 +133,17 @@ export function TurnBar({
       </div>
 
       <div className="turnbar-stats">
-        <Stat label="Money" value={you.money} hot={yourTurn && you.money > 0} />
-        <Stat label="Buys" value={you.buys} />
-        <Stat label="Actions" value={you.actions} />
-        <Stat label="Prophet" value={you.prophet} />
-        <Stat label="VP" value={you.vp} />
-        <Stat label="Combo" value={you.combo} />
+        <Stat
+          label="Money"
+          value={you.money}
+          hot={yourTurn && you.money > 0}
+          pulse={pulses.money ?? 0}
+        />
+        <Stat label="Buys" value={you.buys} pulse={pulses.buys ?? 0} />
+        <Stat label="Actions" value={you.actions} pulse={pulses.actions ?? 0} />
+        <Stat label="Prophet" value={you.prophet} pulse={pulses.prophet ?? 0} />
+        <Stat label="VP" value={you.vp} pulse={pulses.vp ?? 0} />
+        <Stat label="Combo" value={you.combo} pulse={pulses.combo ?? 0} />
       </div>
 
       <div className="turnbar-right">

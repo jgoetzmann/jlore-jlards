@@ -115,7 +115,7 @@ export function keyIntent(e: KeyEventLike, ctx: KeyContext): KeyIntent | null {
 export const KEY_HELP: { keys: string; what: string }[] = [
   { keys: '1 – 9, 0', what: 'play that card in hand — or pick that option in a prompt' },
   { keys: '← →', what: 'move between cards in hand' },
-  { keys: '[ ]', what: 'nudge the focused card left or right — adjacency matters' },
+  { keys: '[ ]', what: 'reorder your hand — nudge the focused card; adjacency matters' },
   { keys: 'E or Space', what: 'end your turn' },
   { keys: 'Enter', what: 'confirm a prompt' },
   { keys: 'S / D', what: 'skip a prompt / take its default' },

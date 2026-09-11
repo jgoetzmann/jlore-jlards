@@ -22,6 +22,24 @@ export const POLL_HIDDEN_INTERVAL_MS = 3000;
 export const POLL_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 export const LOCAL_TICK_MS = 30;
 
+/**
+ * The hot window.
+ *
+ * At rest the loop polls once a second, which ARCHITECTURE §6 chose on the
+ * grounds that nobody notices a second in a turn-based game. They do notice it
+ * on their own click: an intent waited up to a full interval for the host to
+ * see it and another for the view to come back, so pressing a card cost one to
+ * two seconds of nothing before the card moved.
+ *
+ * So the cadence is now conversational. Acting kicks a poll immediately, and
+ * any traffic at all — sent or received — puts the loop into a short fast
+ * window, because a table that just did something is about to do something
+ * else. It falls back to 1s on its own the moment the exchange stops, so the
+ * resting request rate is unchanged and only an active turn costs more.
+ */
+export const POLL_HOT_INTERVAL_MS = 250;
+export const POLL_HOT_WINDOW_MS = 4000;
+
 /** A local relay additionally lets pollers subscribe instead of ticking. */
 export interface LocalRelay extends Relay {
   readonly local: true;
@@ -165,7 +183,22 @@ export interface PollLoop {
   stop(): void;
   /** Reset the idle timer, e.g. after a local action. */
   bump(): void;
+  /**
+   * Poll now and go hot. Call it right after posting, so a player's own action
+   * is not waiting on the next scheduled tick to come back to them.
+   */
+  kick(): void;
   cursor(): number;
+}
+
+/** Exported for the test: which interval applies in a given condition. */
+export function pollIntervalFor(opts: {
+  hidden: boolean;
+  hotUntilMs: number;
+  nowMs: number;
+}): number {
+  if (opts.hidden) return POLL_HIDDEN_INTERVAL_MS;
+  return opts.nowMs < opts.hotUntilMs ? POLL_HOT_INTERVAL_MS : POLL_INTERVAL_MS;
 }
 
 function documentHidden(): boolean {
@@ -187,7 +220,12 @@ export function startPolling(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let inFlight = false;
   let lastActivity = Date.now();
+  let hotUntil = 0;
   let unsubscribe: (() => void) | null = null;
+
+  function goHot(): void {
+    hotUntil = Date.now() + POLL_HOT_WINDOW_MS;
+  }
 
   async function tick(): Promise<void> {
     if (stopped || inFlight) return;
@@ -198,6 +236,8 @@ export function startPolling(
       if (msgs.length > 0) {
         cursor += msgs.length;
         lastActivity = Date.now();
+        // Traffic begets traffic: an exchange is starting, so stay fast.
+        goHot();
         onMessages(msgs);
       }
     } catch (err) {
@@ -213,7 +253,11 @@ export function startPolling(
       stopped = true;
       return;
     }
-    const wait = documentHidden() ? POLL_HIDDEN_INTERVAL_MS : POLL_INTERVAL_MS;
+    const wait = pollIntervalFor({
+      hidden: documentHidden(),
+      hotUntilMs: hotUntil,
+      nowMs: Date.now(),
+    });
     timer = setTimeout(() => {
       void tick().then(schedule);
     }, wait);
@@ -238,6 +282,11 @@ export function startPolling(
       bump() {
         lastActivity = Date.now();
       },
+      kick() {
+        // A local relay already delivers on post; ticking is only belt and
+        // braces for anything posted before this loop subscribed.
+        void tick();
+      },
       cursor() {
         return cursor;
       },
@@ -255,6 +304,16 @@ export function startPolling(
     bump() {
       lastActivity = Date.now();
       if (stopped) return;
+    },
+    kick() {
+      if (stopped) return;
+      lastActivity = Date.now();
+      goHot();
+      // Drop the scheduled tick and take one now, so the reply to what we just
+      // posted is not sitting behind a timer we are already waiting out.
+      if (timer) clearTimeout(timer);
+      timer = null;
+      void tick().then(schedule);
     },
     cursor() {
       return cursor;

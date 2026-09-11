@@ -232,6 +232,29 @@ export function liveVp(state: GameState, player: PlayerId): number {
   return scoreFor(state, player);
 }
 
+/**
+ * `liveVp` minus every value a card is deliberately keeping secret.
+ *
+ * This is the number an *opponent* is allowed to be told. It exists because
+ * `scoreFor` folds in `instance.secret.vp`, and Ascendant Spread's whole
+ * premise is that its real value is known only to its owner — shipping a total
+ * that includes it would leak the secret through arithmetic, which is the same
+ * leak as printing the card, only harder to notice.
+ *
+ * Printed VP on ordinary cards is *not* subtracted: piles are public, the
+ * graveyard is public, and the Crown / Duel / Heavy is the Crown variants end
+ * the game on a VP threshold that players have to be able to see coming.
+ */
+export function publicVp(state: GameState, player: PlayerId): number {
+  let hidden = 0;
+  for (const iid of deckIidsOf(state, player)) {
+    const inst = state.instances[iid];
+    const secret = inst?.secret?.['vp'];
+    if (typeof secret === 'number') hidden += secret;
+  }
+  return liveVp(state, player) - hidden;
+}
+
 function turnsTaken(state: GameState, player: PlayerId): number {
   return state.players[player]?.counters.turnsTaken ?? 0;
 }

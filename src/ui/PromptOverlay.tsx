@@ -10,12 +10,21 @@
 
 import React from 'react';
 import type { GameAction, GameView, PlayerId, Prompt, PromptOption } from '@engine/types';
+import { Card } from './Card';
+import { printedCardView } from './cardview';
+import { promptBounds, promptReady, togglePick } from './prompt';
 
 export interface PromptOverlayProps {
   pending: GameView['pending'];
   playerId: PlayerId;
   names: Record<string, string>;
   onAction: (action: GameAction) => void;
+  /**
+   * Controlled selection. Supplied by the table so the keyboard can drive the
+   * same state the mouse does; left undefined the overlay keeps its own.
+   */
+  picked?: string[];
+  onPickedChange?: (next: string[]) => void;
 }
 
 function isWaiting(p: GameView['pending']): p is { waitingOn: PlayerId } {
@@ -26,30 +35,62 @@ function isPrompt(p: GameView['pending']): p is Prompt {
   return p !== null && typeof p === 'object' && 'id' in p && 'options' in p;
 }
 
-const ORDERING_TYPES = new Set<Prompt['type']>(['order']);
+// The selection rules live in `prompt.ts`, pure and DOM-free, because the table
+// drives the same prompt from the keyboard and both must agree exactly. Kept
+// re-exported here so existing importers of this module still find them.
+export { promptBounds, promptReady, togglePick, ORDERING_TYPES } from './prompt';
+export type { PromptBounds } from './prompt';
 
 function OptionButton({
   option,
   selected,
   index,
+  slot,
   onToggle,
 }: {
   option: PromptOption;
   selected: boolean;
   index: number;
+  /** Position in the list, for the digit hint and the staggered entrance. */
+  slot: number;
   onToggle: () => void;
 }): JSX.Element {
+  // A card-bearing option renders as the card. Everything else — "choose one"
+  // clauses, pile picks, player picks — keeps the label, which is all there is.
+  const face = option.defId ? printedCardView(option.defId, option.key) : null;
+  const digit = slot < 9 ? String(slot + 1) : slot === 9 ? '0' : null;
+
   return (
     <button
       type="button"
-      className={`prompt-option${selected ? ' prompt-option-selected' : ''}`}
+      className={`prompt-option${selected ? ' prompt-option-selected' : ''}${
+        face ? ' prompt-option-card' : ''
+      }`}
+      style={{ ['--i']: String(slot) } as React.CSSProperties}
       data-testid="prompt-option"
       data-option-key={option.key}
+      data-option-def={option.defId}
       onClick={onToggle}
     >
       {selected && <span className="prompt-order-index">{index + 1}</span>}
-      <span className="prompt-option-label">{option.label}</span>
-      {option.defId && <span className="prompt-option-def">{option.defId}</span>}
+      {digit && (
+        <span className="prompt-option-key" aria-hidden="true">
+          {digit}
+        </span>
+      )}
+      {face ? (
+        <>
+          <Card card={face} compact={false} selected={selected} />
+          {option.label && option.label !== face.name && (
+            <span className="prompt-option-label">{option.label}</span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="prompt-option-label">{option.label}</span>
+          {option.defId && <span className="prompt-option-def">{option.defId}</span>}
+        </>
+      )}
       {option.pileId && <span className="prompt-option-pile">pile {option.pileId}</span>}
     </button>
   );
@@ -60,12 +101,26 @@ export function PromptOverlay({
   playerId,
   names,
   onAction,
+  picked: controlledPicked,
+  onPickedChange,
 }: PromptOverlayProps): JSX.Element | null {
   const promptId = isPrompt(pending) ? pending.id : null;
-  const [picked, setPicked] = React.useState<string[]>([]);
+  const [ownPicked, setOwnPicked] = React.useState<string[]>([]);
+  const controlled = controlledPicked !== undefined;
+  const picked = controlled ? controlledPicked : ownPicked;
+
+  const setPicked = React.useCallback(
+    (next: string[]) => {
+      if (onPickedChange) onPickedChange(next);
+      if (!controlled) setOwnPicked(next);
+    },
+    [controlled, onPickedChange],
+  );
 
   React.useEffect(() => {
-    setPicked([]);
+    if (!controlled) setOwnPicked([]);
+    // The table clears the controlled copy when the prompt id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptId]);
 
   if (pending === null || pending === undefined) return null;
@@ -99,22 +154,11 @@ export function PromptOverlay({
   // The union is narrowed once, into a const, so every closure below sees a Prompt.
   const prompt: Prompt = pending;
 
-  const ordering = ORDERING_TYPES.has(prompt.type);
-  const min = typeof prompt.min === 'number' ? prompt.min : 1;
-  const max = typeof prompt.max === 'number' ? prompt.max : Math.max(min, 1);
-  const required = ordering ? prompt.options.length : min;
-  const ready = picked.length >= required && picked.length <= Math.max(max, required);
+  const { ordering, min, max } = promptBounds(prompt);
+  const ready = promptReady(prompt, picked);
 
   function toggle(key: string): void {
-    setPicked((prev) => {
-      if (prev.includes(key)) return prev.filter((k) => k !== key);
-      if (!ordering && prev.length >= max && max > 0) {
-        // Single-pick prompts swap rather than refusing the click.
-        if (max === 1) return [key];
-        return prev;
-      }
-      return [...prev, key];
-    });
+    setPicked(togglePick(picked, key, { ordering, max }));
   }
 
   function submit(keys: string[]): void {
@@ -131,13 +175,21 @@ export function PromptOverlay({
             : min === max
               ? `Pick ${min}`
               : `Pick ${min}–${max}`}
+          {prompt.options.length > 0 && (
+            <span className="prompt-keyhint">
+              {' '}
+              · press <kbd>1</kbd>–<kbd>{Math.min(prompt.options.length, 9)}</kbd> to pick,{' '}
+              <kbd>Enter</kbd> to confirm
+            </span>
+          )}
         </div>
 
         <div className="prompt-options">
-          {prompt.options.map((opt) => (
+          {prompt.options.map((opt, slot) => (
             <OptionButton
               key={opt.key}
               option={opt}
+              slot={slot}
               index={picked.indexOf(opt.key)}
               selected={picked.includes(opt.key)}
               onToggle={() => toggle(opt.key)}

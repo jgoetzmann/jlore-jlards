@@ -109,6 +109,10 @@ export function startClient(
       loop.bump();
       void relay
         .post({ from: seatId, kind: 'intent', payload: action })
+        // Poll the moment the intent is on the queue rather than waiting out
+        // the next scheduled tick. The host still has its own interval to
+        // notice it, so this halves the round trip rather than removing it.
+        .then(() => loop.kick())
         .catch(() => undefined);
     },
   };
