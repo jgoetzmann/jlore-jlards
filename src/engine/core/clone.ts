@@ -24,9 +24,27 @@ export function deepClone<T>(value: T): T {
   return cloneAny(value) as T;
 }
 
-/** B2: `reduce` clones at entry and never mutates its input. */
+/**
+ * B2: `reduce` clones at entry and never mutates its input.
+ *
+ * Everything is deep-cloned except the log's entries: the array is copied, the
+ * LogEntry objects inside it are shared with the input. The log is append-only.
+ * Every write path (core/log.ts, meta/util.ts pushLog, systems/internal.ts
+ * pushLog, shop/util.ts appendLog) creates a fresh entry and pushes or spreads
+ * it onto the array, and nothing anywhere indexes into a past entry to change
+ * it. So sharing is invisible, and it keeps the clone's cost from growing with
+ * the match (the log reaches 2-3k entries late in a game and was the bulk of
+ * every clone). ENGINE-1.
+ */
 export function cloneState(state: GameState): GameState {
-  return deepClone(state);
+  // Key order is kept identical to the input, so JSON.stringify of a clone
+  // matches the original byte for byte (lockstep checksums rely on that).
+  const src = state as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(src)) {
+    out[k] = k === 'log' && Array.isArray(src[k]) ? (src[k] as unknown[]).slice() : cloneAny(src[k]);
+  }
+  return out as unknown as GameState;
 }
 
 export function deepEqual(a: unknown, b: unknown): boolean {
