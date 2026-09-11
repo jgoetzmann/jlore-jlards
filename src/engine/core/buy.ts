@@ -13,7 +13,15 @@
  */
 
 import type { GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
-import { canBuy as shopCanBuy, costOf, isLocked } from '@engine/shop';
+import {
+  applyBuyMods,
+  canBuy as shopCanBuy,
+  costOf,
+  isLocked,
+  peekBuyMods,
+  priceOfPileFor,
+  type BuyMods,
+} from '@engine/shop';
 import { appendLog } from './log.js';
 import {
   fireFieldTriggers,
@@ -30,27 +38,6 @@ import { questProgress } from '@engine/meta';
 /** The one card allowed to bank negative Prophet (SB-5 / B61). */
 function allowsNegativeProphet(defId: string): boolean {
   return defId.includes('unconcerned_lion');
-}
-
-interface BuyMods {
-  costDelta: number;
-  costFloor: number | null;
-  buyTo: Zone | null;
-}
-
-function peekBuyMods(state: GameState, player: PlayerId): BuyMods {
-  const p = state.players[player];
-  const out: BuyMods = { costDelta: 0, costFloor: null, buyTo: null };
-  if (!p) return out;
-  for (const mod of p.nextCardMods) {
-    if (mod.appliesTo !== 'buy') continue;
-    if (mod.costDelta) out.costDelta += mod.costDelta;
-    if (mod.costFloor !== undefined) {
-      out.costFloor = out.costFloor === null ? mod.costFloor : Math.max(out.costFloor, mod.costFloor);
-    }
-    if (mod.buyTo) out.buyTo = mod.buyTo;
-  }
-  return out;
 }
 
 function consumeBuyMods(state: GameState, player: PlayerId): BuyMods {
@@ -70,21 +57,21 @@ function consumeBuyMods(state: GameState, player: PlayerId): BuyMods {
   return out;
 }
 
-/** Current money price of a pile for a buyer, after next-buy modifiers. */
+/**
+ * Current money price of a pile for a buyer, after next-buy modifiers.
+ *
+ * Delegates to the shop slice, which is the one place the price is defined, and
+ * falls back to the printed cost only when the shop slice cannot answer.
+ */
 export function priceFor(state: GameState, pileId: PileId, buyer: PlayerId): number {
-  let base: number;
   try {
-    base = costOf(state, pileId, buyer);
+    return priceOfPileFor(state, pileId, buyer);
   } catch {
     const iid = topOfPile(state, pileId);
     const def = iid ? safeDef(state.instances[iid]!.defId) : null;
-    base = def?.cost.money ?? 0;
+    const base = def?.cost.money ?? 0;
+    return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer));
   }
-  if (!Number.isFinite(base)) base = 0;
-  const mods = peekBuyMods(state, buyer);
-  let price = base + mods.costDelta;
-  if (mods.costFloor !== null && price < mods.costFloor) price = mods.costFloor;
-  return Math.round(price);
 }
 
 /**
@@ -150,6 +137,10 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
   if (!inst) return s;
   const def = safeDef(inst.defId);
 
+  // The price is read BEFORE the modifiers are consumed. Reading it afterwards
+  // priced the card against a state the discount had already been taken out of,
+  // so a Silver the table showed at (1) under Miracle Prep charged its full 3.
+  const price = priceFor(s, pileId, player);
   const mods = consumeBuyMods(s, player);
   let paid = 0;
   let prophetPaid = 0;
@@ -160,8 +151,6 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
     p.prophet -= prophetPaid;
     if (p.prophet < 0 && !allowsNegativeProphet(inst.defId)) p.prophet = 0; // B60/B61
   } else {
-    let price = priceFor(s, pileId, player);
-    if (mods.costFloor !== null && price < mods.costFloor) price = mods.costFloor;
     paid = price;
     p.money -= price; // B55: a negative price credits the buyer.
     p.buys -= 1;

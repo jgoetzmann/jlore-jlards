@@ -173,6 +173,16 @@ export function opResetCombo(s: GameState, item: QueuedEffect): OpResult {
   return 'ok';
 }
 
+/**
+ * End the game from a card (Doomsday Clock).
+ *
+ * `winners` is deliberately left null: the effect interpreter cannot score,
+ * because `computeScores` lives in `core` and `core/endgame` imports the
+ * interpreter back. `reduce` settles it instead — `settleEndedGame` runs after
+ * every branch and turns a flagged-but-unscored state into a finished one. A
+ * game that ended here with no winners is what made the table read "nobody
+ * wins" and freeze.
+ */
 export function opEndGame(s: GameState, item: QueuedEffect): OpResult {
   const node = item.node;
   if (node.op !== 'endGame') return 'ok';

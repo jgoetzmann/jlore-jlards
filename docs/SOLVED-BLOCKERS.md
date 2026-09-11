@@ -1103,6 +1103,47 @@ Code: `startLobbyHost()`, `startHost(relay, state, { seats, since })`,
 
 ## From the smooth-play pass
 
+### SB-66. A token on top of a shop pile is a lockout, not a speed bump
+
+**The question.** `Water Into Swine` read "Add a Cursed Pig to the top of every
+non-empty Draft pile". Playtesting the merged branch, one play of it closed the
+entire Draft Shop for the remaining 27 turns: every pile showed a Cursed Pig, a
+cost chip of `0` and a lit green Buy button, and 39 clicks on those buttons did
+nothing at all.
+
+**Why.** A Cursed Pig is a Token, so it is `notPurchasable`, and `canBuyPile`
+refuses a pile whose top card is (B62/B48: a token is never purchasable, and
+never sits in a shop pile). B49 says the top card is what you buy — so the Pig
+is not a tax you pay through, it is a permanent plug. Nothing in the game removes
+a card from the top of a pile except buying it, which is the one thing the Pig
+forbids. The Draft Shop was dead, and with it the empty-draft-piles end
+condition, so the match could only end on the Jlore pile or the turn limit.
+
+**The ruling.** A `notPurchasable` card never enters a shop pile, at runtime as
+well as at deal time. `opAddToPileTop` refuses one and logs
+`addToPileTopRefused`; that keeps B62/B48 true of a live match and not just of a
+fresh one. Water Into Swine keeps its name, its cost and its PvP tag, and puts
+the Pig where every other Cursed Pig card in the catalog puts it — the
+opponents' graveyards ("Add a Cursed Pig to each opponent's GY"). It is still an
+attack worth (5); it is no longer a card that ends the shop.
+
+Rejected: making the Pig purchasable at 0 so you could buy through it (breaks
+B62, and makes "buy" mean "clear a blocker"), and having a buy skip to the first
+purchasable card in the pile (breaks B49, and hides what you are buying).
+
+**Also fixed with it — the table must never light a Buy the engine will refuse.**
+`PileView.top.affordable` is `canBuyPile`, the engine's own answer. `Board.tsx`
+recomputed buyability from price and Buys alone and ignored it, which is why ten
+unbuyable piles rendered as ten green buttons. The tile now requires
+`top.affordable !== false`, the disabled button says *"Cursed Pig can't be
+bought"*, and `turnDone` uses the same test so a shop full of refused piles still
+reports the turn as finished.
+
+Code: `src/engine/effects/ops/shop.ts` (`opAddToPileTop`),
+`src/cards/economy/shop-manip.ts` (`water_into_swine`), `src/ui/Board.tsx`,
+`src/ui/turnflow.ts`. Tests: `test/smooth-regressions.test.ts`,
+`test/ui-interaction.test.ts`.
+
 ### SB-65. Every browser runs the engine: hidden information is waived for playtesting
 
 **The question.** A networked press took about 1.8 seconds to show up on the

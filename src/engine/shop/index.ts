@@ -8,7 +8,7 @@
 
 import type { GameState, PileId, PlayerId } from '@engine/types';
 import { pileDefId, safeGetCard } from './util';
-import { canAffordMoney, costOf } from './cost';
+import { canAffordMoney, priceOfPileFor } from './cost';
 import { isLocked } from './locks';
 import { canAffordProphet, isProphetPile } from './prophet';
 
@@ -48,7 +48,11 @@ export function canBuy(state: GameState, pileId: PileId, buyer: PlayerId): boole
   }
 
   if (player.buys < 1) return false;
-  return canAffordMoney(player.money, costOf(state, pileId, buyer));
+  // The price after next-buy modifiers, not the printed one. Gating on the
+  // printed cost made Miracle Prep's discount unusable: the view priced a
+  // Silver at (1), `canBuyPile` agreed, and this check vetoed it at 2 — the buy
+  // was refused with `illegalBuy` and the lit Buy button did nothing.
+  return canAffordMoney(player.money, priceOfPileFor(state, pileId, buyer));
 }
 
 /** Every pile this player could buy from right now. Feeds `legalActions`. */
@@ -108,11 +112,15 @@ export {
 
 export {
   DEFAULT_COST_FLOOR,
+  applyBuyMods,
   applyCostMod,
   canAffordMoney,
   costModExpiryFor,
   costModIsActive,
   costModStack,
+  peekBuyMods,
+  priceOfPileFor,
+  type BuyMods,
 } from './cost';
 
 export {

@@ -27,14 +27,20 @@ import { KEY_HELP, digitIndex, digitLabel, keyIntent, type KeyContext } from '@u
 import { allPiles, promptBounds, promptReady, togglePick } from '@ui/prompt';
 import {
   addBuyFlight,
+  endTurnBlocked,
   inFlightPiles,
   isInertPlay,
   isPlainResource,
+  isRepeatPress,
   isUsefulPlay,
   playMoneyPlan,
   submitsOnPick,
   turnDone,
+  BUY_REPEAT_MS,
+  END_TURN_GRACE_MS,
 } from '@ui/turnflow';
+import { isNewlyArrived } from '@ui/Hand';
+import { endReasonText } from '@ui/logtext';
 import { cardSignature, stabilizeView } from '@ui/viewcache';
 import { collapseLines } from '@ui/Log';
 import { artKeysIn, artThumbUrl, artUrl } from '@ui/art';
@@ -394,6 +400,23 @@ describe('turn done (TURN-10)', () => {
     expect(turnDone(v)).toBe(true);
   });
 
+  /**
+   * H2. A pile the engine refuses is not "something left to do". Water Into
+   * Swine put a Cursed Pig on every Draft pile: the price still read 0, so the
+   * turn never reported itself done and the Buy stayed lit over nothing.
+   */
+  it('D1: a pile the engine refuses does not count as something left to do', () => {
+    const refused: PileView = {
+      ...pile('x', 0),
+      top: { ...card('x_top', 'cursed_pig', { cost: 0 }), affordable: false },
+    };
+    const v = gview({
+      you: self({ hand: [tix('t')], money: 5, buys: 1 }),
+      shop: { resource: [], points: [], prophet: [], draft: [refused] },
+    });
+    expect(turnDone(v)).toBe(true);
+  });
+
   it('D1: not done with money in hand, an affordable pile, or a live prompt', () => {
     const shop = { resource: [], points: [], prophet: [], draft: [pile('x', 3)] };
     expect(turnDone(gview({ you: self({ hand: [copper('c')] }), shop }))).toBe(false);
@@ -458,6 +481,47 @@ describe('log (RENDER-1)', () => {
   });
 });
 
+describe('the board tells the truth about what can be bought (H2)', () => {
+  it('B1: a pile the engine refuses renders unbuyable, and says why', () => {
+    const refused: PileView = {
+      ...pile('draft:coal', 0),
+      top: { ...card('coal_top', 'cursed_pig', { cost: 0, name: 'Cursed Pig' }), affordable: false },
+    };
+    const v = gview({
+      you: self({ money: 5, buys: 1 }),
+      shop: { resource: [], points: [], prophet: [], draft: [refused] },
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(Board, { view: v, onBuy: () => undefined, yourTurn: true }),
+    );
+    // Affordable by price, refused by the engine: the button must be off.
+    expect(html).toContain('data-buyable="false"');
+    expect(html).toContain('can’t be bought');
+  });
+
+  it('B1: an ordinary affordable pile is still buyable', () => {
+    const ok: PileView = { ...pile('draft:spotter', 3), top: { ...card('s_top', 'spotter', { cost: 3 }), affordable: true } };
+    const v = gview({
+      you: self({ money: 5, buys: 1 }),
+      shop: { resource: [], points: [], prophet: [], draft: [ok] },
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(Board, { view: v, onBuy: () => undefined, yourTurn: true }),
+    );
+    expect(html).toContain('data-buyable="true"');
+  });
+});
+
+describe('game over reads as a sentence (L1)', () => {
+  it('B1: an engine end reason is rendered in English, never as its identifier', () => {
+    expect(endReasonText('jlorePileEmpty')).toBe('the Jlore pile ran out');
+    expect(endReasonText('emptyPiles')).toBe('enough Draft piles were emptied');
+    expect(endReasonText(null)).toBe('the game ended');
+    // An end reason nobody has written a sentence for still reads as words.
+    expect(endReasonText('someNewReason')).toBe('some new reason');
+  });
+});
+
 describe('art (ART-1)', () => {
   it('A1: thumbnails are WebP under /art/thumb, full art is the jpg', () => {
     expect(artThumbUrl('copper')).toBe('/art/thumb/copper.webp');
@@ -478,17 +542,69 @@ describe('buys in flight (TURN-8, UI-R2)', () => {
   it('B1: every pile bought under one view stays guarded, not just the last', () => {
     let f = addBuyFlight(null, 'a', 7);
     f = addBuyFlight(f, 'b', 7);
-    // Clicking A again before a view lands must still find A in flight.
-    expect(inFlightPiles(f, 7).has('a')).toBe(true);
-    expect(inFlightPiles(f, 7).has('b')).toBe(true);
+    // Clicking A again before the table has answered must still find A in flight.
+    expect(inFlightPiles(f, 7, 1).has('a')).toBe(true);
+    expect(inFlightPiles(f, 7, 1).has('b')).toBe(true);
     expect(addBuyFlight(f, 'a', 7)).toBe(f);
   });
 
   it('B1: a newer view clears the guard, and a buy under it starts afresh', () => {
     const f = addBuyFlight(addBuyFlight(null, 'a', 7), 'b', 7);
-    expect(inFlightPiles(f, 8).size).toBe(0);
+    expect(inFlightPiles(f, 8, 1).size).toBe(0);
     expect(addBuyFlight(f, 'c', 8)).toEqual({ ids: ['c'], revision: 8 });
-    expect(inFlightPiles(null, 8).size).toBe(0);
+    expect(inFlightPiles(null, 8, 1).size).toBe(0);
+  });
+
+  /**
+   * SEAM-2. Under optimistic apply (SB-65) the press is reduced locally and the
+   * log grows before the post leaves, so the view's revision has already moved
+   * on by the next render — the revision-keyed guard cleared itself and a
+   * double-click could buy twice whenever the engine still allowed a second buy
+   * (2+ Buys, or a Prophet pile, which consumes none).
+   */
+  it('B1: nothing shows busy once this browser has no unconfirmed intent', () => {
+    const f = addBuyFlight(null, 'a', 7);
+    expect(inFlightPiles(f, 7, 1).has('a')).toBe(true);
+    // The relay echoed it: the pile's own state now says what happened.
+    expect(inFlightPiles(f, 7, 0).size).toBe(0);
+  });
+
+  it('B1: a repeat press on the same pile inside the window is one gesture', () => {
+    const first = { key: 'draft:coal', atMs: 1_000 };
+    expect(isRepeatPress(first, 'draft:coal', 1_000 + BUY_REPEAT_MS - 1)).toBe(true);
+    // Far enough apart to be two deliberate buys, which is legal with 2 Buys.
+    expect(isRepeatPress(first, 'draft:coal', 1_000 + BUY_REPEAT_MS + 1)).toBe(false);
+    // A different pile is always a different gesture.
+    expect(isRepeatPress(first, 'draft:spotter', 1_000 + 10)).toBe(false);
+    expect(isRepeatPress(null, 'draft:coal', 1_000)).toBe(false);
+  });
+
+  /**
+   * SEAM-1. In hotseat the screen follows whoever must act, so ending your turn
+   * puts the NEXT player's End turn button under the pointer in the same frame.
+   * A quick E,E then ended two turns (1 -> 3).
+   */
+  it('B1: End turn ignores the keyboard for a moment after the turn changes', () => {
+    const changed = 5_000;
+    expect(endTurnBlocked(changed, changed + END_TURN_GRACE_MS - 1)).toBe(true);
+    expect(endTurnBlocked(changed, changed + END_TURN_GRACE_MS + 1)).toBe(false);
+    // Nothing has changed yet: the first End turn of a match is never blocked.
+    expect(endTurnBlocked(null, 5_000)).toBe(false);
+  });
+
+  /**
+   * MP-1. A card that puts cards into your hand refills the slot the pointer is
+   * still on, and the arrival was never "launched", so the second click of a
+   * double-click played it — a card the player never chose.
+   */
+  it('B1: a card that arrived after the play is not clickable while the hand settles', () => {
+    const settle = { known: new Set(['magnet']), untilMs: 1_000 };
+    expect(isNewlyArrived(settle, 'copper_new', 999)).toBe(true);
+    // The card that was there all along stays clickable.
+    expect(isNewlyArrived(settle, 'magnet', 999)).toBe(false);
+    // Once the hand has settled the new card is a normal, clickable card.
+    expect(isNewlyArrived(settle, 'copper_new', 1_001)).toBe(false);
+    expect(isNewlyArrived(null, 'copper_new', 0)).toBe(false);
   });
 
   it('B1: the board turns off the Buy of every pile in flight', () => {

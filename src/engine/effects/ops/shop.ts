@@ -291,6 +291,15 @@ export function opAddToPileTop(s: GameState, item: QueuedEffect, q: QueuedEffect
     for (let k = 0; k < count; k += 1) {
       const defId = resolveDefIdSpec(s, node.defId, ctx, rng);
       if (!defId) continue;
+      // B62/B48: a notPurchasable card never sits in a shop pile. One on top is
+      // not a speed bump, it is a permanent lockout — `canBuyPile` refuses the
+      // pile, nothing ever removes the token, and the pile is dead for the rest
+      // of the match. Water Into Swine did this to all ten Draft piles at once.
+      const def = tryGetCard(defId);
+      if (def && def.notPurchasable) {
+        log(s, 'addToPileTopRefused', { pileId, defId, reason: 'notPurchasable' }, item.player);
+        continue;
+      }
       moveToPile(s, createInstance(s, defId, null, 'shop').iid, pileId, 'top');
       log(s, 'addToPileTop', { pileId, defId }, item.player);
     }

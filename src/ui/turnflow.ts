@@ -141,6 +141,10 @@ export function turnDone(view: GameView): boolean {
   for (const p of piles) {
     if (p.count <= 0 || p.top === null) continue;
     if (!p.prophetCost && you.buys <= 0) continue;
+    // The engine's own gate, same as the Buy button (Board.tsx). A pile the
+    // engine will refuse is not something "left to do", or a table holding an
+    // unbuyable pile never reports the turn as done.
+    if (p.top.affordable === false) continue;
     if (canAfford(p, you.money, you.prophet)) return false;
   }
   if (you.field.some((a) => a.tier === 'heroic' && !a.usedThisTurn && you.money >= HEROIC_ACTIVATION_COST)) {
@@ -188,8 +192,76 @@ export function addBuyFlight(prev: BuyFlight | null, pileId: PileId, revision: n
   return { ids: [...prev.ids, pileId], revision };
 }
 
-/** The piles whose Buy is off right now: none once a newer view has landed. */
-export function inFlightPiles(flight: BuyFlight | null, revision: number): ReadonlySet<PileId> {
-  if (flight === null || flight.revision !== revision || flight.ids.length === 0) return NO_PILES;
+/**
+ * The piles whose Buy shows as busy.
+ *
+ * `unconfirmed` is how many of this browser's own intents the relay has not
+ * echoed yet. It is the only honest signal: under optimistic apply (SB-65) the
+ * press is reduced locally and the log grows immediately, so the view's
+ * revision has ALREADY moved on by the time the next render happens — keying
+ * "still in flight" on the revision meant the guard cleared on the very next
+ * frame, while the post was still going out. In hotseat nothing is ever
+ * unconfirmed for longer than a task, so no pile ever shows busy, which is
+ * right: there is nothing to wait for.
+ */
+export function inFlightPiles(
+  flight: BuyFlight | null,
+  revision: number,
+  unconfirmed = 0,
+): ReadonlySet<PileId> {
+  if (flight === null || flight.ids.length === 0) return NO_PILES;
+  if (unconfirmed <= 0) return NO_PILES;
+  if (flight.revision !== revision) return NO_PILES;
   return new Set(flight.ids);
+}
+
+/**
+ * Double-press guards (TURN-8, SEAM-1/SEAM-2).
+ *
+ * Both exist because the optimistic apply removed the pause these actions used
+ * to have. A press is reduced and re-rendered inside the click handler, so the
+ * second click of a double-click lands on a table that has already moved: a
+ * fresh Buy button on a pile you can still afford, or — in hotseat, where the
+ * screen follows whoever must act — the NEXT player's End turn button sitting
+ * at the same pixels. Neither is a press the player made.
+ *
+ * Wall-clock is right here and nowhere near the engine: these measure a human
+ * gesture, not game time.
+ */
+
+/** A second press on the same pile inside this window is the same gesture. */
+export const BUY_REPEAT_MS = 350;
+
+/** How long End turn ignores presses after the seat on screen changed. */
+export const END_TURN_GRACE_MS = 400;
+
+export interface LastPress {
+  key: string;
+  atMs: number;
+}
+
+/** True when this press repeats `last` inside `windowMs`, so it is a double-click. */
+export function isRepeatPress(
+  last: LastPress | null,
+  key: string,
+  nowMs: number,
+  windowMs = BUY_REPEAT_MS,
+): boolean {
+  if (last === null || last.key !== key) return false;
+  return nowMs - last.atMs < windowMs;
+}
+
+/**
+ * True while End turn must refuse: the seat (or turn) on screen changed less
+ * than `graceMs` ago, so this press was aimed at the table that was there
+ * before. Without it a double-click on End turn ended two turns — yours, then
+ * whoever the hotseat screen followed to.
+ */
+export function endTurnBlocked(
+  seatChangedAtMs: number | null,
+  nowMs: number,
+  graceMs = END_TURN_GRACE_MS,
+): boolean {
+  if (seatChangedAtMs === null) return false;
+  return nowMs - seatChangedAtMs < graceMs;
 }

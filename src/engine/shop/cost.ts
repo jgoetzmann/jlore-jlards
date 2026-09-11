@@ -16,7 +16,7 @@
  * Funding at -3 credits the buyer 3 Money.
  */
 
-import type { CostMod, Duration, GameState, PileId, PlayerId } from '@engine/types';
+import type { CostMod, Duration, GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
 import { pileDefId, safeGetCard } from './util';
 import { expiryTurnFor } from './locks';
 import { dynamicPriceFor } from './dynamic';
@@ -119,4 +119,57 @@ export function costOf(state: GameState, pileId: PileId, buyer: PlayerId): numbe
 /** True when the buyer's wallet covers the price. Negative prices always pass. */
 export function canAffordMoney(money: number, cost: number): boolean {
   return cost <= 0 || money >= cost;
+}
+
+// ---------------------------------------------------------------------------
+// Next-buy modifiers (Miracle Prep, Express Shipping)
+// ---------------------------------------------------------------------------
+
+/**
+ * A player's pending "your next buy costs N less" modifiers, folded together.
+ *
+ * This lives here, next to `costOf`, because it is part of the price: every
+ * reader that asks what a pile costs a given buyer has to apply it, and the two
+ * that did not agree were the whole of the Miracle Prep bug. `core/buy.ts`
+ * consumes these on a purchase; nothing in this module mutates them.
+ */
+export interface BuyMods {
+  costDelta: number;
+  costFloor: number | null;
+  buyTo: Zone | null;
+}
+
+export function peekBuyMods(state: GameState, player: PlayerId): BuyMods {
+  const out: BuyMods = { costDelta: 0, costFloor: null, buyTo: null };
+  const p = state.players[player];
+  if (!p) return out;
+  for (const mod of p.nextCardMods as NextCardMod[]) {
+    if (mod.appliesTo !== 'buy') continue;
+    if (mod.costDelta) out.costDelta += mod.costDelta;
+    if (mod.costFloor !== undefined) {
+      out.costFloor = out.costFloor === null ? mod.costFloor : Math.max(out.costFloor, mod.costFloor);
+    }
+    if (mod.buyTo) out.buyTo = mod.buyTo;
+  }
+  return out;
+}
+
+/** `base` after one set of next-buy modifiers, with the modifier's own floor. */
+export function applyBuyMods(base: number, mods: BuyMods): number {
+  let price = base + mods.costDelta;
+  if (mods.costFloor !== null && price < mods.costFloor) price = mods.costFloor;
+  return Math.round(price);
+}
+
+/**
+ * What this pile actually costs this buyer right now: the modifier stack (B54)
+ * and then any pending next-buy modifier.
+ *
+ * The single source of truth for the price. `canBuy` here, `canBuyPile` and
+ * `buyCard` in `core/buy.ts`, and the price the view prints all read it, so a
+ * pile the table shows at (1) is a pile the engine sells at 1 and gates at 1.
+ */
+export function priceOfPileFor(state: GameState, pileId: PileId, buyer: PlayerId): number {
+  const base = costOf(state, pileId, buyer);
+  return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer));
 }

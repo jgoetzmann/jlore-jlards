@@ -1297,18 +1297,17 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: {},
     effects: [
-      {
-        // The empty-pile guard in selectPilesWith only runs when a filter is
-        // present, and an empty filter matches everything — so this is the way
-        // to say "every non-empty Draft pile" and leave emptied piles emptied.
-        op: 'addToPileTop',
-        target: { shop: 'draft', filter: {} },
-        defId: 'cursed_pig',
-        count: 1,
-      },
+      // Was "add a Cursed Pig to the top of every non-empty Draft pile", which
+      // B62/B48 forbid (a notPurchasable card never sits in a shop pile) and
+      // which bricked the match: `canBuyPile` refuses a pile whose top is a
+      // token, nothing removes the token, so one play closed the whole Draft
+      // Shop permanently — and with it the empty-draft-piles end condition.
+      // Recorded as SB-66. The Pig now goes where tokens are allowed and where
+      // every other Cursed Pig card puts it: the opponents' graveyards.
+      { op: 'createCard', defId: 'cursed_pig', to: 'gy', who: 'eachOpponent' },
     ],
     triggers: [],
-    text: 'Add a Cursed Pig to the top of every non-empty Draft pile.',
+    text: 'Add a Cursed Pig to each opponent’s GY.',
     flavor: 'A lesser miracle.',
     complexity: 'T2',
     subsystems: ['S-TOKEN'],

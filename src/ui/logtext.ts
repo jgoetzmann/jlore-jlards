@@ -36,6 +36,51 @@ export interface LogNaming {
 
 export const HIDDEN_CARD = 'a hidden card';
 
+/**
+ * Why the game ended, as a sentence.
+ *
+ * `state.endReason` is an engine identifier (`jlorePileEmpty`), and the
+ * game-over panel printed it verbatim. Unknown reasons fall back to the raw id
+ * spaced out, so a new end condition reads badly rather than not at all.
+ */
+export function endReasonText(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'jlorePileEmpty':
+    case 'jloreEmpty':
+      return 'the Jlore pile ran out';
+    case 'emptyPiles':
+    case 'pilesEmpty':
+      return 'enough Draft piles were emptied';
+    case 'hardEndTurn':
+      return 'the turn limit was reached';
+    case 'countdown':
+      return 'the countdown ran out';
+    case 'duel':
+      return 'someone pulled far enough ahead';
+    case 'crown':
+      return 'someone reached the target score';
+    case 'deathsDoor':
+      return 'Death’s Door closed';
+    case 'doomsday':
+    case 'doomsdayClock':
+      return 'the Doomsday counter ran out';
+    case 'battleRoyale':
+    case 'lastPlayerStanding':
+      return 'only one player was left standing';
+    case 'aimForTheMoon':
+      return 'someone reached 20 VP';
+    case 'heavyIsTheCrown':
+      return 'someone led by 10 VP';
+    case 'concession':
+      return 'everyone else conceded';
+    case 'cardEffect':
+      return 'a card ended it';
+    default:
+      if (!reason) return 'the game ended';
+      return reason.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  }
+}
+
 function str(detail: Record<string, unknown>, key: string): string | null {
   const v = detail?.[key];
   return typeof v === 'string' ? v : null;
@@ -220,7 +265,21 @@ export function describeEntry(entry: LogEntry, naming: LogNaming): LogLine {
     case 'endTriggered':
       return line('empties the pile that ends the game — everyone gets one more turn');
     case 'gameEnd':
-      return line(`the game ends — ${str(d, 'reason') ?? 'no reason given'}`);
+      return line(`the game ends — ${endReasonText(str(d, 'reason'))}`);
+
+    case 'buff':
+    case 'nerf': {
+      const stat = str(d, 'stat') ?? 'a stat';
+      const delta = num(d, 'delta');
+      const n = num(d, 'affected');
+      const who = n === null || n === 1 ? 'a card' : `${n} cards`;
+      const sign = delta === null ? '' : delta < 0 ? `${delta}` : `+${delta}`;
+      return line(
+        entry.kind === 'buff'
+          ? `buffs ${who}: ${sign} ${stat}`
+          : `nerfs ${who}: ${sign} ${stat}`,
+      );
+    }
     case 'concede':
       return line('concedes');
 

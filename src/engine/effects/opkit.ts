@@ -178,6 +178,21 @@ function selectorCount(s: GameState, sel: Selector, ctx: EffectContext): number 
   return Math.floor(evaluateNs.evalAmount(s, sel.count, ctx));
 }
 
+/** How many piles a `pick:'choose'` may take, and whether that is a maximum. */
+export interface PileChoice {
+  /**
+   * The limit when the selector itself carries no `count`. Several ops put the
+   * count on the NODE rather than on `from`/`target` — `{op:'gainCard', from:{…,
+   * pick:'choose'}, count:2}` — and without this the selector saw no count at
+   * all, so `want` defaulted to "every matching pile", `want >= all.length`
+   * short-circuited, and the op silently took the first N in shop order instead
+   * of ever asking. That is why Blubber Baron never prompted.
+   */
+  count?: number;
+  /** "Add UP TO 2": the player may take fewer, so the prompt's min is 0. */
+  atMost?: boolean;
+}
+
 /** Resolve a pile selector, suspending with a pile prompt on pick:'choose'. */
 export function resolvePiles(
   s: GameState,
@@ -186,6 +201,7 @@ export function resolvePiles(
   sel: Parameters<typeof selectPilesWith>[1],
   pre: Pre | undefined,
   promptText: string,
+  choice?: PileChoice,
 ): PileId[] | null {
   if (pre && pre.pileIds) return pre.pileIds;
   const ctx = ctxFor(item);
@@ -193,7 +209,13 @@ export function resolvePiles(
   if (sel && sel.pick === 'choose') {
     const all = selectPilesWith(s, { ...sel, pick: undefined, count: undefined }, ctx, null);
     if (all.length === 0) return [];
-    const want = sel.count === undefined ? all.length : Math.max(0, Math.floor(evaluateNs.evalAmount(s, sel.count, ctx)));
+    const limit =
+      sel.count !== undefined
+        ? Math.floor(evaluateNs.evalAmount(s, sel.count, ctx))
+        : choice?.count !== undefined
+          ? Math.floor(choice.count)
+          : all.length;
+    const want = Math.max(0, limit);
     if (want === 0) return [];
     if (want >= all.length) return all;
     const prompt: Prompt = {
@@ -202,7 +224,7 @@ export function resolvePiles(
       player: item.player,
       prompt: promptText,
       options: all.map((pid) => optionForPile(s, pid)),
-      min: want,
+      min: choice?.atMost ? 0 : want,
       max: want,
       then: [],
       ctx: payloadFrom(item, 'piles', { node: item.node }),

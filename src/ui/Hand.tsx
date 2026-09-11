@@ -55,6 +55,12 @@ export interface HandProps {
    * still in hand once a newer view lands was refused, so it is given back.
    */
   revision?: number;
+  /**
+   * The turn on screen. The settle window below is scoped to it: a new turn
+   * deals a whole new hand, and every card in it is an "arrival" that has
+   * nothing to do with the play that set the window.
+   */
+  turn?: number;
 }
 
 /** What the table's keyboard can ask of the hand. Every index is a shown index. */
@@ -82,6 +88,35 @@ export const ORDER_ACK_TIMEOUT_MS = 2500;
  * This covers an intent the host dropped without publishing anything.
  */
 export const LAUNCH_TIMEOUT_MS = 2500;
+
+/**
+ * How long a card that ARRIVED in the hand stays unclickable after a play.
+ *
+ * Marking the played card launched is not enough. A card whose effect adds
+ * cards to your hand — Magnet, or any plain "+2 Cards" — refills the slot the
+ * pointer is still sitting on, and the new card was never launched, so the
+ * second click of a double-click plays it. That is a wrong-action bug: every
+ * browser agrees on the result, it just is not the action the player took.
+ */
+export const HAND_SETTLE_MS = 300;
+
+/** Cards the hand held when the last play was sent, and how long that binds. */
+export interface HandSettle {
+  known: ReadonlySet<InstanceId>;
+  untilMs: number;
+}
+
+/**
+ * True for a card that was not in the hand when the last play was sent and is
+ * still inside the settle window — i.e. it slid into the slot under the
+ * pointer. Those clicks belong to the card that was there before, so they are
+ * dropped rather than applied to whatever replaced it.
+ */
+export function isNewlyArrived(settle: HandSettle | null, iid: InstanceId, nowMs: number): boolean {
+  if (settle === null) return false;
+  if (nowMs >= settle.untilMs) return false;
+  return !settle.known.has(iid);
+}
 
 /** Move the item at `from` to index `to`, keeping everything else in order. */
 export function moveInOrder<T>(items: readonly T[], from: number, to: number): T[] {
@@ -328,7 +363,7 @@ function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) 
 // ---------------------------------------------------------------------------
 
 const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
-  { hand, playerId, yourTurn, onAction, pick, revision = 0 },
+  { hand, playerId, yourTurn, onAction, pick, revision = 0, turn = 0 },
   ref,
 ) {
   const [localOrder, setLocalOrder] = React.useState<CardView[] | null>(null);
@@ -343,6 +378,12 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
   const [launch, setLaunch] = React.useState<{ iids: readonly InstanceId[]; revision: number } | null>(null);
   const rowRef = React.useRef<HTMLDivElement | null>(null);
   const registry = React.useContext(FlipContext);
+  // Which cards the hand held when the last play was sent (MP-1). State, not a
+  // ref: `clickable` is computed during render, so the window has to END with a
+  // render of its own. As a ref it never got one, and a hand rendered inside
+  // the window stayed unclickable until the next action — which froze the table
+  // for a whole turn when the window happened to span an end of turn.
+  const [settle, setSettle] = React.useState<HandSettle | null>(null);
 
   // `dragstart` sets state, but the first `dragover` can arrive before React
   // has re-rendered with it, and a dragover that does not `preventDefault` is a
@@ -404,6 +445,20 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     return () => clearTimeout(timer);
   }, [launch]);
 
+  // The settle window closes on its own, with a render, so nothing it made
+  // unclickable stays that way.
+  React.useEffect(() => {
+    if (settle === null) return;
+    const timer = setTimeout(() => setSettle(null), HAND_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [settle]);
+
+  // A new turn deals a new hand. Every card in it is an arrival, and none of
+  // them has anything to do with the play that opened the window.
+  React.useEffect(() => {
+    setSettle(null);
+  }, [turn]);
+
   // The cursor follows the hand: a card played out from under it would
   // otherwise leave the highlight pointing at whatever slid into that slot.
   React.useEffect(() => {
@@ -415,7 +470,10 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     [launch, revision],
   );
   const isPlayable = (card: CardView): boolean =>
-    yourTurn && card.playable !== false && !launchedSet.has(card.iid);
+    yourTurn &&
+    card.playable !== false &&
+    !launchedSet.has(card.iid) &&
+    !isNewlyArrived(settle, card.iid, Date.now());
 
   function commit(next: CardView[]): void {
     const sig = orderSignature(next);
@@ -440,6 +498,13 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     // and the card has to stop being clickable, so an impatient second click
     // cannot land on whatever slides into its place.
     launchCards([card.iid]);
+    // Freeze the slot as well as the card: anything that is not in the hand
+    // right now arrived because of THIS play, and a click landing on it inside
+    // the settle window was aimed at the card that just left.
+    setSettle({
+      known: new Set(shown.map((c) => c.iid)),
+      untilMs: Date.now() + HAND_SETTLE_MS,
+    });
     onAction({ type: 'play', player: playerId, iid: card.iid });
   }
 

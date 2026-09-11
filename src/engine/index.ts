@@ -28,7 +28,7 @@ import { canBuyPile, buyCard } from './core/buy.js';
 import { canActivateAura, activateAura } from './core/aura.js';
 import { endTurn as endTurnImpl, advanceTurn, startTurn } from './core/turn.js';
 import { drainQueue, resolvePrompt } from './core/resume.js';
-import { finishGame, noteEndCondition } from './core/endgame.js';
+import { finishGame, noteEndCondition, settleEndedGame } from './core/endgame.js';
 import { computeScores } from './core/scoring.js';
 
 export { createMatch } from './core/setup.js';
@@ -58,7 +58,11 @@ export function reduce(state: GameState, action: GameAction): GameState {
 
   const draft = cloneState(state);
   try {
-    return dispatch(draft, action);
+    // A card that ends the game (`{op:'endGame'}`) runs inside the effect
+    // interpreter, which cannot score — it sets `ended` and leaves `winners`
+    // null. Settling here is what makes every path out of `reduce` produce a
+    // finished game with a result rather than a frozen "nobody wins" table.
+    return settleEndedGame(dispatch(draft, action));
   } catch (err) {
     const safe = cloneState(state);
     logReject(safe, 'engineError', actorOf(action), {

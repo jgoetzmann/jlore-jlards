@@ -154,6 +154,12 @@ export interface StatClusterProps {
   playMoneyBlocked?: string | null;
   /** Nothing left to do but End turn (TURN-10): one cue, then it stays lit. */
   done?: boolean;
+  /**
+   * Ending the turn, guarded against a double-click that would end the NEXT
+   * player's turn as well (SEAM-1). Without it the button sends the action
+   * itself, which is what the unit tests render.
+   */
+  onEndTurn?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
 export function StatCluster({
@@ -165,6 +171,7 @@ export function StatCluster({
   playMoneyTotal = 0,
   playMoneyBlocked = null,
   done = false,
+  onEndTurn,
 }: StatClusterProps): JSX.Element {
   const you = view.you;
   const canEnd = yourTurn && !view.ended && view.pending === null;
@@ -222,7 +229,10 @@ export function StatCluster({
                   ? 'Nothing left to do — end your turn (E)'
                   : 'End your turn (E)'
           }
-          onClick={() => onAction({ type: 'endTurn', player: playerId })}
+          onClick={(e) => {
+            if (onEndTurn) onEndTurn(e);
+            else onAction({ type: 'endTurn', player: playerId });
+          }}
         >
           <span className="end-turn-label">
             End turn <kbd>E</kbd>

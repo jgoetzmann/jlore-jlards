@@ -125,6 +125,34 @@ export function endGameIfLapComplete(state: GameState): GameState {
   return finishGame(state, state.endReason ?? 'endCondition');
 }
 
+/**
+ * A game an effect ended, but could not score.
+ *
+ * `{op:'endGame'}` (Doomsday Clock, and every card that ends the match outright)
+ * runs inside the effect interpreter, which cannot call `computeScores` without
+ * an import cycle — so it sets `ended` and leaves `winners` null. Every branch
+ * of `reduce` passes through here afterwards, which is what turns that into a
+ * finished game with a result. Without it the table showed "nobody wins" and
+ * every later action was refused with `gameOver`.
+ *
+ * A no-op unless the state really is ended-but-unscored.
+ */
+export function settleEndedGame(state: GameState): GameState {
+  if (!state.ended) return state;
+  if (state.winners !== null) return state;
+  const s = state;
+  const scores = computeScores(s);
+  s.winners = determineWinners(s, scores);
+  const detail: Record<string, unknown> = {
+    reason: s.endReason ?? 'cardEffect',
+    scores,
+    winners: s.winners,
+  };
+  for (const pid of s.playerOrder) detail[`eog:${pid}`] = endOfGameCards(s, pid);
+  appendLog(s, 'gameEnd', null, detail);
+  return s;
+}
+
 /** Terminal. Fires gameEnd windows, scores, and freezes the state. */
 export function finishGame(state: GameState, reason: string): GameState {
   if (state.ended) return state;

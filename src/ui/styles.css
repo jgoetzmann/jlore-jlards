@@ -1651,9 +1651,11 @@ h3 {
   min-width: 0;
 }
 
+/* The title wins the row over the chips: "Lock a p…" next to ten scrolling
+   chips told the player nothing about what they were answering. */
 .prompt-bar .prompt-title {
   flex: 0 1 auto;
-  min-width: 6em;
+  min-width: min(220px, max-content);
   max-width: 420px;
   white-space: nowrap;
   overflow: hidden;
@@ -1807,6 +1809,20 @@ h3 {
   display: flex;
   gap: 8px;
   justify-content: center;
+}
+
+/* A ten-option prompt is taller than the board region, and the panel scrolls —
+   which pushed Confirm below the dock line with no sign it was there. Sticking
+   the actions to the bottom of the panel keeps the way out of the prompt on
+   screen however many options it has. */
+.prompt-card .prompt-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -18px -16px;
+  padding: 10px 18px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
 }
 
 .prompt-confirm {

@@ -84,6 +84,12 @@ export function whyNot(
   }
   if (!opts.yourTurn) return 'Not your turn';
   if (opts.blocked) return 'Answer the open prompt first';
+  // The engine refuses this pile for a reason the price cannot show — a token
+  // sitting on top of it, most often. Said plainly rather than as a lit button
+  // that does nothing when clicked.
+  if (pile.top.affordable === false && canAfford(pile, opts.money, opts.prophet)) {
+    return `${pile.top.name} can’t be bought`;
+  }
   if (pile.prophetCost) {
     return opts.prophet >= pile.prophetCost.threshold
       ? 'Buy'
@@ -122,12 +128,19 @@ function PileTileImpl({
 }: PileTileProps): JSX.Element {
   const empty = pile.count <= 0 || pile.top === null;
   const affordable = canAfford(pile, money, prophet);
+  // `top.affordable` is `canBuyPile` — the engine's own answer, which knows
+  // about things the price does not: a notPurchasable card on top, a Prophet
+  // threshold, a lock. A lit Buy must mean the engine will accept the buy, or
+  // the player clicks and nothing happens (Water Into Swine put a Cursed Pig on
+  // every Draft pile and left ten green Buy buttons that did nothing).
+  const engineAllows = pile.top === null || pile.top.affordable !== false;
   const buyable =
     yourTurn &&
     !blocked &&
     !inFlight &&
     !empty &&
     affordable &&
+    engineAllows &&
     (pile.prophetCost ? true : buys > 0) &&
     !pile.locked;
 

@@ -134,13 +134,16 @@ export const cards: CardDefinition[] = [
     keywords: [],
     stats: { vp: 3 },
     effects: [],
-    triggers: [
-      {
-        on: 'onPileEmpty',
-        zones: ['shop'],
-        effects: [{ op: 'endGame', reason: 'jlorePileEmpty' }],
-      },
-    ],
+    // No `onPileEmpty` trigger. `localEndCondition` (core/endgame.ts) already
+    // ends the game when the Jlore pile empties, and it does so through
+    // `noteEndCondition`, which scores and grants the B15 lap of honour.
+    //
+    // The trigger could not: `fireEvent` sweeps every instance for a non-self
+    // event and the event carries no pile id, so EVERY Jlore in the shop fired
+    // on ANY pile emptying — one gain that emptied a (2) Draft pile ended the
+    // match outright, via `opEndGame`, which sets `ended` without computing
+    // winners. The table froze on "nobody wins" with the Jlore pile untouched.
+    triggers: [],
     text: '+3 VP. Emptying this pile ends the game.',
     flavor: 'The whole point.',
     complexity: 'T1',

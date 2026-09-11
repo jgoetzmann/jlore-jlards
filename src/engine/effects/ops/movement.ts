@@ -185,7 +185,19 @@ export function opGainCard(s: GameState, item: QueuedEffect, q: QueuedEffect[], 
     return 'ok';
   }
 
-  const piles = resolvePiles(s, item, q, node.from as Parameters<typeof resolvePiles>[3], pre, 'Gain a card from a pile');
+  // The count lives on the node, not on `from`, so it has to be handed to the
+  // pile resolver explicitly — otherwise a `pick:'choose'` gain never prompts
+  // and just takes the first N piles in shop order (Blubber Baron). "Add up to
+  // N" means the player may also take fewer, so the prompt's minimum is 0.
+  const piles = resolvePiles(
+    s,
+    item,
+    q,
+    node.from as Parameters<typeof resolvePiles>[3],
+    pre,
+    count === 1 ? 'Gain a card from a pile' : `Gain up to ${count} cards from piles`,
+    { count, atMost: true },
+  );
   if (piles === null) return 'suspend';
 
   for (const pid of players) {

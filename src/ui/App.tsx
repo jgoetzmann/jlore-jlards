@@ -31,7 +31,19 @@ import { useKeyboard } from './useKeyboard';
 import { ANCHOR_DISCARD, ANCHOR_LIBRARY, MOTION_MS, planFlip } from './motion';
 import { FlipContext, FlipScope, createFlipRegistry, type FlipRegistry } from './useFlip';
 import { useIsoLayoutEffect, useOneShot, usePrefersReducedMotion } from './useMotion';
-import { addBuyFlight, inFlightPiles, isUsefulPlay, playMoneyPlan, submitsOnPick, turnDone, type BuyFlight } from './turnflow';
+import {
+  addBuyFlight,
+  endTurnBlocked,
+  inFlightPiles,
+  isRepeatPress,
+  isUsefulPlay,
+  playMoneyPlan,
+  submitsOnPick,
+  turnDone,
+  type BuyFlight,
+  type LastPress,
+} from './turnflow';
+import { endReasonText } from './logtext';
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
 
@@ -280,6 +292,8 @@ export interface TableLayoutProps {
    */
   sendMany?: (actions: GameAction[]) => void;
   turnSeconds: number;
+  /** Own intents the relay has not echoed yet; drives the Buy busy state (TURN-8). */
+  pendingIntents?: number;
 }
 
 /**
@@ -406,6 +420,7 @@ export function TableLayout({
   send,
   sendMany,
   turnSeconds,
+  pendingIntents = 0,
 }: TableLayoutProps): JSX.Element {
   const viewRef = React.useRef(view);
   viewRef.current = view;
@@ -518,7 +533,10 @@ export function TableLayout({
   // is the synchronous copy, so two clicks inside one frame are caught too.
   const [buyFlight, setBuyFlight] = React.useState<BuyFlight | null>(null);
   const buyFlightRef = React.useRef<BuyFlight | null>(null);
-  const inFlight = React.useMemo(() => inFlightPiles(buyFlight, revision), [buyFlight, revision]);
+  const inFlight = React.useMemo(
+    () => inFlightPiles(buyFlight, revision, pendingIntents),
+    [buyFlight, revision, pendingIntents],
+  );
   React.useEffect(() => {
     if (buyFlight === null) return;
     const t = setTimeout(() => {
@@ -528,11 +546,20 @@ export function TableLayout({
     return () => clearTimeout(t);
   }, [buyFlight]);
 
+  // The double-click guard proper. The in-flight record above only says whether
+  // the table has answered; with the press applied locally it always has, so it
+  // can no longer stop a second click on its own (the engine happily takes a
+  // second buy when you hold 2 Buys, or on a Prophet pile, which needs none).
+  // A repeat press on the same pile inside BUY_REPEAT_MS is one gesture.
+  const lastBuyRef = React.useRef<LastPress | null>(null);
+
   const onBuy = React.useCallback(
     (pileId: PileId) => {
       const v = viewRef.current;
+      const now = Date.now();
+      if (isRepeatPress(lastBuyRef.current, pileId, now)) return;
+      lastBuyRef.current = { key: pileId, atMs: now };
       const rev = viewRevision(v);
-      if (inFlightPiles(buyFlightRef.current, rev).has(pileId)) return;
       const next = addBuyFlight(buyFlightRef.current, pileId, rev);
       buyFlightRef.current = next;
       setBuyFlight(next);
@@ -558,6 +585,45 @@ export function TableLayout({
 
   const done = React.useMemo(() => turnDone(view), [view]);
   const canEnd = yourTurn && view.pending === null;
+
+  // --- ending the turn (SEAM-1) -------------------------------------------------
+  // A press is reduced and re-rendered inside the click handler, and in hotseat
+  // the screen then follows the seat that must act next — so the second click of
+  // a double-click lands on the NEXT player's End turn button, at the same
+  // pixels, and ends their turn too (1 -> 3). Two different gestures, two
+  // guards: a real double-click carries `detail > 1`, and a quick E,E carries
+  // nothing at all, so the keyboard is held for a moment after the turn changes.
+  // Stamped only when the turn actually CHANGES. Stamping on mount too would
+  // hold the very first End turn of a match for the grace window, which is a
+  // press nobody is repeating — and it swallowed a legitimate first E.
+  const endTurnRef = React.useRef<number | null>(null);
+  const lastTurnRef = React.useRef(view.turn);
+  React.useEffect(() => {
+    if (lastTurnRef.current === view.turn) return;
+    lastTurnRef.current = view.turn;
+    endTurnRef.current = Date.now();
+  }, [view.turn]);
+
+  const sendEndTurn = React.useCallback(() => {
+    const v = viewRef.current;
+    if (v.ended || v.pending !== null || v.activePlayer !== v.you.id) return;
+    send({ type: 'endTurn', player: v.you.id });
+  }, [send]);
+
+  const onEndTurnClick = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      // The second half of a double-click, on a button that has just become a
+      // different player's. Never a press anyone meant to make.
+      if (e.detail > 1) return;
+      sendEndTurn();
+    },
+    [sendEndTurn],
+  );
+
+  const onEndTurnKey = React.useCallback(() => {
+    if (endTurnBlocked(endTurnRef.current, Date.now())) return;
+    sendEndTurn();
+  }, [sendEndTurn]);
 
   // --- keyboard ---------------------------------------------------------------------
   const promptReadyNow = prompt ? promptReady(prompt, picked) : false;
@@ -593,7 +659,7 @@ export function TableLayout({
           onPlayMoney();
           return;
         case 'endTurn':
-          if (canEnd) send({ type: 'endTurn', player: me });
+          if (canEnd) onEndTurnKey();
           return;
         case 'pickOption': {
           const option = prompt?.options[intent.index];
@@ -719,7 +785,7 @@ export function TableLayout({
             {view.ended && (
               <div className="game-over" data-testid="game-over">
                 <h2>Game over</h2>
-                <p>{view.endReason ?? 'the game ended'}</p>
+                <p>{endReasonText(view.endReason)}</p>
                 <p className="winners">
                   {(view.winners ?? []).map((w) => names[w] ?? w).join(', ') || 'nobody'} wins
                 </p>
@@ -853,6 +919,7 @@ export function TableLayout({
                 onAction={send}
                 pick={handPick}
                 revision={revision}
+                turn={view.turn}
               />
             </div>
 
@@ -866,6 +933,7 @@ export function TableLayout({
                 playMoneyTotal={money.total}
                 playMoneyBlocked={money.blocked}
                 done={done}
+                onEndTurn={onEndTurnClick}
               />
             </div>
           </section>
@@ -987,6 +1055,7 @@ function Table({
       send={send}
       sendMany={sendMany}
       turnSeconds={session.turnSeconds}
+      pendingIntents={session.pendingIntents}
     />
   );
 }

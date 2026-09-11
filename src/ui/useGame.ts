@@ -110,6 +110,15 @@ export interface GameSession {
   seatToMove: string | null;
   /** This browser's state disagreed with the host's and is being repaired. */
   desynced: boolean;
+  /**
+   * How many of this browser's own intents the relay has not echoed back yet.
+   *
+   * Under optimistic apply the local state has already moved on, so this is the
+   * only thing that still says "the table has not agreed to my press". The Buy
+   * guard reads it: in hotseat it is back to zero within the task, in a room it
+   * stays up for the round trip. Zero when there is no session.
+   */
+  pendingIntents: number;
 }
 
 export const DEFAULT_TURN_SECONDS = 90;
@@ -574,6 +583,7 @@ export function useGame(opts: UseGameOptions): GameSession {
     setSeatCap,
     seatToMove,
     desynced: core ? core.desynced() : false,
+    pendingIntents: core ? core.pendingCount() : 0,
   };
 }
 

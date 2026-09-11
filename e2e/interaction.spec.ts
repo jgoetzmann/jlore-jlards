@@ -195,6 +195,40 @@ test.describe('interaction — keyboard, Play money, one-click paths', () => {
     expect(left).toBe(0);
   });
 
+  /**
+   * SEAM-1. A press is reduced and re-rendered inside the click handler, and in
+   * hotseat the screen then follows the seat that has to act next — so the
+   * second half of a double-click landed on the NEXT player's End turn button,
+   * at the same pixels, and ended their turn too (turn 1 -> 3).
+   */
+  test('double-clicking End turn ends one turn, not two', async ({ page }) => {
+    await openTable(page);
+    const end = page.getByTestId('end-turn');
+    test.skip(!(await end.isEnabled().catch(() => false)), 'a prompt is holding the turn open');
+    const turn = Number(await page.getByTestId('turn-number').textContent());
+
+    await end.dblclick();
+
+    await expect.poll(async () => Number(await page.getByTestId('turn-number').textContent())).toBe(turn + 1);
+    // And it stays there: no second turn arrives late.
+    await page.waitForTimeout(600);
+    expect(Number(await page.getByTestId('turn-number').textContent())).toBe(turn + 1);
+  });
+
+  test('E pressed twice quickly ends one turn, not two', async ({ page }) => {
+    await openTable(page);
+    const end = page.getByTestId('end-turn');
+    test.skip(!(await end.isEnabled().catch(() => false)), 'a prompt is holding the turn open');
+    const turn = Number(await page.getByTestId('turn-number').textContent());
+
+    await page.keyboard.press('e');
+    await page.keyboard.press('e');
+
+    await expect.poll(async () => Number(await page.getByTestId('turn-number').textContent())).toBe(turn + 1);
+    await page.waitForTimeout(600);
+    expect(Number(await page.getByTestId('turn-number').textContent())).toBe(turn + 1);
+  });
+
   test('a disabled Buy says why', async ({ page }) => {
     await openTable(page);
     const disabled = page.locator('[data-testid="buy"][disabled]');
