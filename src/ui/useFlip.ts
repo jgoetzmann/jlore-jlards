@@ -152,6 +152,11 @@ function stop(registry: FlipRegistry, key: string): void {
   registry.live.delete(key);
 }
 
+/** Cancel every flight and remove every ghost: the cards on screen are no longer the ones flying. */
+export function stopAll(registry: FlipRegistry): void {
+  for (const key of Array.from(registry.live.keys())) stop(registry, key);
+}
+
 function track(registry: FlipRegistry, key: string, anims: Animation[], ghost: HTMLElement | null): void {
   const live: Live = { anims, ghost };
   registry.live.set(key, live);
@@ -296,6 +301,12 @@ export interface FlipScopeProps<T> {
   token: T;
   plan: (prev: T, next: T) => FlipPlan | null;
   enabled: boolean;
+  /**
+   * Whose table this is. When it changes (a hotseat seat swap) every flight in
+   * progress belonged to the other seat's cards and is dropped at once, rather
+   * than finishing over the new seat's hand.
+   */
+  resetKey?: string;
   children?: React.ReactNode;
 }
 
@@ -308,7 +319,8 @@ export class FlipScope<T> extends React.Component<FlipScopeProps<T>> {
     return { plan: p, before: measureBefore(registry, p) };
   }
 
-  override componentDidUpdate(_prev: Readonly<FlipScopeProps<T>>, _state: unknown, snap: FlipSnapshot): void {
+  override componentDidUpdate(prev: Readonly<FlipScopeProps<T>>, _state: unknown, snap: FlipSnapshot): void {
+    if (prev.resetKey !== this.props.resetKey) stopAll(this.props.registry);
     if (snap) runFlip(this.props.registry, snap.plan, snap.before);
   }
 

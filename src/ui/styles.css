@@ -1909,9 +1909,9 @@ h3 {
 }
 
 .key-help {
-  max-width: 520px;
-  margin-top: 16px;
-  padding: 14px 18px;
+  width: min(640px, 100%);
+  margin-top: 10px;
+  padding: 10px 16px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1925,9 +1925,10 @@ h3 {
 .key-help-list {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 8px 14px;
-  margin: 10px 0 14px;
+  gap: 4px 12px;
+  margin: 6px 0 8px;
   align-items: baseline;
+  font-size: 12.5px;
 }
 
 .key-help-list dt {

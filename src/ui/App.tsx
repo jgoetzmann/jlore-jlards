@@ -585,7 +585,7 @@ export function TableLayout({
 
   return (
     <FlipContext.Provider value={registry}>
-      <FlipScope registry={registry} token={view} plan={planFlip} enabled={!reduced}>
+      <FlipScope registry={registry} token={view} plan={planFlip} enabled={!reduced} resetKey={view.you.id}>
         <div
           className="table"
           data-testid="table"

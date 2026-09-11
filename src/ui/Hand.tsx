@@ -335,7 +335,9 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
   const [pendingSig, setPendingSig] = React.useState<string | null>(null);
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
   const [dropPos, setDropPos] = React.useState<number | null>(null);
-  const [cursor, setCursor] = React.useState(-1);
+  // The card [ ] would nudge. Hover moves it quietly; only the arrow keys make
+  // it visible, so a mouse player never sees a second highlight.
+  const [cursor, setCursor] = React.useState<{ index: number; shown: boolean }>({ index: -1, shown: false });
   // Launched cards remember the view they were launched against: once a newer
   // view is showing and the card is still here, the play was refused.
   const [launch, setLaunch] = React.useState<{ iids: readonly InstanceId[]; revision: number } | null>(null);
@@ -405,7 +407,7 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
   // The cursor follows the hand: a card played out from under it would
   // otherwise leave the highlight pointing at whatever slid into that slot.
   React.useEffect(() => {
-    setCursor((c) => (c >= shown.length ? shown.length - 1 : c));
+    setCursor((c) => (c.index >= shown.length ? { ...c, index: shown.length - 1 } : c));
   }, [shown.length]);
 
   const launchedSet = React.useMemo(
@@ -479,7 +481,7 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
   });
 
   const onHover = useStable((index: number) => {
-    setCursor((c) => (c === index ? c : index));
+    setCursor((c) => (c.index === index && !c.shown ? c : { index, shown: false }));
   });
 
   React.useImperativeHandle(
@@ -503,21 +505,24 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     playAt(index) {
       const card = shown[index];
       if (!card || picking || !isPlayable(card)) return false;
-      setCursor(index);
+      setCursor({ index, shown: false });
       play(card);
       return true;
     },
     nudge(delta) {
-      if (!canReorder || cursor < 0) return;
-      const to = cursor + delta;
+      if (!canReorder || cursor.index < 0) return;
+      const to = cursor.index + delta;
       if (to < 0 || to >= shown.length) return;
-      commit(moveInOrder(shown, cursor, to));
-      setCursor(to);
+      commit(moveInOrder(shown, cursor.index, to));
+      setCursor({ index: to, shown: true });
     },
     moveCursor(delta) {
       const n = shown.length;
       if (n === 0) return;
-      setCursor((c) => (c < 0 ? (delta > 0 ? 0 : n - 1) : (((c + delta) % n) + n) % n));
+      setCursor((c) => ({
+        index: c.index < 0 ? (delta > 0 ? 0 : n - 1) : (((c.index + delta) % n) + n) % n,
+        shown: true,
+      }));
     },
     launchCards,
   };
@@ -600,7 +605,7 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
             dragging={dragIndex === i}
             caretBefore={caret === i}
             caretAfter={caret === shown.length && i === shown.length - 1}
-            cursor={cursor === i}
+            cursor={cursor.shown && cursor.index === i}
             hint={showHints ? digitLabel(i) : null}
             onCardClick={onCardClick}
             onDragStartAt={onDragStartAt}
