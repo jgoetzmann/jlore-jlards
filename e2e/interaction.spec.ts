@@ -58,11 +58,19 @@ async function ownCards(page: Page): Promise<{ hand: number; play: number; disca
  * whatever happens to be first (UI-R1). Null when the hand holds no Copper.
  */
 async function firstCopper(page: Page): Promise<{ iid: string; digit: string } | null> {
+  // Flimsy cards trash themselves after they are played, so a Flimsy Copper
+  // never reaches In play. Fading Blossom gives every card Flimsy; that anomaly
+  // failed the digit spec once this fix was in.
+  const anomaly = page.getByTestId('anomaly-banner');
+  if ((await anomaly.count()) > 0 && /flimsy/i.test((await anomaly.first().getAttribute('title')) ?? '')) {
+    return null;
+  }
   const coppers = page.getByTestId('hand').locator('[data-testid="card"][data-card-id="copper"]');
   const n = await coppers.count();
   for (let i = 0; i < n; i += 1) {
     const c = coppers.nth(i);
     if ((await c.getAttribute('data-clickable')) !== 'true') continue;
+    if (/flimsy/i.test((await c.locator('.keyword-chip').allTextContents()).join(' '))) continue;
     const hint = c.locator('.card-hint');
     if ((await hint.count()) === 0) continue;
     const digit = ((await hint.first().textContent()) ?? '').trim();
