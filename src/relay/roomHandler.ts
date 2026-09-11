@@ -1,9 +1,12 @@
 /**
  * Pure request logic for the relay route, extracted so it is testable with no
- * network and no Redis. `api/room/[code].ts` is a thin wrapper over this.
+ * network and no Redis. `api/room/[code].ts` and the Vite dev middleware are
+ * thin wrappers over this, and both use the same store adapters.
  *
  * The relay parses nothing about the game. A message is an opaque JSON blob
  * with an envelope the relay checks only for shape.
+ *
+ * Runs as plain Node ESM on Vercel: no path aliases, and no runtime imports.
  */
 
 import type { RelayMessage } from '../../src/engine/types';
@@ -14,17 +17,35 @@ export const MAX_BODY_BYTES = 256 * 1024;
 /** Rooms self-destruct six hours after the last message. */
 export const ROOM_TTL_SECONDS = 6 * 60 * 60;
 
-/** The four storage operations the route needs. Redis or memory. */
+/** A stream ends itself after this long, inside the function's 60s budget. */
+export const STREAM_MAX_MS = 50_000;
+/** A comment line this often keeps proxies and the client's watchdog happy. */
+export const STREAM_HEARTBEAT_MS = 15_000;
+/** How long the pub/sub subscription may take to confirm. */
+export const STREAM_SUBSCRIBE_TIMEOUT_MS = 4_000;
+
+export interface Subscription {
+  /** Resolves when the upstream subscription ends on its own. */
+  closed: Promise<void>;
+}
+
+/**
+ * The storage operations the route needs. Redis (over Upstash REST) or memory.
+ *
+ * `append` is RPUSH + EXPIRE + PUBLISH in one round trip. `subscribe` is the
+ * push half: it calls `onNotify` whenever something is appended to `key`.
+ */
 export interface RoomStore {
-  rpush(key: string, value: string): Promise<number>;
+  append(key: string, value: string, ttlSeconds: number): Promise<number>;
   lrange(key: string, start: number, stop: number): Promise<string[]>;
-  expire(key: string, seconds: number): Promise<unknown>;
-  exists(key: string): Promise<number>;
+  llen(key: string): Promise<number>;
+  subscribe?(key: string, onNotify: () => void, signal: AbortSignal): Promise<Subscription>;
 }
 
 export type RoomResult =
   | { status: 200; body: { seq: number } }
   | { status: 200; body: { messages: RelayMessage[] } }
+  | { status: 200; body: { messages: RelayMessage[]; next: number } }
   | { status: 400; body: { error: 'bad_request' } }
   | { status: 404; body: { error: 'no_room' } }
   | { status: 413; body: { error: 'too_large' } };
@@ -79,7 +100,8 @@ function normalizeBody(body: unknown): { text: string; value: unknown } | null {
   return { text, value: body };
 }
 
-function parseSince(since: unknown): number | null {
+/** `since` as a list index; 'end' is the list length. Null means malformed. */
+export function parseSince(since: unknown): number | 'end' | null {
   if (since === undefined || since === null || since === '') return 0;
   const raw = Array.isArray(since) ? since[0] : since;
   if (typeof raw === 'number') {
@@ -87,15 +109,43 @@ function parseSince(since: unknown): number | null {
     return raw < 0 ? 0 : Math.floor(raw);
   }
   if (typeof raw !== 'string') return null;
-  if (!/^-?\d+$/.test(raw.trim())) return null;
-  const n = Number.parseInt(raw.trim(), 10);
+  const t = raw.trim();
+  if (t === 'end') return 'end';
+  if (!/^-?\d+$/.test(t)) return null;
+  const n = Number.parseInt(t, 10);
   if (!Number.isFinite(n)) return null;
   return n < 0 ? 0 : n;
 }
 
+/** One stored list entry as a message with its seq. Null if unreadable. */
+export function toMessage(line: unknown, seq: number): RelayMessage | null {
+  let parsed: unknown;
+  if (typeof line === 'string') {
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return null;
+    }
+  } else {
+    parsed = line;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const m = parsed as Record<string, unknown>;
+  const msg: RelayMessage = {
+    seq,
+    from: typeof m.from === 'string' ? m.from : '',
+    kind: (m.kind as RelayMessage['kind']) ?? 'intent',
+    payload: m.payload,
+  };
+  if (typeof m.to === 'string') msg.to = m.to;
+  return msg;
+}
+
 /**
  * B105: POST appends and returns the new list length as `seq`.
- * B106: GET ?since=N returns only messages with index >= N.
+ * B106: GET ?since=N returns only messages with index >= N. `since=end`
+ *       returns no messages and `next`, the list length, for a reader that
+ *       wants to start at the tail (NET-8).
  * B107: malformed body -> 400 bad_request, body over 256KB -> 413 too_large.
  */
 export async function handleRoomRequest(
@@ -127,40 +177,26 @@ export async function handleRoomRequest(
     const line = JSON.stringify(stored);
     if (byteLength(line) > MAX_BODY_BYTES) return TOO_LARGE;
 
-    const length = await store.rpush(key, line);
-    await store.expire(key, ROOM_TTL_SECONDS);
+    const length = await store.append(key, line, ROOM_TTL_SECONDS);
     return { status: 200, body: { seq: length } };
   }
 
   if (verb === 'GET') {
     const from = parseSince(since);
     if (from === null) return BAD_REQUEST;
-    const exists = await store.exists(key);
-    if (!exists) return NO_ROOM;
+    if (from === 'end') {
+      const next = await store.llen(key);
+      if (next === 0) return NO_ROOM;
+      return { status: 200, body: { messages: [], next } };
+    }
+    // One round trip (NET-5): Redis deletes an empty list, so "nothing from
+    // index 0" is exactly "no such room".
     const raw = await store.lrange(key, from, -1);
+    if (from === 0 && raw.length === 0) return NO_ROOM;
     const messages: RelayMessage[] = [];
     for (let i = 0; i < raw.length; i++) {
-      const line = raw[i];
-      let parsed: unknown;
-      if (typeof line === 'string') {
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-      } else {
-        parsed = line;
-      }
-      if (parsed === null || typeof parsed !== 'object') continue;
-      const m = parsed as Record<string, unknown>;
-      const msg: RelayMessage = {
-        seq: from + i + 1,
-        from: typeof m.from === 'string' ? m.from : '',
-        kind: (m.kind as RelayMessage['kind']) ?? 'intent',
-        payload: m.payload,
-      };
-      if (typeof m.to === 'string') msg.to = m.to;
-      messages.push(msg);
+      const msg = toMessage(raw[i], from + i + 1);
+      if (msg) messages.push(msg);
     }
     return { status: 200, body: { messages } };
   }
@@ -168,15 +204,183 @@ export async function handleRoomRequest(
   return BAD_REQUEST;
 }
 
-/** In-process store. Used by tests and by `vercel dev` without Upstash creds. */
+// ---------------------------------------------------------------------------
+// The push path
+// ---------------------------------------------------------------------------
+
+export interface StreamIO {
+  write(chunk: string): void;
+  /** Aborts when the client goes away. */
+  signal: AbortSignal;
+}
+
+export interface StreamTiming {
+  maxMs?: number;
+  heartbeatMs?: number;
+  subscribeTimeoutMs?: number;
+}
+
+function sseEvent(msg: RelayMessage): string {
+  return `id: ${msg.seq}\ndata: ${JSON.stringify(msg)}\n\n`;
+}
+
+/**
+ * Server-sent events for one room, from `since` on.
+ *
+ * Subscribe first, then read the backlog, so nothing appended in between is
+ * missed. Each notification reads the list from the cursor; a notification that
+ * arrives mid-read makes the read run once more instead of racing it. Ends with
+ * `event: bye` after `maxMs` so it fits the platform's duration cap; the client
+ * reopens from its cursor. Any failure writes `event: error` and ends, which
+ * the client counts toward falling back to polling.
+ */
+export async function streamRoom(
+  code: string,
+  since: number,
+  store: RoomStore,
+  io: StreamIO,
+  timing: StreamTiming = {},
+): Promise<void> {
+  const key = roomKey(code);
+  const maxMs = timing.maxMs ?? STREAM_MAX_MS;
+  const heartbeatMs = timing.heartbeatMs ?? STREAM_HEARTBEAT_MS;
+  const subscribeTimeoutMs = timing.subscribeTimeoutMs ?? STREAM_SUBSCRIBE_TIMEOUT_MS;
+
+  let cursor = since < 0 ? 0 : since;
+  let done = false;
+  let failed = false;
+  let finish: () => void = () => undefined;
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const end = (): void => {
+    if (done) return;
+    done = true;
+    finish();
+  };
+  const upstream = new AbortController();
+  const onAbort = (): void => end();
+  if (io.signal.aborted) return;
+  io.signal.addEventListener('abort', onAbort);
+
+  const safeWrite = (chunk: string): void => {
+    if (done && !chunk.startsWith('event:')) return;
+    try {
+      io.write(chunk);
+    } catch {
+      end();
+    }
+  };
+  const fail = (why: string): void => {
+    if (done) return;
+    failed = true;
+    safeWrite(`event: error\ndata: ${JSON.stringify(why.slice(0, 120))}\n\n`);
+    end();
+  };
+
+  // The first byte, at once: it tells the client the push path is alive, and
+  // a platform that buffers responses shows up as its absence.
+  safeWrite(`: open\n\n`);
+
+  let busy = false;
+  let again = false;
+  const pump = async (): Promise<void> => {
+    if (done) return;
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
+    try {
+      do {
+        again = false;
+        const raw = await store.lrange(key, cursor, -1);
+        if (done) return;
+        let chunk = '';
+        for (let i = 0; i < raw.length; i++) {
+          const msg = toMessage(raw[i], cursor + i + 1);
+          if (msg) chunk += sseEvent(msg);
+        }
+        cursor += raw.length;
+        if (chunk) safeWrite(chunk);
+      } while (again && !done);
+    } catch (err) {
+      fail(`read_failed: ${String(err)}`);
+    } finally {
+      busy = false;
+    }
+  };
+
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let deadline: ReturnType<typeof setTimeout> | null = null;
+  try {
+    if (!store.subscribe) {
+      fail('no_push');
+    } else {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const sub = await Promise.race([
+          store.subscribe(key, () => void pump(), upstream.signal),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('subscribe_timeout')), subscribeTimeoutMs);
+          }),
+        ]);
+        void sub.closed.then(() => {
+          // The upstream went away; end cleanly and let the client reopen.
+          end();
+        });
+      } catch (err) {
+        fail(`subscribe_failed: ${String(err)}`);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    if (!done) {
+      await pump();
+      heartbeat = setInterval(() => safeWrite(`: hb\n\n`), heartbeatMs);
+      deadline = setTimeout(end, maxMs);
+      await finished;
+    }
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (deadline) clearTimeout(deadline);
+    io.signal.removeEventListener('abort', onAbort);
+    upstream.abort();
+    if (!failed && !io.signal.aborted) {
+      try {
+        io.write(`event: bye\ndata: {}\n\n`);
+      } catch {
+        /* the client is gone */
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-process store. Tests, `npm run dev`, and a deployment with no credentials.
+// ---------------------------------------------------------------------------
+
 export function makeMemoryStore(): RoomStore & { lists: Map<string, string[]> } {
   const lists = new Map<string, string[]>();
+  const subs = new Map<string, Set<() => void>>();
   return {
     lists,
-    async rpush(key, value) {
+    async append(key, value) {
       const list = lists.get(key) ?? [];
       list.push(value);
       lists.set(key, list);
+      const listeners = subs.get(key);
+      if (listeners) {
+        for (const cb of Array.from(listeners)) {
+          queueMicrotask(() => {
+            try {
+              cb();
+            } catch {
+              /* one dead subscriber must not stop the others */
+            }
+          });
+        }
+      }
       return list.length;
     },
     async lrange(key, start, stop) {
@@ -185,11 +389,23 @@ export function makeMemoryStore(): RoomStore & { lists: Map<string, string[]> } 
       const begin = start < 0 ? Math.max(0, list.length + start) : start;
       return list.slice(begin, Math.max(begin, end));
     },
-    async expire() {
-      return 1;
+    async llen(key) {
+      return (lists.get(key) ?? []).length;
     },
-    async exists(key) {
-      return lists.has(key) ? 1 : 0;
+    async subscribe(key, onNotify, signal) {
+      const set = subs.get(key) ?? new Set<() => void>();
+      subs.set(key, set);
+      set.add(onNotify);
+      const closed = new Promise<void>((resolve) => {
+        const drop = (): void => {
+          set.delete(onNotify);
+          if (set.size === 0) subs.delete(key);
+          resolve();
+        };
+        if (signal.aborted) drop();
+        else signal.addEventListener('abort', drop, { once: true });
+      });
+      return { closed };
     },
   };
 }

@@ -1,19 +1,28 @@
 /**
  * The entire backend. A message queue that has never heard of a card game.
  *
- *   POST /api/room/[code]           -> RPUSH, EXPIRE 6h, return new length as seq
- *   GET  /api/room/[code]?since=N   -> LRANGE N -1
+ *   POST /api/room/[code]                  -> RPUSH + EXPIRE 6h + PUBLISH, return new length as seq
+ *   GET  /api/room/[code]?since=N          -> LRANGE N -1
+ *   GET  /api/room/[code]?since=end        -> { messages: [], next: LLEN }
+ *   GET  /api/room/[code]?stream=1&since=N -> text/event-stream, one event per entry,
+ *                                            pushed via Upstash pub/sub; ends after ~50s
  *
  * It parses nothing about the game. Behaviors B105, B106, B107.
+ *
+ * Runs as plain Node ESM: relative imports with explicit .js, never @ aliases.
  */
 
-import { Redis } from '@upstash/redis';
 import {
   handleRoomRequest,
+  isValidRoomCode,
   makeMemoryStore,
   MAX_BODY_BYTES,
+  parseSince,
+  streamRoom,
   type RoomStore,
+  type StreamTiming,
 } from '../../src/relay/roomHandler.js';
+import { makeUpstashStore, readUpstashEnv } from '../../src/relay/upstash.js';
 
 /** Minimal structural shape of a Vercel Node request/response. */
 interface VercelLikeRequest {
@@ -29,67 +38,37 @@ interface VercelLikeResponse {
   setHeader(name: string, value: string): void;
   json(body: unknown): void;
   end(body?: string): void;
+  write?(chunk: string): unknown;
+  flushHeaders?(): void;
+  on?(event: 'close', cb: () => void): unknown;
+  writableEnded?: boolean;
 }
 
-/**
- * Read a credential from the environment, tolerating a pasted value that still
- * has its quotes on.
- *
- * A dashboard value of `"https://x.upstash.io"` is truthy, so it slips past the
- * "are these configured" check and reaches `new Redis()`, which rejects it with
- * UrlError — an uncaught throw at request time, which the platform reports as
- * an opaque FUNCTION_INVOCATION_FAILED with no hint that the cause is a pair of
- * quote characters. Copying straight out of a .env file does exactly this.
- */
-function readEnv(name: string): string {
-  const raw = process.env[name] ?? '';
-  return raw.trim().replace(/^['"]|['"]$/g, '');
-}
-
-const REST_URL = readEnv('UPSTASH_REDIS_REST_URL');
-const REST_TOKEN = readEnv('UPSTASH_REDIS_REST_TOKEN');
+const ENV = readUpstashEnv();
 
 /** Which store answered. Surfaced as a response header so a deployment can be
  *  diagnosed with curl instead of a dashboard log hunt. */
-let storeKind: 'redis' | 'memory' = 'memory';
+const storeKind: 'redis' | 'memory' = ENV.creds ? 'redis' : 'memory';
 
-const fallbackStore = makeMemoryStore();
+// Anything that is not a usable https REST url falls back rather than
+// throwing. A degraded room that still serves hotseat beats a 500 on every
+// request, and the header says which one you got.
+const store: RoomStore = ENV.creds ? makeUpstashStore(ENV.creds) : makeMemoryStore();
 
-let cachedStore: RoomStore | null = null;
+/** Tests shorten the stream's clock. */
+let streamTiming: StreamTiming = {};
+export function setStreamTimingForTest(t: StreamTiming): void {
+  streamTiming = t;
+}
 
-function getStore(): RoomStore {
-  if (cachedStore) return cachedStore;
-  // Anything that is not a usable https REST url falls back rather than
-  // throwing. A degraded room that still serves hotseat beats a 500 on every
-  // request, and the header says which one you got.
-  if (!REST_URL || !REST_TOKEN || !REST_URL.startsWith('https://')) {
-    cachedStore = fallbackStore;
-    return cachedStore;
-  }
-  let redis: Redis;
-  try {
-    redis = new Redis({ url: REST_URL, token: REST_TOKEN });
-  } catch {
-    cachedStore = fallbackStore;
-    return cachedStore;
-  }
-  storeKind = 'redis';
-  cachedStore = {
-    async rpush(key, value) {
-      return (await redis.rpush(key, value)) as number;
-    },
-    async lrange(key, start, stop) {
-      const raw = (await redis.lrange(key, start, stop)) as unknown[];
-      return raw.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
-    },
-    async expire(key, seconds) {
-      return await redis.expire(key, seconds);
-    },
-    async exists(key) {
-      return (await redis.exists(key)) as number;
-    },
-  };
-  return cachedStore;
+function queryParam(req: VercelLikeRequest, name: string): string | undefined {
+  const q = req.query?.[name];
+  if (typeof q === 'string') return q;
+  if (Array.isArray(q) && typeof q[0] === 'string') return q[0];
+  const url = req.url ?? '';
+  const qi = url.indexOf('?');
+  if (qi < 0) return undefined;
+  return new URLSearchParams(url.slice(qi + 1)).get(name) ?? undefined;
 }
 
 function readCode(req: VercelLikeRequest): string {
@@ -102,23 +81,39 @@ function readCode(req: VercelLikeRequest): string {
   return decodeURIComponent(parts[parts.length - 1] ?? '');
 }
 
-function readSince(req: VercelLikeRequest): string | undefined {
-  const q = req.query?.since;
-  if (typeof q === 'string') return q;
-  if (Array.isArray(q) && typeof q[0] === 'string') return q[0];
-  const url = req.url ?? '';
-  const qi = url.indexOf('?');
-  if (qi < 0) return undefined;
-  const params = new URLSearchParams(url.slice(qi + 1));
-  return params.get('since') ?? undefined;
+function header(req: VercelLikeRequest, name: string): string | undefined {
+  const h = req.headers?.[name];
+  const raw = Array.isArray(h) ? h[0] : h;
+  return typeof raw === 'string' ? raw : undefined;
 }
 
 function contentLength(req: VercelLikeRequest): number {
-  const h = req.headers?.['content-length'];
-  const raw = Array.isArray(h) ? h[0] : h;
-  if (typeof raw !== 'string') return -1;
+  const raw = header(req, 'content-length');
+  if (raw === undefined) return -1;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) ? n : -1;
+}
+
+async function stream(req: VercelLikeRequest, res: VercelLikeResponse): Promise<void> {
+  const code = readCode(req);
+  const lastId = header(req, 'last-event-id');
+  const since = parseSince(lastId ? lastId : queryParam(req, 'since') ?? '0');
+  if (!isValidRoomCode(code) || since === null || since === 'end' || typeof res.write !== 'function') {
+    res.status(400).json({ error: 'bad_request' });
+    return;
+  }
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.status(200);
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+  const gone = new AbortController();
+  // The response's close, not the request's: a GET's request "closes" as soon
+  // as its (empty) body has been read.
+  if (typeof res.on === 'function') res.on('close', () => gone.abort());
+  const write = res.write.bind(res);
+  await streamRoom(code, since, store, { write: (c) => void write(c), signal: gone.signal }, streamTiming);
+  if (!res.writableEnded) res.end();
 }
 
 export default async function handler(
@@ -126,20 +121,15 @@ export default async function handler(
   res: VercelLikeResponse,
 ): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
-  // Populate `storeKind` before reporting it.
-  getStore();
   res.setHeader('x-jlore-store', storeKind);
   // Ops diagnostic: is the relay actually configured? Reports the *shape* of
   // the credentials, never their values, so a half-configured deployment can be
   // identified with curl. Distinguishes "no variable" (len 0) from "wrong kind
   // of url" (https=false, e.g. a redis:// connection string) — the two ways
   // this has actually been got wrong.
-  res.setHeader(
-    'x-jlore-env',
-    `urlLen=${REST_URL.length},tokenLen=${REST_TOKEN.length},https=${REST_URL.startsWith('https://')}`,
-  );
+  res.setHeader('x-jlore-env', ENV.shape);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type, last-event-id');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
 
   const method = (req.method ?? 'GET').toUpperCase();
@@ -154,15 +144,20 @@ export default async function handler(
   }
 
   try {
+    if (method === 'GET' && queryParam(req, 'stream') === '1') {
+      await stream(req, res);
+      return;
+    }
     const result = await handleRoomRequest(
       method,
       readCode(req),
       req.body,
-      readSince(req),
-      getStore(),
+      queryParam(req, 'since'),
+      store,
     );
     res.status(result.status).json(result.body);
   } catch {
+    if (res.writableEnded) return;
     res.status(400).json({ error: 'bad_request' });
   }
 }
