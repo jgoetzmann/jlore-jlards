@@ -40,22 +40,57 @@ async function openTable(page: Page): Promise<void> {
   await blur(page);
 }
 
+/**
+ * The cards the table draws for this seat, zone by zone: hand, in play, and
+ * the discard's count. A play moves a card between these; nothing else should.
+ */
+async function ownCards(page: Page): Promise<{ hand: number; play: number; discard: number }> {
+  const hand = await page.getByTestId('hand').getByTestId('card').count();
+  const play = await page.getByTestId('in-play').getByTestId('card').count();
+  const txt = await page.getByTestId('discard-pile').locator('.dock-pile-label b').textContent();
+  return { hand, play, discard: Number((txt ?? '0').trim()) };
+}
+
+/**
+ * The first Copper in hand that carries a digit badge, with that digit. A
+ * random deck can deal cards that leave the table when played (trashed, set
+ * aside), so the specs that count cards play a known plain card instead of
+ * whatever happens to be first (UI-R1). Null when the hand holds no Copper.
+ */
+async function firstCopper(page: Page): Promise<{ iid: string; digit: string } | null> {
+  const coppers = page.getByTestId('hand').locator('[data-testid="card"][data-card-id="copper"]');
+  const n = await coppers.count();
+  for (let i = 0; i < n; i += 1) {
+    const c = coppers.nth(i);
+    if ((await c.getAttribute('data-clickable')) !== 'true') continue;
+    const hint = c.locator('.card-hint');
+    if ((await hint.count()) === 0) continue;
+    const digit = ((await hint.first().textContent()) ?? '').trim();
+    const iid = await c.getAttribute('data-iid');
+    if (digit !== '' && iid) return { iid, digit };
+  }
+  return null;
+}
+
 test.describe('interaction — keyboard, Play money, one-click paths', () => {
   test('a digit plays the card shown in that position', async ({ page }) => {
     await openTable(page);
     const hand = page.getByTestId('hand').getByTestId('card');
+    // The badge on each card is the key that plays it, in the order shown.
+    const n = Math.min(await hand.count(), 9);
+    for (let i = 0; i < n; i += 1) {
+      await expect(hand.nth(i).locator('.card-hint')).toHaveText(String(i + 1));
+    }
+    const copper = await firstCopper(page);
+    test.skip(copper === null, 'this deal put no Copper in the opening hand');
+    if (copper === null) return;
     const before = await hand.count();
-    const first = hand.first();
-    await expect(first).toHaveAttribute('data-clickable', 'true');
-    const iid = await first.getAttribute('data-iid');
-    // The badge on the card is the key that plays it.
-    await expect(first.locator('.card-hint')).toHaveText('1');
 
-    await page.keyboard.press('1');
+    await page.keyboard.press(copper.digit);
 
-    await expect(page.getByTestId('hand').locator(`[data-iid="${iid}"]`)).toHaveCount(0);
+    await expect(page.getByTestId('hand').locator(`[data-iid="${copper.iid}"]`)).toHaveCount(0);
     await expect.poll(async () => hand.count()).toBe(before - 1);
-    await expect(page.getByTestId('in-play').locator(`[data-iid="${iid}"]`)).toHaveCount(1);
+    await expect(page.getByTestId('in-play').locator(`[data-iid="${copper.iid}"]`)).toHaveCount(1);
   });
 
   test('M plays every plain Resource in hand at once', async ({ page }) => {
@@ -125,10 +160,12 @@ test.describe('interaction — keyboard, Play money, one-click paths', () => {
 
   test('card-flight ghosts are never counted as cards and never linger', async ({ page }) => {
     await openTable(page);
-    const inHand = await page.getByTestId('hand').getByTestId('card').count();
-    const total = await page.getByTestId('card').count();
+    const copper = await firstCopper(page);
+    test.skip(copper === null, 'this deal put no Copper in the opening hand');
+    if (copper === null) return;
+    const before = await ownCards(page);
     // Play a card and look straight away, mid-flight.
-    await page.keyboard.press('1');
+    await page.keyboard.press(copper.digit);
     const during = await page.evaluate(() => {
       const layer = document.querySelector('.motion-layer');
       return {
@@ -138,9 +175,12 @@ test.describe('interaction — keyboard, Play money, one-click paths', () => {
     });
     expect(during.ghostTestIds).toBe(0);
     expect(during.ghostIids).toBe(0);
-    // A card moved hand -> in play; the page-wide card count is unchanged.
-    await expect.poll(async () => page.getByTestId('hand').getByTestId('card').count()).toBe(inHand - 1);
-    expect(await page.getByTestId('card').count()).toBe(total);
+    // The Copper moved hand -> in play; this seat's card total is unchanged,
+    // so no ghost was counted as a card anywhere the table draws.
+    await expect.poll(async () => (await ownCards(page)).hand).toBe(before.hand - 1);
+    const after = await ownCards(page);
+    expect(after.play).toBe(before.play + 1);
+    expect(after.hand + after.play + after.discard).toBe(before.hand + before.play + before.discard);
     // Every flight is under a quarter second; nothing is left behind.
     await page.waitForTimeout(600);
     const left = await page.evaluate(() => document.querySelector('.motion-layer')?.children.length ?? 0);
