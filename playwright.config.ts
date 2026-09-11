@@ -10,7 +10,12 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Not parallel: the two-browser spec drives a shared room through one relay,
  * and the game is turn-based, so interleaving specs would fight over turn order.
+ *
+ * E2E_PORT moves the dev server off 5199, so two checkouts can run their
+ * suites side by side without --strictPort failing one of them.
  */
+const PORT = Number(process.env['E2E_PORT'] ?? 5199);
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 120_000,
@@ -20,15 +25,15 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:5199',
+    baseURL: `http://localhost:${PORT}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'npx vite --port 5199 --strictPort',
-    url: 'http://localhost:5199',
+    command: `npx vite --port ${PORT} --strictPort`,
+    url: `http://localhost:${PORT}`,
     // Always start our own. Reusing a stray dev server means testing whatever
     // tree that server was launched from — which happened: a leftover server
     // from another checkout served the SPA fallback for every /art/ request, so
