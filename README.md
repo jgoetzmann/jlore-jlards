@@ -109,9 +109,12 @@ npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
 
 ## How it fits together
 
-One browser — the host's — runs the engine. Everyone else runs a dumb terminal
-that renders a filtered view and posts button presses back. The server is a
-message queue that has never heard of a card game.
+Every browser runs the engine (SB-65). The host posts one start message at the
+deal; after that the relay carries button presses, and each browser folds the
+same list through the same pure reducer and lands on the same state. Your own
+press is applied and rendered before it is posted, so it costs one frame, and
+it reaches everyone else over a server-sent event stream in a fraction of a
+second. The server is a message queue that has never heard of a card game.
 
 A networked room has two phases. In the **lobby** nothing has been dealt: the
 host holds the room open and the roster is whoever has said hello in the last few
@@ -120,17 +123,18 @@ people, every seat bound to a browser before the first view goes out. Hotseat
 skips the lobby — there is nobody to wait for (SB-64).
 
 ```
-Host browser                 Vercel relay              Friends' browsers
-┌───────────────────┐        ┌──────────────┐          ┌──────────────────┐
-│ engine (pure fn)  │ views  │ Redis list   │  views   │ renders view     │
-│ full game state   │───────>│ opaque blobs │─────────>│ knows only their │
-│ view filter       │<───────│              │<─────────│ own hand         │
-└───────────────────┘ intents└──────────────┘  intents └──────────────────┘
+Every browser                  Vercel relay               Every other browser
+┌──────────────────────┐ intent ┌────────────────┐  push   ┌──────────────────────┐
+│ engine (pure fn)     │───────>│ Redis list     │────────>│ engine (pure fn)     │
+│ full game state      │        │ + pub/sub      │  (SSE)  │ full game state      │
+│ renders viewFor(you) │<───────│ opaque blobs   │<────────│ renders viewFor(you) │
+└──────────────────────┘  push  └────────────────┘ intent  └──────────────────────┘
 ```
 
-Hidden information is *absent* from a non-host browser, not hidden by CSS. Your
-opponent's hand was never sent, so there is nothing to find in devtools. That is
-the whole security model and it is about 40 lines.
+Hidden information is waived for playtesting: every browser holds the whole
+state, so a player with devtools could read your hand. What the table *renders*
+is still only `viewFor(state, you)` — your opponents' hands are counts on
+screen — and the tests pin that boundary.
 
 ```
 src/engine/   pure rules engine — no I/O, no React, no fetch
@@ -141,7 +145,7 @@ src/engine/   pure rules engine — no I/O, no React, no fetch
   effects/      the effect-node interpreter (~60 ops)
   shop/ systems/ meta/
 src/cards/    534 card definitions + 25 auras, as typed data
-src/net/      relay poll loop, host, client, storage tiers
+src/net/      lockstep session, relay transport (push + poll), lobby, storage tiers
 src/ui/       React components
 src/sim/      bots, headless match runner, balance telemetry
 api/          the entire backend, ~40 lines
@@ -220,10 +224,9 @@ link after the cards were dealt and is told so rather than left waiting.
 The hidden-information spec is worth understanding precisely. It asserts that
 neither browser's DOM contains the other player's hand instance ids, which is
 what `viewFor` actually guarantees. It deliberately does **not** assert that the
-relay queue is unreadable: addressed views ride one shared list, and
-`ARCHITECTURE.md` §6 accepts that a determined player could fish another seat's
-view out of it with devtools. That is the stated privacy bar, and the test pins
-the real boundary rather than a flattering one.
+other hand is absent from the browser: since SB-65 every browser holds the full
+state, and the relay list carries every action. That is the stated trade for
+playtesting, and the test pins the real boundary rather than a flattering one.
 
 ## Reproducing a bug from a playtest
 
@@ -242,8 +245,9 @@ same cards resolve in the same order every time.
 
 ## Known weaknesses, accepted
 
-The host closing their tab ends the game. The host's browser can see all state.
-A determined player could read another seat's view off the relay queue with
-devtools. Clearing your browser wipes your Codex. All four are fine: it's an
-hour-long session with people you're on a call with, and the fix for any of them
-costs more than the problem.
+Every browser can see all state, so a determined player could read every hand
+with devtools (SB-65). Two browsers on different builds deal different matches;
+the per-turn checksum catches it and the odd one out adopts the host's state.
+Clearing your browser wipes your Codex. All three are fine: it's an hour-long
+session with people you're on a call with, and the fix for any of them costs
+more than the problem.
