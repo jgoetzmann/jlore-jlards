@@ -1058,3 +1058,153 @@ Code: `startLobbyHost()`, `startHost(relay, state, { seats, since })`,
 `LobbyPayload` / `isLobbyPayload` in `net/relay.ts`, `useGame`'s `phase`,
 `src/ui/Lobby.tsx`. Tests: `test/net-lobby.test.ts`, and the lobby steps in
 `e2e/multiplayer.spec.ts` (including a three-browser deal and a latecomer).
+
+## From the smooth-play pass
+
+### SB-65. Every browser runs the engine: hidden information is waived for playtesting
+
+**The question.** A networked press took about 1.8 seconds to show up on the
+presser's own screen, the host's included, and about 1.7 seconds on everyone
+else's (measured by `e2e/latency.spec.ts` on the dev relay, before this change).
+That was the whole design at work: only the host held a `GameState`, so every
+click was an intent POSTed to the relay, picked up on the host's next 1 s poll,
+reduced, turned into one filtered `view` per seat, POSTed back, and picked up
+again on each client's own 1 s poll. The owner's verdict was "about two seconds
+per press", and the owner said explicitly that hidden-information security does
+not matter for playtesting: trade it for speed.
+
+**The ruling.** Lockstep with optimistic local apply. Every browser, the host
+included, folds the same relay list through `reduce` and renders
+`viewFor(localState, you)`.
+
+- **The deal is one message.** At Start the host posts a `snapshot` tagged
+  `jlore-start/1`: config, seed, each seat's name and codex (collected from the
+  lobby hellos, not the host's own codex for everyone), the seat bindings
+  (`seats[i]` acts for `playerOrder[i]`), and a checksum of the state it builds.
+  Every client calls `createMatch` on exactly that. The first start in a room is
+  the match. Nothing about the deal happens outside `reduce`/`createMatch` any
+  more (the old `recordCodex`/`recordName` mutated host state on the side).
+- **An action is an intent** `{nonce, actions}` from a seat. The acting player
+  comes from the envelope's `from` through the seat bindings, never from the
+  payload. A batch (one intent, several actions: "play all money") is unrolled
+  in order by every client and stops at the first action that is refused or
+  that opens a prompt. There is no legality pre-gate: `reduce` refuses illegal
+  actions itself, identically everywhere. The old gate silently dropped every
+  `reorderHand` (HOST-1/TURN-5); off-turn reorders stay illegal under B20 and the
+  UI simply does not offer them.
+- **A press renders before it is posted.** `send` reduces the action onto the
+  predicted state and renders at once, then posts. When that intent comes back
+  in order with nothing foreign ahead of it, the already-computed state becomes
+  the confirmed one with no second reduce. If someone else's intent lands
+  first, the still-pending actions are refolded onto the new confirmed state.
+  A client's posts leave in click order (each waits for the previous answer),
+  and a retried post that had in fact landed is skipped by nonce, the same way
+  on every client.
+- **Nobody is left silently desynced.** At every turn boundary each client
+  checksums its confirmed state (key-sorted serialization, log body excluded);
+  the host's seat posts its own as `jlore-check/1`. On a mismatch a client first
+  rebuilds from the start message and the full intent list; if that still
+  disagrees it logs `DESYNC` to the console, asks with `jlore-resync/1`, and
+  adopts the host's state from a `jlore-state/1` reply (log trimmed). A state
+  too big for one post goes in parts (64K-character slices of its JSON, at
+  most 32), and a client still waiting asks again after 15 s, doubling to
+  2 min, in case the host was away when it first asked. The session exposes
+  `desynced` while that is under way.
+- **A reload is a rejoin.** The room is read from index 0 (intents are ~100
+  bytes), the start is found, and the list is replayed; the seat cookie binds
+  you back to your seat. That includes the host, which used to come back as a
+  guest of its own room and had to resume on a new room code. The host's only
+  remaining duty after Start is posting checksums; the turn timer never posted
+  anything (TurnBar only counts down), so there was no timer duty to move.
+  A replaying client holds its own posts until it has read as far as the room
+  reached when it started (`GET ?since=end`), then drops what the list already
+  holds: no checksum for a past turn, no second answer to an answered resync.
+  Before that, a host reloading at turn N queued N checksum posts ahead of its
+  own presses, and a guest took each old one whose sum it had evicted for drift
+  and rebuilt the match (NET-R2). A guest now ignores a checksum for a boundary
+  it no longer remembers. `e2e/host-reload.spec.ts` drives the host case in two
+  browsers.
+- **Hotseat runs the same code** over the local relay, one session acting for
+  every seat: no host loop, no N clients, no tick waits. It follows the seat
+  that must choose (a prompt's owner) before the active seat, and a seat picked
+  by hand holds only until the turn or prompt changes (HS-2/TURN-4).
+
+**Why it is safe.** `reduce` is pure and seeded; B119 already guarantees that
+replaying the same actions reproduces the same state (`npm run replay` relies on
+it); and the relay's RPUSH order is one total order every reader sees
+identically. The one cross-browser hazard is floating point that ECMAScript
+leaves to the implementation (`Math.log` in `expr.ts`): the engine pass pins
+the expression evaluator's results so V8 and SpiderMonkey agree, and the
+checksums catch anything that slips through.
+
+**What a client can now see.** Everything. Each browser holds the full
+`GameState` in memory: every hand, every library in draw order, the seed and RNG
+cursor (so future shuffles and draws can be computed), and the options of
+prompts that belong to other players. The relay list, readable by anyone with
+the room code, carries every seat's codex in the start message and every action
+anyone took. What is *not* given up is the UI boundary: React is only ever
+handed a `GameView` from `viewFor`, so the table never renders another player's
+hand, and `test/net-host.test.ts` (B111, restated) and the e2e hidden-hand DOM
+test both still pin that. Peeking takes devtools and intent, which is the bar
+this was always held to among friends; it is no longer technically prevented.
+
+**The transport.** `GET /api/room/CODE?stream=1&since=N` is server-sent events,
+one event per list entry. On Vercel it is backed by Upstash pub/sub: POST is one
+`/pipeline` call (RPUSH + EXPIRE + PUBLISH), and each open stream SUBSCRIBEs
+(REST, `text/event-stream`), reads the backlog, then reads from its cursor on
+every notification. A stream ends itself after ~50 s to fit `maxDuration: 60`,
+and the client reopens from its cursor. The server writes `: open` at once and
+`: ready` only when the upstream SUBSCRIBE has confirmed. A stream clears the
+client's failure count only after it has shown `: ready`, a heartbeat or an
+entry, and has then either lived 5 s or delivered an entry. `event: error` is
+always a failure, and so is a `bye` from a stream that proved nothing. Reopens
+are at least 1 s apart. Resetting on the first byte, as the first cut did, meant
+a refused SUBSCRIBE reopened every 250 ms forever, about 8 requests a second per
+client (NET-R1). If the stream cannot be opened, shows no first byte within 4 s,
+or fails three times running (about 2 s), the client polls: 1 s at
+rest, 250 ms for 5 s after any traffic, a kick right after its own post and when
+the tab becomes visible, no hidden-tab backoff during a match, and an idle stop
+that anything local undoes and that a visible live match never takes. Every
+request has a timeout (4 s GET, 8 s POST) and `stop()` aborts all of them.
+Server-side long-polling on LLEN was ruled out: it burns the command quota.
+
+**Free-tier budget, per 4-player hour** (assumptions: ~120 turns an hour and
+~6 intents a turn, so ~840 appends with the checksums; 4 streams open):
+
+| | Upstash commands | Vercel invocations |
+|---|---|---|
+| appends (RPUSH + EXPIRE + PUBLISH each) | ~2,500 | ~840 |
+| one LRANGE per open stream per append | ~3,400 | — |
+| stream reopen every ~50 s (SUBSCRIBE + backlog read) | ~600 | ~290 |
+| **total** | **~6,500** | **~1,130** |
+
+Against Upstash's 500k commands a month that is roughly 75 four-player hours
+(roughly 50 if Upstash also bills each pub/sub delivery as a command, which this
+pass could not verify); a five-minute lobby adds about 2,000. Against Vercel
+Hobby's 1M invocations it is several hundred hours. The streams hold 4 function
+instances open for the hour, mostly waiting on the network: check function
+duration / active CPU in the Vercel usage tab after the first real session. If
+the push path does not work in production, the polling fallback costs about
+15,000-20,000 commands per 4-player hour, roughly 25-30 hours a month.
+
+**Measured on the dev relay** (`e2e/latency.spec.ts`): a networked press now
+renders for the presser in 57-132 ms and reaches the other browser in 86-195 ms,
+from ~1.8 s and ~1.7 s. Engine cost per press is small (reduce 1-2 ms, viewFor
+~0.5 ms, a checksum 4-6 ms once per turn); the rest is React rendering the
+table. A cold rejoin that replays an entire 180-turn 4-player match (1,409
+actions) took 2.3 s in Node.
+
+**Verified against production services, and not.** `npm run relay:check` against
+the real Upstash database (2026-09-11) passes: the `/pipeline` append, LRANGE,
+`since=end`, TTL, and the REST `/subscribe` push path, with 139 ms from an append
+to the event on an open stream. It drives `streamRoom` directly, so two things
+remain unmeasured until a deploy: whether Vercel's Node runtime streams
+`res.write` unbuffered, and the latency other players see on the deployed site.
+If Vercel buffers, the 4 s first-byte timeout and the rule above send every
+client to polling rather than into a retry loop.
+
+Code: `src/net/lockstep.ts` (`LockstepCore`, `startSession`, `makeStart`,
+`stateChecksum`), `src/ui/useGame.ts`, `src/net/relay.ts` (`startPolling`,
+`makeRelay().stream`), `src/relay/roomHandler.ts` (`streamRoom`),
+`src/relay/upstash.ts`. Tests: `test/net-lockstep.test.ts`,
+`test/net-stream.test.ts`, `test/net-host.test.ts` (B111).

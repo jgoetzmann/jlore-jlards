@@ -4,8 +4,10 @@
  * The relay is the only part of this project that cannot be proven by the test
  * suite: `npx vitest run` exercises the handler against an in-memory store, so
  * a green suite says nothing about whether your credentials, your database, or
- * the network path actually work. This drives the real `handleRoomRequest`
- * against real Redis and checks the same behaviors the suite does (B105-B107).
+ * the network path actually work. This drives the real `handleRoomRequest` and
+ * `streamRoom` against real Redis, through the same REST adapter the deployed
+ * function uses, and checks the same behaviors the suite does (B105-B107) plus
+ * the pub/sub push path.
  *
  *   npm run relay:check
  *
@@ -15,13 +17,13 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { Redis } from '@upstash/redis';
 import {
   handleRoomRequest,
   roomKey,
+  streamRoom,
   ROOM_TTL_SECONDS,
-  type RoomStore,
 } from '../src/relay/roomHandler.js';
+import { makeUpstashStore, readUpstashEnv } from '../src/relay/upstash.js';
 
 /** Minimal .env loader: strips surrounding quotes, never overwrites a real env var. */
 function loadDotEnv(): void {
@@ -44,42 +46,19 @@ function check(label: string, ok: boolean, detail = ''): void {
 
 async function main(): Promise<void> {
   loadDotEnv();
-  const url = process.env['UPSTASH_REDIS_REST_URL'] ?? '';
-  const token = process.env['UPSTASH_REDIS_REST_TOKEN'] ?? '';
+  const { creds, shape } = readUpstashEnv(process.env);
 
-  if (!url || !token) {
-    console.log('No Upstash credentials found.');
-    console.log('Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in .env');
-    console.log('(copy .env.example). The app still runs hotseat without them.');
-    process.exitCode = 1;
-    return;
-  }
-  if (!url.startsWith('https://')) {
-    console.log('UPSTASH_REDIS_REST_URL must start with https:// — got a different scheme.');
-    console.log('Use the REST url from the Upstash console, not the redis:// connection string.');
+  if (!creds) {
+    console.log(`No usable Upstash credentials found (${shape}).`);
+    console.log('Set UPSTASH_REDIS_REST_URL (the https:// REST url, not redis://) and');
+    console.log('UPSTASH_REDIS_REST_TOKEN in .env (copy .env.example). The app still runs hotseat without them.');
     process.exitCode = 1;
     return;
   }
 
-  const redis = new Redis({ url, token });
-  const store: RoomStore = {
-    async rpush(key, value) {
-      return (await redis.rpush(key, value)) as number;
-    },
-    async lrange(key, start, stop) {
-      const raw = (await redis.lrange(key, start, stop)) as unknown[];
-      return raw.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
-    },
-    async expire(key, seconds) {
-      return await redis.expire(key, seconds);
-    },
-    async exists(key) {
-      return (await redis.exists(key)) as number;
-    },
-  };
-
+  const store = makeUpstashStore(creds);
   const code = `CHK${String(Date.now() % 100000).padStart(5, '0')}`;
-  console.log(`checking relay against ${new URL(url).host} using room ${code}\n`);
+  console.log(`checking relay against ${new URL(creds.url).host} using room ${code}\n`);
 
   try {
     const p1 = await handleRoomRequest('POST', code, { from: 'p1', kind: 'hello', payload: {} }, undefined, store);
@@ -94,6 +73,9 @@ async function main(): Promise<void> {
     const g1 = await handleRoomRequest('GET', code, undefined, 1, store);
     check('B106 GET since=1 returns only newer messages', (g1.body as { messages: unknown[] }).messages.length === 1);
 
+    const tail = await handleRoomRequest('GET', code, undefined, 'end', store);
+    check('GET since=end reports the tail', (tail.body as { next?: number }).next === 2);
+
     const bad = await handleRoomRequest('POST', code, { nope: true }, undefined, store);
     check('B107 a malformed body is 400 bad_request', bad.status === 400 && (bad.body as { error: string }).error === 'bad_request');
 
@@ -103,10 +85,30 @@ async function main(): Promise<void> {
     const gone = await handleRoomRequest('GET', 'NOSUCHROOM', undefined, 0, store);
     check('B107 an unknown room is 404 no_room', gone.status === 404);
 
-    const ttl = await redis.ttl(roomKey(code));
+    const ttl = Number(await store.command(['TTL', roomKey(code)]));
     check('rooms expire', ttl > 0 && ttl <= ROOM_TTL_SECONDS, `ttl ${ttl}s of ${ROOM_TTL_SECONDS}`);
 
-    await redis.del(roomKey(code));
+    // The push path: open a stream from the tail, append, and time the event.
+    const chunks: string[] = [];
+    const client = new AbortController();
+    const streaming = streamRoom(code, 2, store, { write: (c) => chunks.push(c), signal: client.signal }, { maxMs: 8000 });
+    await new Promise((r) => setTimeout(r, 1200));
+    const t0 = Date.now();
+    await handleRoomRequest('POST', code, { from: 'p1', kind: 'intent', payload: { type: 'endTurn' } }, undefined, store);
+    let seenAt = 0;
+    while (Date.now() - t0 < 5000) {
+      if (chunks.join('').includes('id: 3')) {
+        seenAt = Date.now();
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    client.abort();
+    await streaming;
+    check('pub/sub pushes an appended entry to an open stream', seenAt > 0, seenAt ? `${seenAt - t0}ms` : 'no event in 5s');
+    check('the stream did not report an error', !chunks.join('').includes('event: error'), chunks.find((c) => c.includes('error')) ?? '');
+
+    await store.command(['DEL', roomKey(code)]);
   } catch (e) {
     check('reached Upstash', false, String(e).slice(0, 200));
   }

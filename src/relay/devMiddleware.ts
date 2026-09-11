@@ -4,60 +4,32 @@
  * Without this, `npm run dev` serves the client and no `/api`, so multiplayer
  * cannot be exercised locally at all — you would have to deploy to Vercel to
  * find out whether two browsers can talk. It runs the same `handleRoomRequest`
- * the Vercel function does, so what you test locally is what ships.
+ * and `streamRoom` the Vercel function does, over the same store adapters, so
+ * what you test locally is what ships — the push path included, which is what
+ * the e2e suite exercises.
  *
  * Uses Upstash when `UPSTASH_REDIS_REST_URL` / `_TOKEN` are in the environment,
  * and an in-process store otherwise, which is what the e2e run uses.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleRoomRequest, roomKey, type RoomStore } from './roomHandler';
+import {
+  handleRoomRequest,
+  isValidRoomCode,
+  makeMemoryStore,
+  parseSince,
+  roomKey,
+  streamRoom,
+  type RoomStore,
+  type StreamTiming,
+} from './roomHandler';
+import { makeUpstashStore, readUpstashEnv } from './upstash';
 
-/** In-process store. Same semantics as Redis for the four ops we use. */
-export function makeMemoryStore(): RoomStore {
-  const lists = new Map<string, string[]>();
-  return {
-    async rpush(key, value) {
-      const list = lists.get(key) ?? [];
-      list.push(value);
-      lists.set(key, list);
-      return list.length;
-    },
-    async lrange(key, start, stop) {
-      const list = lists.get(key) ?? [];
-      const end = stop < 0 ? list.length + stop + 1 : stop + 1;
-      return list.slice(Math.max(0, start), Math.max(0, end));
-    },
-    async expire() {
-      return 1;
-    },
-    async exists(key) {
-      return lists.has(key) ? 1 : 0;
-    },
-  };
-}
+export { makeMemoryStore };
 
-async function makeStore(): Promise<RoomStore> {
-  const url = process.env['UPSTASH_REDIS_REST_URL'] ?? '';
-  const token = process.env['UPSTASH_REDIS_REST_TOKEN'] ?? '';
-  if (!url || !token || !url.startsWith('https://')) return makeMemoryStore();
-  const { Redis } = await import('@upstash/redis');
-  const redis = new Redis({ url, token });
-  return {
-    async rpush(key, value) {
-      return (await redis.rpush(key, value)) as number;
-    },
-    async lrange(key, start, stop) {
-      const raw = (await redis.lrange(key, start, stop)) as unknown[];
-      return raw.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
-    },
-    async expire(key, seconds) {
-      return await redis.expire(key, seconds);
-    },
-    async exists(key) {
-      return (await redis.exists(key)) as number;
-    },
-  };
+function makeStore(): RoomStore {
+  const { creds } = readUpstashEnv(process.env);
+  return creds ? makeUpstashStore(creds) : makeMemoryStore();
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -79,13 +51,18 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-/** A Vite/Connect middleware serving POST+GET /api/room/:code. */
-export function relayMiddleware(): (
+export interface RelayMiddlewareOptions {
+  store?: RoomStore;
+  timing?: StreamTiming;
+}
+
+/** A Vite/Connect middleware serving POST, GET and the event stream at /api/room/:code. */
+export function relayMiddleware(options: RelayMiddlewareOptions = {}): (
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void,
 ) => void {
-  let storePromise: Promise<RoomStore> | null = null;
+  let store: RoomStore | null = options.store ?? null;
 
   return (req, res, next) => {
     const url = req.url ?? '';
@@ -96,13 +73,34 @@ export function relayMiddleware(): (
 
     void (async () => {
       try {
-        storePromise ??= makeStore();
-        const store = await storePromise;
+        store ??= makeStore();
 
         const parsed = new URL(url, 'http://localhost');
         const code = decodeURIComponent(parsed.pathname.replace('/api/room/', '').split('/')[0] ?? '');
         const sinceRaw = parsed.searchParams.get('since');
-        const since = sinceRaw === null ? undefined : Number(sinceRaw);
+
+        if (req.method === 'GET' && parsed.searchParams.get('stream') === '1') {
+          const lastId = req.headers['last-event-id'];
+          const since = parseSince(typeof lastId === 'string' && lastId ? lastId : sinceRaw ?? '0');
+          if (!isValidRoomCode(code) || since === null || since === 'end') {
+            res.statusCode = 400;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ error: 'bad_request' }));
+            return;
+          }
+          res.statusCode = 200;
+          res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+          res.setHeader('cache-control', 'no-cache, no-transform');
+          res.setHeader('x-accel-buffering', 'no');
+          res.flushHeaders();
+          const gone = new AbortController();
+          res.on('close', () => gone.abort());
+          await streamRoom(code, since, store, { write: (c) => res.write(c), signal: gone.signal }, options.timing);
+          if (!res.writableEnded) res.end();
+          return;
+        }
+
+        const since = sinceRaw === null ? undefined : sinceRaw;
 
         let body: unknown;
         if (req.method === 'POST') {
@@ -119,6 +117,10 @@ export function relayMiddleware(): (
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(result.body));
       } catch (err) {
+        if (res.headersSent) {
+          if (!res.writableEnded) res.end();
+          return;
+        }
         res.statusCode = 500;
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ error: 'relay_failed', detail: String(err).slice(0, 200) }));

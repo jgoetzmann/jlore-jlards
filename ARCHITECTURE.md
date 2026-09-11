@@ -188,11 +188,15 @@ test('a view never contains library contents', () => {
 A message queue that has never heard of a card game.
 
 ```
-POST /api/room/[code]     → RPUSH msg, EXPIRE 6h, return new length
-GET  /api/room/[code]?since=N → LRANGE N..-1
+POST /api/room/[code]                  → RPUSH + EXPIRE 6h + PUBLISH (one pipeline), return new length
+GET  /api/room/[code]?since=N          → LRANGE N..-1
+GET  /api/room/[code]?since=end        → { messages: [], next: LLEN }
+GET  /api/room/[code]?stream=1&since=N → text/event-stream, one event per entry, pushed via pub/sub
 ```
 
 That's the entire backend. Vercel Function + Upstash Redis, both free tier. Messages are opaque JSON blobs; the relay doesn't parse them, doesn't validate them, doesn't know who's the host.
+
+**Since SB-65, every browser runs the engine (lockstep).** The owner waived hidden information for playtesting, so the relay no longer carries filtered views. It carries one `start` message and then intents, and every browser folds that list through `reduce` in relay order. `reduce` is pure and seeded (B119) and RPUSH order is a total order, so they all land on the same state; a checksum each turn catches anything that does not.
 
 **Message envelope:**
 
@@ -200,14 +204,12 @@ That's the entire backend. Vercel Function + Upstash Redis, both free tier. Mess
 { seq, from: seatId, kind: 'intent' | 'view' | 'hello' | 'snapshot', payload }
 ```
 
-- `intent` — a player pressed a button. Any seat → host.
-- `view` — host → one seat, that seat's filtered view. (Yes, addressed views ride the same shared list. Any client *could* read another's view off the queue if it wanted to. That's the "if they wanted to, that's fine" tier of privacy — it takes deliberate effort and a devtools session, which is exactly the bar.)
-- `hello` — a seat joined or refreshed; host replies with a fresh view.
-- `snapshot` — see §8.
+- `intent` — `{nonce, actions}`: a player pressed a button (or a batch of them). Every browser applies it; the actor is the seat bound to `from`, never a field of the payload.
+- `view` — the lobby roster, broadcast (`jlore-lobby/1`). No game views ride the list any more.
+- `hello` — presence in the lobby, every 4s, carrying the seat's name and (once) its Codex. After the deal it only matters for a resumed match with open seats: the first hello from an unbound seat claims the next one.
+- `snapshot` — tagged payloads: `jlore-start/1` (the deal), `jlore-check/1` (the host's checksum at a turn boundary), `jlore-resync/1` / `jlore-state/1` (a client that could not rebuild its way back into agreement asks for, and adopts, the host's state).
 
-**Polling, not WebSockets.** One request per second. The game is turn-based; nobody notices, and it eliminates connection lifecycle, reconnect logic, and the Hobby-tier function duration cap entirely. WebSockets are available on Vercel now but they'd add real complexity for zero perceptible benefit at 4 players taking 30-second turns.
-
-Backoff to 3s when the tab is hidden. Stop when it's been idle 10 minutes.
+**Push, with polling behind it.** Polling at 1 s was chosen because "nobody notices a second in a turn-based game". They did: a press cost two polls and two round trips, about 1.8 s on your own screen. A press now renders locally before it is posted, and other browsers hear about it over server-sent events backed by Upstash pub/sub — about 0.1-0.2 s on the dev relay. A stream ends itself after ~50 s to fit the 60 s function budget and the client reopens from its cursor. If streams cannot be opened, the same loop polls: 1 s at rest, 250 ms right after traffic, no hidden-tab backoff during a match, and an idle stop that a click or the tab coming back undoes.
 
 ### Why not WebRTC
 
@@ -223,7 +225,7 @@ Three tiers, and the split matters more than it looks.
 |---|---|---|---|
 | Seat token + room code | **Cookie** | ~100 bytes | Survives refresh, so reloading puts you back in your seat instead of joining as a new player. Small enough that riding along on every relay request costs nothing. |
 | Codex (seen cards), settings, last snapshot | **localStorage** | KBs–MBs | Persistent, per-device, and **never sent anywhere**. |
-| Live game state | **In memory** | — | Rebuilt from the host each time. Nothing to persist. |
+| Live game state | **In memory** | — | Rebuilt by replaying the room's relay list (SB-65). Nothing to persist. |
 
 **On putting the library in a cookie specifically:** don't. Cookies cap around 4KB and get attached to *every single HTTP request*, so a 40-card library would be shipped to the relay a thousand times a session — the opposite of private. localStorage holds 5MB and never leaves the browser on its own. Use the cookie for identity, localStorage for data.
 
@@ -235,7 +237,7 @@ localStorage.setItem('jlore_codex', JSON.stringify([...seenCardIds]));
 localStorage.setItem('jlore_snapshot', JSON.stringify({ code, seq, state }));
 ```
 
-**Codex / Known Universe** lives entirely in localStorage. It's a set of card IDs, appended whenever a card appears in a match you're in. ~60 cards Discover from "the Known Universe," so the engine needs it synchronously — the host reads each seat's Codex once at match start (sent up in `hello`) and caches it in match state. Clearing your browser resets your Codex; for a hobby build that's a fine tradeoff against building account storage.
+**Codex / Known Universe** lives entirely in localStorage. It's a set of card IDs, appended whenever a card appears in a match you're in. ~60 cards Discover from "the Known Universe," so the engine needs it synchronously — each seat's Codex goes up in its first lobby `hello`, and the host puts all of them in the start message, so every browser deals the match with the same codices. Clearing your browser resets your Codex; for a hobby build that's a fine tradeoff against building account storage.
 
 ---
 
@@ -245,30 +247,26 @@ localStorage.setItem('jlore_snapshot', JSON.stringify({ code, seq, state }));
 
 **Joining before the deal:** open the link → client sends `hello` with your seat token (from cookie, or freshly generated) and Codex, and repeats it every 4s → you appear in the host's roster within about a poll each way. The lobby host broadcasts the roster on every change; it never touches the engine.
 
-**Dealing:** the lobby freezes its roster and hands the match host an ordered list of seat tokens plus its relay cursor. `startHost` binds `seats[i] → playerOrder[i]` *before it reads a message*, so the opening `publishAll` is already addressed to every real browser — no hello round trip to get seated, and the new host does not replay the lobby's traffic.
+**Dealing:** the lobby freezes its roster and hands over an ordered list of seat tokens, names and codices. The host posts one `start` message carrying those plus the config, seed and a checksum; `seats[i]` acts for `playerOrder[i]`. Every browser builds the identical match from it — the host applies it at once, without waiting for its own post — so nobody needs a hello round trip to get seated.
 
-**Joining after the deal:** the final lobby broadcast carries `started: true` and the frozen seating order, so a latecomer gets a definite answer rather than a timeout: their token is in the list (a reconnect — their view is already on the wire) or it is not (the match was dealt without them, and the screen says so).
+**Joining after the deal:** the final lobby broadcast carries `started: true` and the frozen seating order, so a latecomer gets a definite answer rather than a timeout: their token is in the list (a reconnect — they replay the room and are back) or it is not (the match was dealt without them, and the screen says so).
 
-**Refresh:** cookie restores your seat token, `hello` gets you a fresh view, you're back where you were. Takes about a second.
+**Refresh:** the cookie restores your seat token; the room is read from its first message and replayed, and you're back where you were. The host too: after the deal the host is just another client of its own room, so a host reload is a rejoin into seat one, not a resume on a new room code.
 
-**Host closes the tab:** the game is gone. This is accepted. Sessions run an hour, the host is me, and if it dies we restart.
-
-**Optional mitigation** (build only if it actually becomes annoying): the host pushes a `snapshot` message with the serialized state each turn. Any other client can then take over as host from the last snapshot. Note this does put the full state on the relay in a form a determined person could fetch and parse — which, again, is the stated privacy bar.
+**Host closes the tab:** the match goes on for everyone else — every browser has the state. Only the turn-boundary checksums stop until the host comes back. No full-state snapshot is posted to the relay; a local one is kept (off the click path) for the start screen's resume.
 
 ---
 
 ## 9. A turn, end to end
 
 1. Friend 2 clicks "play Temple Marketplace."
-2. Their client `POST`s `{kind:'intent', payload:{type:'play', instanceId}}`.
-3. Host's next poll picks it up.
-4. Host runs `reduce(state, action, rng)`.
-5. New state has `pending: {type:'discover', player:'p2', options:[...]}`.
-6. Host computes `viewFor(state, seat)` for each seat and POSTs three `view` messages.
-7. Friend 2's client renders the Discover picker. Friends 1 and 3 see "waiting on Friend 2."
-8. Friend 2 picks → `{kind:'intent', payload:{type:'resolve', choice:1}}` → back to step 3.
+2. Their browser runs `reduce(predicted, {type:'play', …})` and renders `viewFor(predicted, p2)` at once: the Discover picker is up in the same frame.
+3. It `POST`s `{kind:'intent', payload:{nonce, actions:[{type:'play', …}]}}`.
+4. The relay appends it and publishes; every open stream reads it and pushes it out.
+5. Friends 1 and 3 run the same `reduce` on the same state and see "waiting on Friend 2." Friend 2's browser sees its own intent come back in order and keeps the state it already computed.
+6. Friend 2 picks → `{type:'resolve', …}` → back to step 2.
 
-Total latency: two poll intervals, so ~1–2 seconds. Fine for a turn-based game.
+Latency: the presser, one render (~50-130 ms on the dev relay, most of it React); everyone else, one POST plus one push (~0.1-0.2 s on the dev relay).
 
 ---
 
@@ -346,7 +344,7 @@ Each step is playable on its own, which is the point.
 |---|---|
 | Host closes tab → game over | It's an hour-long session with people I'm on a call with |
 | Host's browser can see all state | The host is a person I know |
-| A determined player could read others' views off the relay queue | Requires deliberate devtools work; that's the stated bar |
+| Every browser holds the full state, so a determined player can read every hand and library with devtools (SB-65) | Waived by the owner for playtesting; the UI still renders only `viewFor` |
 | Host does all the compute | Peak is 4 players and a few hundred effect nodes |
 | Clearing browser data wipes your Codex | Building account storage costs more than it's worth here |
 | No reconnect if the *relay* dies | Vercel + Upstash going down mid-session is not my problem to solve |
