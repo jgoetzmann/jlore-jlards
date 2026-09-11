@@ -15,6 +15,7 @@ import type {
   PlayerState,
   Zone,
 } from '@engine/types';
+import { makeLogEntry } from '@engine/core/log';
 
 // ---------------------------------------------------------------------------
 // Player copying
@@ -56,8 +57,7 @@ export function pushLog(
   player: PlayerId | null = null,
 ): GameState {
   state.logSeq += 1;
-  const entry: LogEntry = { seq: state.logSeq, turn: state.turn, player, kind, detail };
-  state.log.push(entry);
+  state.log.push(makeLogEntry(state.logSeq, state.turn, player, kind, detail));
   return state;
 }
 

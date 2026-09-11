@@ -261,14 +261,69 @@ function applyFn(name: string, args: number[]): number {
     return name === 'min' ? Math.min.apply(null, args) : Math.max.apply(null, args);
   }
   if (name === 'log') {
-    if (args.length === 1) return args[0] <= 0 ? 0 : Math.log(args[0]);
+    if (args.length === 1) return args[0] <= 0 || !Number.isFinite(args[0]) ? 0 : snap(detLn(args[0]));
     if (args.length === 2) {
       if (args[0] <= 0 || args[1] <= 0 || args[1] === 1) return 0;
-      return Math.log(args[0]) / Math.log(args[1]);
+      if (!Number.isFinite(args[0]) || !Number.isFinite(args[1])) return 0;
+      return snap(detLn(args[0]) / detLn(args[1]));
     }
     throw new ExprError('log takes 1 or 2 arguments');
   }
   throw new ExprError('unknown function: ' + name);
+}
+
+// ---------------------------------------------------------------------------
+// Engine-independent logarithm
+// ---------------------------------------------------------------------------
+//
+// Every client now runs reduce itself (lockstep), so an expression must give
+// the same bits in V8, SpiderMonkey and JavaScriptCore. ECMAScript pins +, -,
+// *, /, %, sqrt, floor, ceil, round, abs, min and max to exact IEEE-754
+// results, but leaves the library logarithm "implementation-approximated": V8
+// gives floor(ln(1000) / ln(10)) === 2 because of one ulp, and another engine
+// is free to give 3. So `log` is computed here from basic arithmetic only,
+// which every engine must round identically, and the result is snapped to
+// 1e-9 so that exact cases (log(1000, 10), log(8, 2)) land on the integer a
+// card author expects before any floor / ceil / comparison sees them.
+
+const LN2 = 0.6931471805599453;
+const SQRT2 = 1.4142135623730951;
+
+/** ln(x) for finite x > 0, using only exactly-rounded operations. */
+function detLn(x: number): number {
+  // x = m * 2^e with m in [1, 2). Halving and doubling are exact.
+  let m = x;
+  let e = 0;
+  while (m >= 2) {
+    m /= 2;
+    e += 1;
+  }
+  while (m < 1) {
+    m *= 2;
+    e -= 1;
+  }
+  if (m > SQRT2) {
+    m /= 2;
+    e += 1;
+  }
+  // ln(m) = 2 * atanh(t), t = (m - 1) / (m + 1), |t| <= 0.172; 21 odd terms
+  // take the series well past double precision.
+  const t = (m - 1) / (m + 1);
+  const t2 = t * t;
+  let term = t;
+  let sum = 0;
+  for (let k = 1; k <= 41; k += 2) {
+    sum += term / k;
+    term *= t2;
+  }
+  return e * LN2 + 2 * sum;
+}
+
+/** Round to 9 decimal places. Math.round and IEEE multiply/divide are exact. */
+function snap(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  const r = Math.round(v * 1e9) / 1e9;
+  return r === 0 ? 0 : r; // never -0
 }
 
 /**

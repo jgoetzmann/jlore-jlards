@@ -137,6 +137,7 @@ export {
   accruedVp,
   isEndOfGame,
   liveVp,
+  publicVp,
   scoreFor,
   CONSTELLATION_ID,
   STAR_ALIGNER_ID,
