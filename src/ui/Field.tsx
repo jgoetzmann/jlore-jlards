@@ -1,6 +1,11 @@
 /**
  * Auras. Heroic gets an Activate (2) button, disabled once it has been used
  * this turn — one Heroic, unlimited Celestial, one Hypercelestial.
+ *
+ * `variant="strip"` is the dock form (SB-63): one chip per aura at the start of
+ * the in-play strip, with the aura's text as its tooltip and the Activate
+ * button inline. Activation spends Money, so it has to sit next to the hand and
+ * the Money readout, not in a drawer.
  */
 
 import React from 'react';
@@ -14,6 +19,7 @@ export interface FieldProps {
   money: number;
   yourTurn: boolean;
   onAction: (action: GameAction) => void;
+  variant?: 'panel' | 'strip';
 }
 
 const TIER_ORDER: AuraTier[] = ['hypercelestial', 'heroic', 'celestial'];
@@ -23,11 +29,57 @@ function tierRank(tier: AuraTier): number {
   return i < 0 ? TIER_ORDER.length : i;
 }
 
-export function Field({ field, playerId, money, yourTurn, onAction }: FieldProps): JSX.Element {
+function activateTitle(usedThisTurn: boolean, money: number): string {
+  if (usedThisTurn) return 'Already activated this turn';
+  if (money < HEROIC_ACTIVATION_COST) return 'Costs 2 Money';
+  return 'Activate this aura';
+}
+
+export function Field({
+  field,
+  playerId,
+  money,
+  yourTurn,
+  onAction,
+  variant = 'panel',
+}: FieldProps): JSX.Element | null {
   const auras = field.slice().sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
 
   function activate(auraId: AuraId): void {
     onAction({ type: 'activateAura', player: playerId, auraId });
+  }
+
+  if (variant === 'strip') {
+    if (auras.length === 0) return null;
+    return (
+      <div className="field field-strip" data-testid="field">
+        {auras.map((aura) => {
+          const heroic = aura.tier === 'heroic';
+          const canActivate =
+            heroic && yourTurn && !aura.usedThisTurn && money >= HEROIC_ACTIVATION_COST;
+          return (
+            <span
+              className={`aura-chip aura-${aura.tier}`}
+              key={aura.auraId}
+              title={`${aura.name} (${aura.tier}) — ${aura.text}`}
+            >
+              <span className="aura-name">{aura.name}</span>
+              {heroic && (
+                <button
+                  type="button"
+                  className="aura-activate"
+                  disabled={!canActivate}
+                  title={activateTitle(aura.usedThisTurn, money)}
+                  onClick={() => activate(aura.auraId)}
+                >
+                  {aura.usedThisTurn ? 'used' : `Activate (${HEROIC_ACTIVATION_COST})`}
+                </button>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -57,13 +109,7 @@ export function Field({ field, playerId, money, yourTurn, onAction }: FieldProps
                   className="aura-activate"
                   disabled={!canActivate}
                   onClick={() => activate(aura.auraId)}
-                  title={
-                    aura.usedThisTurn
-                      ? 'Already activated this turn'
-                      : money < HEROIC_ACTIVATION_COST
-                        ? 'Costs 2 Money'
-                        : 'Activate this aura'
-                  }
+                  title={activateTitle(aura.usedThisTurn, money)}
                 >
                   Activate ({HEROIC_ACTIVATION_COST})
                   {aura.usedThisTurn ? ' — used' : ''}

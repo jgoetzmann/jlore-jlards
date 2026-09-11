@@ -26,15 +26,10 @@ import { reduce } from '@engine/index';
 import { viewFor } from '@engine/view';
 import type { GameState, GameView, PlayerId, Prompt } from '@engine/types';
 import { botAction } from '@sim/bot';
-import { App } from '@ui/App';
-import { Board } from '@ui/Board';
-import { Field } from '@ui/Field';
-import { Hand } from '@ui/Hand';
+import { App, TableLayout } from '@ui/App';
 import { Lobby } from '@ui/Lobby';
 import { Log } from '@ui/Log';
-import { Opponents } from '@ui/Opponents';
 import { PromptOverlay } from '@ui/PromptOverlay';
-import { TurnBar } from '@ui/TurnBar';
 import { seedMatch, type LobbyInfo } from '@ui/useGame';
 
 const noop = (): void => undefined;
@@ -45,37 +40,24 @@ function testIdsIn(html: string): Set<string> {
   return out;
 }
 
-/** Everything the table renders for one seat, as one string of markup. */
+/**
+ * Everything the table renders for one seat, as one string of markup: the
+ * whole `TableLayout` App.tsx mounts, plus the log (which lives in a drawer
+ * that only renders its contents while open).
+ */
 function renderTable(view: GameView, me: PlayerId): string {
+  void me;
   return [
-    React.createElement(TurnBar, {
+    React.createElement(TableLayout, {
       view,
-      playerId: me,
-      yourTurn: true,
+      mode: 'hotseat',
+      code: null,
+      seats: ['s1'],
+      views: { s1: view },
+      activeSeat: 's1',
+      setActiveSeat: noop,
+      send: noop,
       turnSeconds: 90,
-      onAction: noop,
-    }),
-    React.createElement(Board, { view, onBuy: noop, yourTurn: true }),
-    React.createElement(Hand, {
-      hand: view.you.hand,
-      playerId: me,
-      yourTurn: true,
-      actions: view.you.actions,
-      onAction: noop,
-    }),
-    React.createElement(Opponents, { view }),
-    React.createElement(Field, {
-      field: view.you.field,
-      playerId: me,
-      money: view.you.money,
-      yourTurn: true,
-      onAction: noop,
-    }),
-    React.createElement(PromptOverlay, {
-      pending: view.pending,
-      playerId: me,
-      names: {},
-      onAction: noop,
     }),
     React.createElement(Log, { log: view.log, names: {} }),
   ]

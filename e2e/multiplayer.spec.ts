@@ -277,7 +277,15 @@ test.describe('two chromium players over the relay', () => {
       const watcher = activeIsHost ? guest : host;
       expect(hostId).toBeTruthy();
 
-      const copper = mover.page.getByTestId('hand').locator('[data-card-id="copper"]').first();
+      // Play a Copper when there is one. Xushi's Game can deal an opening hand
+      // with none, and then any clickable card proves the same thing: the
+      // watcher sees the mover's hand shrink. Only a Copper promises Money.
+      const moverHand = mover.page.getByTestId('hand').getByTestId('card');
+      await expect(moverHand.first()).toBeVisible({ timeout: 20_000 });
+      const hasCopper = (await mover.page.getByTestId('hand').locator('[data-card-id="copper"]').count()) > 0;
+      const copper = hasCopper
+        ? mover.page.getByTestId('hand').locator('[data-card-id="copper"]').first()
+        : mover.page.getByTestId('hand').locator('[data-testid="card"][data-clickable="true"]').first();
       await expect(copper).toBeVisible({ timeout: 20_000 });
       const before = await statValue(mover.page, 'money');
       // Capture the watcher's view of the mover's hand before the play, so the
@@ -289,7 +297,9 @@ test.describe('two chromium players over the relay', () => {
       await copper.click();
 
       // The mover sees their own money rise.
-      await expect.poll(async () => statValue(mover.page, 'money'), { timeout: 20_000 }).toBeGreaterThan(before);
+      if (hasCopper) {
+        await expect.poll(async () => statValue(mover.page, 'money'), { timeout: 20_000 }).toBeGreaterThan(before);
+      }
 
       // And the watcher's view of that player updates too — the hand count drops,
       // which proves the host republished a filtered view to the other seat.

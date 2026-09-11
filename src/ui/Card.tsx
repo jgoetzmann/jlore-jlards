@@ -4,18 +4,45 @@
  * `CardView.text` arrives already rendered per viewer by the host. It is never
  * re-templated here — the whole point of Call to Chaos 12-15 and Ascendant
  * Spread is that the string the client shows can differ from the real effect.
+ *
+ * Variants (SB-63 layout):
+ *   - `full`    the whole face; prompt panels.
+ *   - `dock`    a hand card in the dock: ~120px, 3-line clamped text, nothing
+ *               the hover preview can say for it (typeline, keywords, rarity).
+ *   - `mini`    a shop pile tile: art with the pile's chips over it, 2-line name.
+ *   - `chip`    one line in the in-play strip or the graveyard list.
+ *   - `preview` the hover layer's big face (12px text, big art).
+ * Every variant keeps `data-testid="card"` (unless `testId` overrides it), the
+ * `<img>` art and `elementRef`, which the browser suite and FLIP rely on.
+ *
+ * Memoised (RENDER-1): with `stabilizeView` handing back the same CardView for
+ * a card that didn't change, and callers passing stable handlers, a view that
+ * moves one Copper re-renders one card face, not sixty.
  */
 
 import React from 'react';
 import type { CardView, Rarity, StatKey } from '@engine/types';
-import type { AnimPreset } from './motion';
+import { artPlaceholder, artThumbUrl, artUrl, nameHue } from './art';
+import { hidePreview, showPreview } from './preview';
+
+export { artUrl, artThumbUrl, nameHue } from './art';
+
+export type CardVariant = 'full' | 'dock' | 'mini' | 'chip' | 'preview';
 
 export interface CardProps {
   card: CardView;
   onClick?: (card: CardView) => void;
   selected?: boolean;
   disabled?: boolean;
+  /** The old small face: no rules text. Kept for callers that still use it. */
   compact?: boolean;
+  variant?: CardVariant;
+  /** Overrides `data-testid="card"`; the preview layer uses this so it is never counted as a card on the table. */
+  testId?: string;
+  /** Drawn over the art (mini tiles: the pile's cost chip and count). */
+  artOverlay?: React.ReactNode;
+  /** Don't drive the hover preview from this card. */
+  noPreview?: boolean;
   badge?: string | null;
   footer?: React.ReactNode;
   draggable?: boolean;
@@ -23,34 +50,20 @@ export interface CardProps {
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onDragEnd?: (e: React.DragEvent) => void;
-  /** One-shot entrance keyframe from `useMotion`. Expires on its own. */
-  cue?: AnimPreset | 'enter' | null;
+  /** Kept for callers; entrances now run from the FLIP layer, not a class. */
+  cue?: string | null;
   /** The card the keyboard is currently on. Independent of hover. */
   cursor?: boolean;
   /** An intent for this card is in flight and the view has not caught up yet. */
   committed?: boolean;
-  /** FLIP registration — `flip.register(card.iid)`. */
+  /** Playing it only adds combo (TURN-9): clickable, but not advertised as playable. */
+  inert?: boolean;
+  /** Ref to the face's root element. */
   elementRef?: (el: HTMLElement | null) => void;
   /** Position in its row, for staggered entrances. */
   index?: number;
   /** Keyboard hint shown in the corner, e.g. "3". */
   hint?: string | null;
-}
-
-/**
- * JPEG, not PNG: the card frame is drawn by the client so the art never needs
- * alpha, and at 533 cards the format choice is the difference between roughly
- * 14 MB and 250 MB of committed assets.
- */
-export function artUrl(key: string): string {
-  return `/art/${encodeURIComponent(key)}.jpg`;
-}
-
-/** Deterministic hue from a name, so the placeholder is stable per card. */
-export function nameHue(name: string): number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return h;
 }
 
 export function initialsOf(name: string): string {
@@ -60,30 +73,44 @@ export function initialsOf(name: string): string {
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
 }
 
-/** Art slot with a generated placeholder fallback carrying the card name. */
-export function CardArt({ artKey, name }: { artKey?: string; name: string }): JSX.Element {
+/**
+ * The art slot (ART-1). Small faces load the 256px WebP thumbnail; the preview
+ * and prompt faces load the full jpg over the thumbnail. The gradient is the
+ * art box's own background, so a loading image never shows as a blank box, and
+ * a missing one falls back to the named placeholder.
+ */
+export function CardArt({
+  artKey,
+  name,
+  size = 'thumb',
+}: {
+  artKey?: string;
+  name: string;
+  size?: 'thumb' | 'full';
+}): JSX.Element {
   const [failed, setFailed] = React.useState(false);
-  const hue = nameHue(name);
   if (!artKey || failed) {
     return (
-      <div
-        className="card-art card-art-placeholder"
-        style={{
-          background: `linear-gradient(150deg, hsl(${hue} 45% 26%), hsl(${(hue + 48) % 360} 40% 15%))`,
-        }}
-        aria-label={name}
-      >
+      <div className="card-art card-art-placeholder" style={{ background: artPlaceholder(name) }} aria-label={name}>
         <span className="card-art-initials">{initialsOf(name)}</span>
         <span className="card-art-name">{name}</span>
       </div>
     );
   }
+  const full = size === 'full';
+  const background = full
+    ? `url("${artThumbUrl(artKey)}") center / cover no-repeat, ${artPlaceholder(name)}`
+    : artPlaceholder(name);
   return (
     <img
       className="card-art"
-      src={artUrl(artKey)}
+      src={full ? artUrl(artKey) : artThumbUrl(artKey)}
       alt={name}
+      width={full ? 512 : 256}
+      height={full ? 512 : 256}
+      decoding="async"
       draggable={false}
+      style={{ background }}
       onError={() => setFailed(true)}
     />
   );
@@ -119,7 +146,7 @@ export function rarityClass(rarity: Rarity): string {
 export function costLabel(card: CardView): string {
   if (card.prophetCost) return `P${card.prophetCost.threshold}`;
   if (card.cost === null || card.cost === undefined) return '—';
-  return card.cost < 0 ? `(${card.cost})` : `(${card.cost})`;
+  return `(${card.cost})`;
 }
 
 /**
@@ -148,17 +175,29 @@ export function travelledTooFar(
   return dx * dx + dy * dy > slop * slop;
 }
 
-export function Card(props: CardProps): JSX.Element {
+function CardImpl(props: CardProps): JSX.Element {
   const { card, onClick, selected, disabled, compact, badge, footer } = props;
+  const variant: CardVariant = props.variant ?? 'full';
   const counters = Object.entries(card.counters ?? {}).filter(([, v]) => v !== 0);
   const stats = statLine(card);
   const clickable = Boolean(onClick) && !disabled;
+  const previewable = !props.noPreview && variant !== 'preview';
 
   // Where the pointer went down, and whether this gesture became a drag. Refs,
   // not state: both are read inside the click handler for the *same* gesture,
   // so a re-render would be a frame too late.
   const pressedAt = React.useRef<{ x: number; y: number } | null>(null);
   const wasDragged = React.useRef(false);
+
+  // A played card unmounts under the pointer and never sees pointerleave; its
+  // preview must not outlive it.
+  const iid = card.iid;
+  React.useEffect(
+    () => () => {
+      if (previewable) hidePreview(iid);
+    },
+    [iid, previewable],
+  );
 
   // The slop guard exists because a drag that never crossed the browser's own
   // threshold arrives as a click. That only happens on a card you can drag, and
@@ -167,22 +206,109 @@ export function Card(props: CardProps): JSX.Element {
   // gain from it. So it is scoped to draggable cards -- today, the hand.
   const guardsDrag = props.draggable === true;
 
-  const classes = ['card', rarityClass(card.rarity)];
+  const classes = ['card', `card-${variant}`, rarityClass(card.rarity)];
   if (compact) classes.push('card-compact');
   if (selected) classes.push('card-selected');
   if (disabled) classes.push('card-disabled');
   if (clickable) classes.push('card-clickable');
   if (card.playable) classes.push('card-playable');
   if (card.affordable) classes.push('card-affordable');
+  if (props.inert) classes.push('card-inert');
   if (props.cursor) classes.push('card-cursor');
   if (props.committed) classes.push('card-committed');
-  if (props.cue) classes.push('card-cue', `card-cue-${props.cue}`);
 
-  // The cue is keyed so React replaces the node when the preset changes:
-  // re-adding a class to a live element does not restart its animation.
+  const showText = !compact && (variant === 'full' || variant === 'dock' || variant === 'preview');
+  const art = (
+    <CardArt artKey={card.art?.key} name={card.name} size={variant === 'preview' || variant === 'full' ? 'full' : 'thumb'} />
+  );
+
+  let body: React.ReactNode;
+  if (variant === 'chip') {
+    body = (
+      <>
+        {art}
+        <span className="card-name">{card.name}</span>
+      </>
+    );
+  } else if (variant === 'mini') {
+    body = (
+      <>
+        <div className="card-art-wrap">
+          {art}
+          {props.artOverlay}
+        </div>
+        <span className="card-name">{card.name}</span>
+      </>
+    );
+  } else if (variant === 'dock') {
+    body = (
+      <>
+        <div className="card-head">
+          <span className="card-cost">{costLabel(card)}</span>
+          <span className="card-name">{card.name}</span>
+        </div>
+        {art}
+        {stats.length > 0 && <div className="card-stats">{stats.join('  ')}</div>}
+        {showText && card.text && <div className="card-text">{card.text}</div>}
+        {counters.length > 0 && (
+          <div className="card-counters">
+            {counters.map(([k, v]) => (
+              <span key={k} className="counter-chip" title={k}>
+                {k} {v}
+              </span>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <div className="card-head">
+          <span className="card-cost">{costLabel(card)}</span>
+          <span className="card-name">{card.name}</span>
+        </div>
+        {art}
+        <div className="card-typeline">
+          <span className="card-types">{card.types.join(' · ')}</span>
+          {card.subtypes.length > 0 && (
+            <span className="card-subtypes"> — {card.subtypes.join(' ')}</span>
+          )}
+          <span className={`card-rarity ${rarityClass(card.rarity)}`}>{card.rarity}</span>
+        </div>
+        {card.keywords.length > 0 && (
+          <div className="card-keywords">
+            {card.keywords.map((k) => (
+              <span key={k} className="keyword-chip">
+                {k}
+              </span>
+            ))}
+          </div>
+        )}
+        {stats.length > 0 && <div className="card-stats">{stats.join('  ')}</div>}
+        {showText && card.text && <div className="card-text">{card.text}</div>}
+        {counters.length > 0 && (
+          <div className="card-counters">
+            {counters.map(([k, v]) => (
+              <span key={k} className="counter-chip" title={k}>
+                {k} {v}
+              </span>
+            ))}
+          </div>
+        )}
+        {card.prophetCost && (
+          <div className="card-prophet">
+            Prophet {card.prophetCost.threshold} · drain {card.prophetCost.drain}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // No `key` on this element. The old `key={cue}` remounted the node to restart
+  // an entrance, which also threw away the FLIP registration mid-flight (MOT-3).
   return (
     <div
-      key={props.cue ?? 'still'}
       ref={props.elementRef}
       className={classes.join(' ')}
       style={
@@ -190,21 +316,23 @@ export function Card(props: CardProps): JSX.Element {
           ? undefined
           : ({ ['--i']: String(props.index) } as React.CSSProperties)
       }
-      data-testid="card"
+      data-testid={props.testId ?? 'card'}
       data-card-id={card.defId}
       data-card-name={card.name}
       data-iid={card.iid}
       data-clickable={clickable ? 'true' : 'false'}
-      data-cue={props.cue ?? undefined}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       draggable={props.draggable}
+      onPointerEnter={previewable ? (e) => showPreview(card, e.currentTarget) : undefined}
+      onPointerLeave={previewable ? () => hidePreview(card.iid) : undefined}
       onPointerDown={(e) => {
         pressedAt.current = { x: e.clientX, y: e.clientY };
         wasDragged.current = false;
       }}
       onDragStart={(e) => {
         wasDragged.current = true;
+        if (previewable) hidePreview(card.iid);
         props.onDragStart?.(e);
       }}
       onDragOver={props.onDragOver}
@@ -239,52 +367,11 @@ export function Card(props: CardProps): JSX.Element {
           onClick(card);
         }
       }}
-      title={card.text}
+      // The hover preview replaces the native tooltip; a card that opts out of
+      // the preview keeps the tooltip so its text is still reachable.
+      title={previewable ? undefined : card.text}
     >
-      <div className="card-head">
-        <span className="card-cost">{costLabel(card)}</span>
-        <span className="card-name">{card.name}</span>
-      </div>
-
-      <CardArt artKey={card.art?.key} name={card.name} />
-
-      <div className="card-typeline">
-        <span className="card-types">{card.types.join(' · ')}</span>
-        {card.subtypes.length > 0 && (
-          <span className="card-subtypes"> — {card.subtypes.join(' ')}</span>
-        )}
-        <span className={`card-rarity ${rarityClass(card.rarity)}`}>{card.rarity}</span>
-      </div>
-
-      {card.keywords.length > 0 && (
-        <div className="card-keywords">
-          {card.keywords.map((k) => (
-            <span key={k} className="keyword-chip">
-              {k}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {stats.length > 0 && <div className="card-stats">{stats.join('  ')}</div>}
-
-      {!compact && card.text && <div className="card-text">{card.text}</div>}
-
-      {counters.length > 0 && (
-        <div className="card-counters">
-          {counters.map(([k, v]) => (
-            <span key={k} className="counter-chip" title={k}>
-              {k} {v}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {card.prophetCost && (
-        <div className="card-prophet">
-          Prophet {card.prophetCost.threshold} · drain {card.prophetCost.drain}
-        </div>
-      )}
+      {body}
 
       {props.hint && (
         <div className="card-hint" aria-hidden="true">
@@ -297,5 +384,10 @@ export function Card(props: CardProps): JSX.Element {
     </div>
   );
 }
+
+export const Card = React.memo(CardImpl);
+
+/** Kept for importers that used the placeholder hue directly. */
+export const cardHue = nameHue;
 
 export default Card;

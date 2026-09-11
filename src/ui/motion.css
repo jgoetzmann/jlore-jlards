@@ -14,14 +14,14 @@
  */
 
 :root {
-  /* Durations. Keep the ratios: a card move should read as one beat, a stat
-     tick as half of one, a turn change as two. */
-  --t-instant: 90ms;
-  --t-tick: 160ms;
-  --t-quick: 220ms;
-  --t-move: 320ms;
-  --t-beat: 480ms;
-  --t-turn: 900ms;
+  /* Durations (MOT-9). Snappy, not cinematic. JS reads the same numbers from
+     MOTION_MS in motion.ts — change both together. */
+  --t-instant: 60ms;
+  --t-tick: 100ms;
+  --t-quick: 120ms;
+  --t-move: 180ms;
+  --t-beat: 200ms;
+  --t-turn: 600ms;
 
   /* Easings. `--e-out` for things arriving, `--e-spring` for things the player
      did on purpose, `--e-in` for things leaving. */
@@ -33,15 +33,14 @@
 
 /* ------------------------------------------------------------------ cards */
 
-/* The lift was instant before. Same destination, with a ramp — and on a
-   transform-only property so the row never reflows. */
+/* The lift, with a ramp, on a transform-only property so the row never
+   reflows. No box-shadow transition (it repaints every frame) and no global
+   `will-change` (MOT-10): WAAPI promotes a card only while it is flying. */
 .card {
   transition:
     transform var(--t-quick) var(--e-out),
     border-color var(--t-quick) var(--e-out),
-    box-shadow var(--t-quick) var(--e-out),
     opacity var(--t-quick) var(--e-out);
-  will-change: transform;
 }
 
 .card-clickable:hover {
@@ -93,9 +92,9 @@
 }
 
 /* --------------------------------------------------- entrance keyframes --
- * These are the five presets `ArtSlot.anim` already names on 174 cards, plus
- * a generic `enter` for the other 359. Applied for one beat by useMotion and
- * then dropped, so nothing is left mid-animation.
+ * The five `ArtSlot.anim` presets, kept for `card-cue-*` callers. Card flights
+ * and entrances now run from useFlip.ts with el.animate(), so nothing on the
+ * table applies these classes today.
  */
 
 .card-cue {
@@ -214,19 +213,14 @@
 
 /* --------------------------------------------------------------- the hand */
 
-.hand-slot {
-  transition: transform var(--t-quick) var(--e-out);
-}
-
-/* The gap that opens where a dragged card would land. */
-.hand-slot-over {
-  transform: translateX(10px);
-}
-
-/* The slot the keyboard is on sits slightly proud of the row. */
+/* The slot is the element FLIP measures and moves (MOT-4), so it never carries
+   a transform of its own. Lifts go on the card inside it. */
 .hand-slot-cursor {
-  transform: translateY(-6px);
   z-index: 2;
+}
+
+.hand-slot-cursor > .card {
+  transform: translateY(-6px);
 }
 
 .hand-hint kbd {
@@ -261,24 +255,13 @@
 
 /* -------------------------------------------------------------- the board */
 
+/* No infinite glow on buyable piles (MOT-10/LAY-10): they carry a static
+   outline (styles.css). A pile's count knock and its one-beat "emptied" flash
+   run from Board.tsx with el.animate(). */
 .pile {
   transition:
     opacity var(--t-quick) var(--e-out),
     filter var(--t-quick) var(--e-out);
-}
-
-.pile-buyable .card {
-  animation: pile-breathe 2.8s var(--e-linear) infinite;
-}
-
-@keyframes pile-breathe {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(127 212 160 / 0%);
-  }
-  50% {
-    box-shadow: 0 0 0 3px rgb(127 212 160 / 22%);
-  }
 }
 
 .pile-empty {
@@ -286,67 +269,12 @@
   filter: saturate(0.3);
 }
 
-/* The pile that just lost its last card. One beat, then it is simply empty. */
-.pile-just-emptied {
-  animation: pile-emptied var(--t-turn) var(--e-out) both;
-}
-
-@keyframes pile-emptied {
-  0% {
-    box-shadow: 0 0 0 3px var(--danger);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgb(224 112 112 / 0%);
-  }
-}
-
-.pile-drained .pile-count {
-  animation: count-knock var(--t-beat) var(--e-spring) both;
-}
-
-@keyframes count-knock {
-  0% {
-    transform: scale(1.5);
-    color: var(--accent-2);
-  }
-  100% {
-    transform: none;
-  }
-}
-
 /* --------------------------------------------------------------- turn bar */
 
+/* A stat ticking is a 200ms scale pulse from TurnBar.tsx (usePulse). */
 .stat-value {
   display: inline-block;
   transition: color var(--t-tick) var(--e-out);
-}
-
-.stat-pulse-up .stat-value {
-  animation: stat-up var(--t-beat) var(--e-spring) both;
-}
-
-.stat-pulse-down .stat-value {
-  animation: stat-down var(--t-beat) var(--e-out) both;
-}
-
-@keyframes stat-up {
-  0% {
-    transform: translateY(6px) scale(1.35);
-    color: var(--accent);
-  }
-  100% {
-    transform: none;
-  }
-}
-
-@keyframes stat-down {
-  0% {
-    transform: translateY(-5px) scale(1.2);
-    color: var(--danger);
-  }
-  100% {
-    transform: none;
-  }
 }
 
 /* The floating +3 / −1 that rides off a stat when it changes. */
@@ -400,26 +328,31 @@
   }
 }
 
-/* ------------------------------------------------------- the turn banner */
+/* ------------------------------------------------------- the turn banner
+ * Always in the DOM, invisible, and never takes the pointer. A turn change
+ * runs one 600ms sweep on it from App.tsx (useOneShot); nothing waits on it.
+ */
 
 .turn-banner {
   position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  left: 50%;
+  top: 34%;
+  translate: -50% 0;
   pointer-events: none;
   z-index: 40;
+  opacity: 0;
 }
 
 .turn-banner-inner {
-  padding: 14px 34px;
+  padding: 12px 30px;
   border-radius: 999px;
-  background: rgb(25 29 38 / 92%);
+  background: rgb(25 29 38 / 94%);
   border: 1px solid var(--line);
   font-size: 20px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  animation: banner-sweep var(--t-turn) var(--e-out) both;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 0 14px 40px rgb(0 0 0 / 45%);
 }
 
 .turn-banner-yours .turn-banner-inner {
@@ -427,20 +360,11 @@
   color: var(--accent);
 }
 
-@keyframes banner-sweep {
-  0% {
-    opacity: 0;
-    transform: translateY(14px) scale(0.94);
-  }
-  22%,
-  62% {
-    opacity: 1;
-    transform: none;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-12px) scale(0.98);
-  }
+.turn-banner-turn {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-dim);
+  letter-spacing: 0;
 }
 
 /* ------------------------------------------------------------- the prompt */
@@ -459,8 +383,9 @@
   }
 }
 
+/* Your own prompt: a 120ms rise, no overshoot (MOT-9). */
 .prompt-card {
-  animation: prompt-rise var(--t-move) var(--e-spring) both;
+  animation: prompt-rise var(--t-quick) var(--e-out) both;
 }
 
 @keyframes prompt-rise {
@@ -474,11 +399,12 @@
   }
 }
 
-/* Discover options land one after another rather than all at once, which is
-   what makes three cards read as three choices instead of one wall. */
+/* Options land one after another, 20ms apart and never more than 100ms in
+   total, so ten options are all readable within a fifth of a second. */
 .prompt-option {
-  animation: option-in var(--t-move) var(--e-out) both;
-  animation-delay: calc(var(--i, 0) * 55ms);
+  position: relative;
+  animation: option-in var(--t-quick) var(--e-out) both;
+  animation-delay: min(calc(var(--i, 0) * 20ms), 100ms);
   transition:
     transform var(--t-quick) var(--e-out),
     border-color var(--t-quick) var(--e-out);
@@ -534,19 +460,8 @@ button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.end-turn:not(:disabled) {
-  animation: end-turn-ready 2.4s var(--e-linear) infinite;
-}
-
-@keyframes end-turn-ready {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(240 198 116 / 0%);
-  }
-  50% {
-    box-shadow: 0 0 0 3px rgb(240 198 116 / 20%);
-  }
-}
+/* End turn has no idle pulse (MOT-10). When nothing is left to do it gets one
+   600ms cue from TurnBar.tsx and then a static ring (TURN-10). */
 
 /* ------------------------------------------------------- pending an intent
  * The gap between clicking and the host's next view is up to a poll interval.
@@ -589,6 +504,32 @@ button:active:not(:disabled) {
 
 .key-help {
   animation: prompt-rise var(--t-quick) var(--e-out) both;
+}
+
+/* ----------------------------------------------------------- card flights
+ * Ghosts for cards that change containers (useFlip.ts). One fixed layer over
+ * the table that never takes the pointer; each ghost is a clone of a face with
+ * every test id and data attribute stripped.
+ */
+
+.motion-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 45;
+  overflow: hidden;
+  contain: strict;
+}
+
+.motion-ghost {
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.motion-ghost .card,
+.motion-ghost.card {
+  width: 100%;
+  height: 100%;
 }
 
 /* ------------------------------------------------------- reduced motion --

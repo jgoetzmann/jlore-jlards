@@ -127,32 +127,30 @@
 
 /* --------------------------------------------------------- the launch --
  *
- * A click is an irreversible action whose confirmation is a network round-trip
- * away. The card answers immediately instead: it lifts out of the row, goes
- * inert, and waits there until the host's view removes it.
+ * A click is irreversible, so the card goes inert at once. With the press
+ * applied locally the next view removes it in the same frame and the FLIP
+ * layer flies it into play; this dimmed state only shows when a round trip is
+ * actually slow. No keyframe: a lift that the next view cuts off after two
+ * frames reads as a twitch (MOT-1).
  */
 
 .hand-row .card-committed {
-  opacity: 0.45;
+  opacity: 0.55;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgb(127 212 160 / 35%);
   pointer-events: none;
-  animation: hand-launch var(--t-move, 320ms) var(--e-out, ease-out) both;
 }
 
-@keyframes hand-launch {
-  0% {
-    opacity: 1;
-    transform: none;
-  }
-  40% {
-    opacity: 1;
-    transform: translateY(-16px) scale(1.04);
-  }
-  100% {
-    opacity: 0.45;
-    transform: translateY(-10px) scale(0.97);
-  }
+/* A play that only adds combo (TURN-9): still a card you can click, but not
+   advertised as a play. */
+.hand-row .card-inert.card-playable.card-clickable {
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.hand-row .card-inert.card-clickable::after {
+  content: "+1 COMBO";
+  border-color: var(--line);
+  color: var(--ink-dim);
 }
 
 /* ------------------------------------------------------------ the drag --
