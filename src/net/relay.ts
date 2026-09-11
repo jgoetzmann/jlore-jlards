@@ -1,32 +1,74 @@
 /**
  * The transport. Two implementations behind one interface:
  *
- *  - `makeRelay(code, seat)` talks to `/api/room/[code]` over HTTP. It polls at
- *    1s, backs off to 3s while `document.hidden`, and stops after 10 minutes
- *    idle (ARCHITECTURE.md §6).
- *  - `makeLocalRelay()` delivers posted messages to pollers in the same process
+ *  - `makeRelay(code, seat)` talks to `/api/room/[code]`. It pushes: a
+ *    server-sent event stream (`?stream=1`) delivers each list entry as it is
+ *    appended. If the stream cannot be opened, or keeps failing, the same loop
+ *    polls instead: 1s at rest, 250ms for a few seconds after any traffic.
+ *  - `makeLocalRelay()` delivers posted messages to readers in the same process
  *    with no network at all (B108). Hotseat and tests run on this.
+ *
+ * `startPolling` drives either and hands new messages to a callback. The name
+ * predates the push path; it is the one loop everything reads the room with.
  */
 
 import type { RelayMessage } from '@engine/types';
+
+export interface StreamHandlers {
+  /** New entries, in order. */
+  onMessages(msgs: RelayMessage[]): void;
+  /** The first byte arrived: the push path works. */
+  onOpen(): void;
+  /** The server closed the stream on purpose (its time budget). Reopen now. */
+  onEnd(): void;
+  /** The stream failed or went silent. */
+  onError(err: unknown): void;
+}
 
 export interface Relay {
   post(msg: Omit<RelayMessage, 'seq'>): Promise<number>;
   poll(since: number): Promise<RelayMessage[]>;
   stop(): void;
+  /** Push transport, when the relay has one. Returns a function that closes it. */
+  stream?(since: number, handlers: StreamHandlers): () => void;
+  /** Current list length, so a reader that wants no history can start there. */
+  tail?(): Promise<number>;
 }
 
 /** Poll cadence, all in milliseconds. */
 export const POLL_INTERVAL_MS = 1000;
 export const POLL_HIDDEN_INTERVAL_MS = 3000;
+/** Fast cadence right after traffic: a table that just acted is about to again. */
+export const POLL_HOT_INTERVAL_MS = 250;
+export const POLL_HOT_WINDOW_MS = 5000;
+/** A loop with nothing happening goes idle. Anything local wakes it. */
 export const POLL_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
-export const LOCAL_TICK_MS = 30;
+/** A live match only idles when its tab has also been hidden this long. */
+export const LIVE_HIDDEN_IDLE_MS = 30 * 60 * 1000;
+export const LOCAL_TICK_MS = 500;
 
-/** A local relay additionally lets pollers subscribe instead of ticking. */
+/** Request budgets. A hung request must not freeze the loop behind it. */
+export const GET_TIMEOUT_MS = 4000;
+export const POST_TIMEOUT_MS = 8000;
+/** The push path must show a first byte this fast, or we poll instead. */
+export const STREAM_OPEN_TIMEOUT_MS = 4000;
+/** The server sends a heartbeat every ~15s; this much silence is a dead stream. */
+export const STREAM_SILENCE_MS = 25000;
+/** Consecutive stream failures before falling back to polling for a while. */
+export const STREAM_MAX_FAILURES = 3;
+export const STREAM_RETRY_AFTER_MS = 60000;
+
+/** A local relay additionally lets readers subscribe instead of ticking. */
 export interface LocalRelay extends Relay {
   readonly local: true;
   subscribe(cb: () => void): () => void;
   messages(): RelayMessage[];
+  /**
+   * Synchronous `poll`. A lockstep session reads with this inside the
+   * subscription callback, so a hotseat press is confirmed in the same task
+   * that made it instead of a microtask (or a safety tick) later.
+   */
+  read(since: number): RelayMessage[];
 }
 
 export function isLocalRelay(relay: Relay): relay is LocalRelay {
@@ -37,10 +79,16 @@ export function isLocalRelay(relay: Relay): relay is LocalRelay {
 // Local relay — no network
 // ---------------------------------------------------------------------------
 
-export function makeLocalRelay(): Relay {
+export function makeLocalRelay(): LocalRelay {
   const list: RelayMessage[] = [];
   const listeners = new Set<() => void>();
   let stopped = false;
+
+  function read(since: number): RelayMessage[] {
+    if (stopped) return [];
+    const from = since < 0 ? 0 : since;
+    return list.slice(from).map((m) => ({ ...m }));
+  }
 
   const relay: LocalRelay = {
     local: true,
@@ -65,9 +113,11 @@ export function makeLocalRelay(): Relay {
       return seq;
     },
     async poll(since) {
-      if (stopped) return [];
-      const from = since < 0 ? 0 : since;
-      return list.slice(from).map((m) => ({ ...m }));
+      return read(since);
+    },
+    read,
+    async tail() {
+      return list.length;
     },
     stop() {
       stopped = true;
@@ -89,32 +139,183 @@ export function makeLocalRelay(): Relay {
 // HTTP relay
 // ---------------------------------------------------------------------------
 
-export function roomUrl(roomCode: string): string {
-  return `/api/room/${encodeURIComponent(roomCode)}`;
+export function roomUrl(roomCode: string, base = ''): string {
+  return `${base}/api/room/${encodeURIComponent(roomCode)}`;
 }
 
-export function makeRelay(roomCode: string, seatId: string): Relay {
-  let stopped = false;
-  let controller: AbortController | null = null;
+export interface HttpRelayOptions {
+  /** Origin to prefix, for callers outside a browser page (tests, tools). */
+  base?: string;
+  /** Turn the push path off, e.g. to test the fallback. */
+  stream?: boolean;
+}
 
-  async function request(input: string, init: RequestInit): Promise<unknown> {
-    controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const signal = controller ? controller.signal : undefined;
-    const res = await fetch(input, { ...init, signal });
-    if (!res.ok) {
-      let error = `relay_${res.status}`;
+class TimeoutError extends Error {
+  constructor(what: string) {
+    super(`${what}_timeout`);
+    this.name = 'TimeoutError';
+  }
+}
+
+export function isTimeout(err: unknown): boolean {
+  return err instanceof TimeoutError;
+}
+
+function isMessage(m: unknown): m is RelayMessage {
+  return m !== null && typeof m === 'object' && typeof (m as RelayMessage).seq === 'number';
+}
+
+export function makeRelay(roomCode: string, seatId: string, options: HttpRelayOptions = {}): Relay {
+  let stopped = false;
+  const live = new Set<AbortController>();
+  const base = options.base ?? '';
+
+  async function request(input: string, init: RequestInit, timeoutMs: number, what: string): Promise<unknown> {
+    const controller = new AbortController();
+    live.add(controller);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    try {
+      let res: Response;
       try {
-        const parsed = (await res.json()) as { error?: string };
-        if (parsed && typeof parsed.error === 'string') error = parsed.error;
-      } catch {
-        /* body was not JSON; the status code is enough */
+        res = await fetch(input, { ...init, signal: controller.signal });
+      } catch (err) {
+        if (timedOut) throw new TimeoutError(what);
+        throw err;
       }
-      throw new Error(error);
+      if (!res.ok) {
+        let error = `relay_${res.status}`;
+        try {
+          const parsed = (await res.json()) as { error?: string };
+          if (parsed && typeof parsed.error === 'string') error = parsed.error;
+        } catch {
+          /* body was not JSON; the status code is enough */
+        }
+        throw new Error(error);
+      }
+      try {
+        return await res.json();
+      } catch (err) {
+        if (timedOut) throw new TimeoutError(what);
+        throw err;
+      }
+    } finally {
+      clearTimeout(timer);
+      live.delete(controller);
     }
-    return await res.json();
   }
 
-  return {
+  function stream(since: number, h: StreamHandlers): () => void {
+    const controller = new AbortController();
+    live.add(controller);
+    let closed = false;
+    let opened = false;
+    let bye = false;
+    let silence: ReturnType<typeof setTimeout> | null = null;
+
+    const fail = (err: unknown): void => {
+      if (closed) return;
+      close();
+      h.onError(err);
+    };
+    const arm = (ms: number, why: string): void => {
+      if (silence) clearTimeout(silence);
+      silence = setTimeout(() => fail(new Error(why)), ms);
+    };
+    function close(): void {
+      if (closed) return;
+      closed = true;
+      if (silence) clearTimeout(silence);
+      silence = null;
+      live.delete(controller);
+      try {
+        controller.abort();
+      } catch {
+        /* already settled */
+      }
+    }
+
+    arm(STREAM_OPEN_TIMEOUT_MS, 'stream_open_timeout');
+
+    void (async () => {
+      let res: Response;
+      try {
+        res = await fetch(`${roomUrl(roomCode, base)}?stream=1&since=${since}`, {
+          method: 'GET',
+          headers: { accept: 'text/event-stream' },
+          signal: controller.signal,
+        });
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      const type = res.headers.get('content-type') ?? '';
+      if (!res.ok || !res.body || !type.includes('text/event-stream')) {
+        fail(new Error(`stream_${res.status}`));
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (closed) return;
+          if (done) break;
+          if (!opened) {
+            opened = true;
+            h.onOpen();
+          }
+          arm(STREAM_SILENCE_MS, 'stream_silent');
+          buf += decoder.decode(value, { stream: true });
+          const batch: RelayMessage[] = [];
+          let cut = buf.indexOf('\n\n');
+          while (cut >= 0) {
+            const block = buf.slice(0, cut);
+            buf = buf.slice(cut + 2);
+            cut = buf.indexOf('\n\n');
+            let event = 'message';
+            let data = '';
+            for (const line of block.split('\n')) {
+              if (line.startsWith(':')) continue;
+              const colon = line.indexOf(':');
+              const field = colon < 0 ? line : line.slice(0, colon);
+              const val = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
+              if (field === 'event') event = val;
+              else if (field === 'data') data += data ? `\n${val}` : val;
+            }
+            if (event === 'bye') {
+              bye = true;
+            } else if (event === 'message' && data) {
+              try {
+                const m = JSON.parse(data) as unknown;
+                if (isMessage(m)) batch.push(m);
+              } catch {
+                /* a torn event is skipped; the next backlog read covers it */
+              }
+            } else if (event === 'error') {
+              bye = false;
+            }
+          }
+          if (batch.length > 0) h.onMessages(batch);
+        }
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      if (closed) return;
+      close();
+      if (bye) h.onEnd();
+      else h.onError(new Error('stream_ended'));
+    })();
+
+    return close;
+  }
+
+  const relay: Relay = {
     async post(msg) {
       if (stopped) return 0;
       const body: Record<string, unknown> = {
@@ -123,141 +324,399 @@ export function makeRelay(roomCode: string, seatId: string): Relay {
         payload: msg.payload,
       };
       if (msg.to !== undefined) body.to = msg.to;
-      const out = (await request(roomUrl(roomCode), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })) as { seq?: number };
+      const out = (await request(
+        roomUrl(roomCode, base),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        POST_TIMEOUT_MS,
+        'post',
+      )) as { seq?: number };
       return typeof out?.seq === 'number' ? out.seq : 0;
     },
 
     async poll(since) {
       if (stopped) return [];
       const from = since < 0 ? 0 : since;
-      const out = (await request(`${roomUrl(roomCode)}?since=${from}`, {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-      })) as { messages?: unknown };
+      const out = (await request(
+        `${roomUrl(roomCode, base)}?since=${from}`,
+        { method: 'GET', headers: { accept: 'application/json' } },
+        GET_TIMEOUT_MS,
+        'poll',
+      )) as { messages?: unknown };
       if (!out || !Array.isArray(out.messages)) return [];
-      return (out.messages as RelayMessage[]).filter(
-        (m) => m !== null && typeof m === 'object' && typeof m.seq === 'number',
-      );
+      return (out.messages as unknown[]).filter(isMessage);
+    },
+
+    async tail() {
+      const out = (await request(
+        `${roomUrl(roomCode, base)}?since=end`,
+        { method: 'GET', headers: { accept: 'application/json' } },
+        GET_TIMEOUT_MS,
+        'tail',
+      )) as { next?: number };
+      return typeof out?.next === 'number' ? out.next : 0;
     },
 
     stop() {
       stopped = true;
-      if (controller) {
+      for (const c of Array.from(live)) {
         try {
-          controller.abort();
+          c.abort();
         } catch {
           /* aborting an already-settled request is fine */
         }
       }
+      live.clear();
     },
   };
+  if (options.stream !== false && typeof ReadableStream !== 'undefined') relay.stream = stream;
+  return relay;
 }
 
 // ---------------------------------------------------------------------------
-// The poll loop both host and client run
+// The loop everything reads the room with
 // ---------------------------------------------------------------------------
 
 export interface PollLoop {
   stop(): void;
-  /** Reset the idle timer, e.g. after a local action. */
+  /** Reset the idle timer, e.g. after a local action. Wakes an idle loop. */
   bump(): void;
+  /** Read now and go hot. Call it right after posting. */
+  kick(): void;
   cursor(): number;
+  /** 'stream' while pushed to, 'poll' while polling, 'idle' when parked. */
+  mode(): 'stream' | 'poll' | 'idle' | 'local';
+}
+
+export interface PollOptions {
+  /**
+   * True while a match is being played. A live loop never backs off for a
+   * hidden tab and never parks while the tab is visible: nothing posts during
+   * a long think, and a parked loop is a table that stopped responding.
+   */
+  live?: () => boolean;
+  /** Use the push path when the relay has one. Default true. */
+  stream?: boolean;
 }
 
 function documentHidden(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
+/** Which interval applies. Exported for the test. */
+export function pollIntervalFor(opts: {
+  hidden: boolean;
+  live: boolean;
+  hotUntilMs: number;
+  nowMs: number;
+}): number {
+  if (opts.nowMs < opts.hotUntilMs) return POLL_HOT_INTERVAL_MS;
+  if (opts.hidden && !opts.live) return POLL_HIDDEN_INTERVAL_MS;
+  return POLL_INTERVAL_MS;
+}
+
+/** Whether a loop that has been quiet this long should park. Exported for the test. */
+export function shouldIdle(opts: {
+  live: boolean;
+  hidden: boolean;
+  quietMs: number;
+  hiddenForMs: number;
+}): boolean {
+  if (opts.live) return opts.hidden && opts.hiddenForMs > LIVE_HIDDEN_IDLE_MS && opts.quietMs > LIVE_HIDDEN_IDLE_MS;
+  return opts.quietMs > POLL_IDLE_TIMEOUT_MS;
+}
+
 /**
- * Drives `relay.poll` and hands new messages to `onMessages`, advancing an
- * internal cursor. Local relays skip the timer entirely and deliver on post.
+ * Drives the relay and hands new messages to `onMessages`, advancing a cursor
+ * by the seq of the last message seen.
+ *
+ * One chain, always: a kick while a read is in flight sets `again` and the
+ * finishing read runs once more, instead of starting a second chain beside it
+ * (NET-10). An idle loop is parked, never dead: `kick`, `bump` and the tab
+ * becoming visible all wake it (NET-3).
  */
 export function startPolling(
   relay: Relay,
   since: number,
   onMessages: (msgs: RelayMessage[]) => void,
   onError?: (err: unknown) => void,
+  options: PollOptions = {},
 ): PollLoop {
   let cursor = since < 0 ? 0 : since;
   let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight = false;
-  let lastActivity = Date.now();
-  let unsubscribe: (() => void) | null = null;
+  const isLive = (): boolean => (options.live ? options.live() : false);
 
-  async function tick(): Promise<void> {
-    if (stopped || inFlight) return;
-    inFlight = true;
-    try {
-      const msgs = await relay.poll(cursor);
-      if (stopped) return;
-      if (msgs.length > 0) {
-        cursor += msgs.length;
-        lastActivity = Date.now();
-        onMessages(msgs);
-      }
-    } catch (err) {
-      if (onError) onError(err);
-    } finally {
-      inFlight = false;
-    }
+  function deliver(msgs: RelayMessage[]): boolean {
+    const fresh = msgs.filter((m) => m && typeof m.seq === 'number' && m.seq > cursor);
+    if (fresh.length === 0) return false;
+    cursor = fresh[fresh.length - 1]!.seq;
+    onMessages(fresh);
+    return true;
   }
 
-  function schedule(): void {
-    if (stopped) return;
-    if (Date.now() - lastActivity > POLL_IDLE_TIMEOUT_MS) {
-      stopped = true;
-      return;
-    }
-    const wait = documentHidden() ? POLL_HIDDEN_INTERVAL_MS : POLL_INTERVAL_MS;
-    timer = setTimeout(() => {
-      void tick().then(schedule);
-    }, wait);
-  }
-
+  // ---- local: delivered on post ----
   if (isLocalRelay(relay)) {
-    unsubscribe = relay.subscribe(() => {
+    let inFlight = false;
+    let again = false;
+    const tick = async (): Promise<void> => {
+      if (stopped) return;
+      if (inFlight) {
+        // The post that woke us landed after our read started. Read again
+        // rather than wait for the safety tick (HS-3).
+        again = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        do {
+          again = false;
+          const msgs = await relay.poll(cursor);
+          if (stopped) return;
+          deliver(msgs);
+        } while (again && !stopped);
+      } catch (err) {
+        if (onError) onError(err);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const unsubscribe = relay.subscribe(() => {
       void tick();
     });
-    // A short safety tick catches anything posted before subscribing.
-    timer = setInterval(() => {
+    const timer = setInterval(() => {
       void tick();
-    }, LOCAL_TICK_MS) as unknown as ReturnType<typeof setTimeout>;
+    }, LOCAL_TICK_MS);
     void tick();
     return {
       stop() {
         stopped = true;
-        if (unsubscribe) unsubscribe();
-        if (timer) clearInterval(timer as unknown as ReturnType<typeof setInterval>);
-        timer = null;
+        unsubscribe();
+        clearInterval(timer);
       },
-      bump() {
-        lastActivity = Date.now();
+      bump() {},
+      kick() {
+        void tick();
       },
       cursor() {
         return cursor;
       },
+      mode() {
+        return 'local';
+      },
     };
   }
 
-  void tick().then(schedule);
+  // ---- remote ----
+  let mode: 'stream' | 'poll' = relay.stream && options.stream !== false ? 'stream' : 'poll';
+  let idle = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let inFlight = false;
+  let again = false;
+  let lastActivity = Date.now();
+  let hotUntil = 0;
+  let hiddenSince = documentHidden() ? Date.now() : 0;
+  let closeStream: (() => void) | null = null;
+  let streamFailures = 0;
+  let streamRetryAt = 0;
+  let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const goHot = (): void => {
+    hotUntil = Date.now() + POLL_HOT_WINDOW_MS;
+  };
+
+  function clearTimer(): void {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  }
+
+  function checkIdle(): boolean {
+    const now = Date.now();
+    const hidden = documentHidden();
+    if (
+      shouldIdle({
+        live: isLive(),
+        hidden,
+        quietMs: now - lastActivity,
+        hiddenForMs: hidden && hiddenSince ? now - hiddenSince : 0,
+      })
+    ) {
+      park();
+      return true;
+    }
+    return false;
+  }
+
+  function park(): void {
+    idle = true;
+    clearTimer();
+    if (reopenTimer) clearTimeout(reopenTimer);
+    reopenTimer = null;
+    if (closeStream) closeStream();
+    closeStream = null;
+  }
+
+  function wake(): void {
+    if (stopped || !idle) return;
+    idle = false;
+    lastActivity = Date.now();
+    if (mode === 'stream') openStream();
+    else run();
+  }
+
+  // -- push --
+  function openStream(): void {
+    if (stopped || idle || !relay.stream) return;
+    if (closeStream) closeStream();
+    closeStream = relay.stream(cursor, {
+      onMessages(msgs) {
+        if (stopped) return;
+        if (deliver(msgs)) {
+          lastActivity = Date.now();
+          goHot();
+        }
+      },
+      onOpen() {
+        streamFailures = 0;
+      },
+      onEnd() {
+        closeStream = null;
+        if (stopped || idle) return;
+        if (checkIdle()) return;
+        openStream();
+      },
+      onError(err) {
+        closeStream = null;
+        if (stopped || idle) return;
+        if (onError) onError(err);
+        streamFailures += 1;
+        if (streamFailures >= STREAM_MAX_FAILURES) {
+          // The push path is not working here. Poll, and try it again later.
+          mode = 'poll';
+          streamRetryAt = Date.now() + STREAM_RETRY_AFTER_MS;
+          run();
+          return;
+        }
+        // Catch up with one read while the stream comes back.
+        run();
+        reopenTimer = setTimeout(() => {
+          reopenTimer = null;
+          if (mode === 'stream') openStream();
+        }, 250 * streamFailures);
+      },
+    });
+  }
+
+  // -- poll --
+  function run(): void {
+    if (stopped || idle) return;
+    if (inFlight) {
+      again = true;
+      return;
+    }
+    clearTimer();
+    inFlight = true;
+    let rerun = false;
+    relay
+      .poll(cursor)
+      .then(
+        (msgs) => {
+          if (stopped) return;
+          if (deliver(msgs)) {
+            lastActivity = Date.now();
+            goHot();
+          }
+        },
+        (err) => {
+          if (onError) onError(err);
+          // A timed-out read is re-armed at once, not after another interval.
+          if (isTimeout(err)) rerun = true;
+        },
+      )
+      .finally(() => {
+        inFlight = false;
+        if (stopped) return;
+        if (again || rerun) {
+          again = false;
+          run();
+          return;
+        }
+        schedule();
+      });
+  }
+
+  function schedule(): void {
+    clearTimer();
+    if (stopped || idle) return;
+    if (mode === 'stream') return;
+    if (checkIdle()) return;
+    if (relay.stream && options.stream !== false && Date.now() >= streamRetryAt && streamRetryAt > 0) {
+      streamRetryAt = 0;
+      streamFailures = 0;
+      mode = 'stream';
+      openStream();
+      return;
+    }
+    const wait = pollIntervalFor({
+      hidden: documentHidden(),
+      live: isLive(),
+      hotUntilMs: hotUntil,
+      nowMs: Date.now(),
+    });
+    timer = setTimeout(run, wait);
+  }
+
+  const onVisibility = (): void => {
+    if (documentHidden()) {
+      if (!hiddenSince) hiddenSince = Date.now();
+      return;
+    }
+    hiddenSince = 0;
+    if (idle) wake();
+    else if (mode === 'poll') kick();
+  };
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', onVisibility);
+  }
+
+  function kick(): void {
+    if (stopped) return;
+    lastActivity = Date.now();
+    goHot();
+    if (idle) {
+      wake();
+      return;
+    }
+    if (mode === 'poll') run();
+  }
+
+  if (mode === 'stream') openStream();
+  else run();
 
   return {
     stop() {
       stopped = true;
-      if (timer) clearTimeout(timer);
-      timer = null;
+      clearTimer();
+      if (reopenTimer) clearTimeout(reopenTimer);
+      reopenTimer = null;
+      if (closeStream) closeStream();
+      closeStream = null;
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
     },
     bump() {
       lastActivity = Date.now();
-      if (stopped) return;
+      if (idle) wake();
     },
+    kick,
     cursor() {
       return cursor;
+    },
+    mode() {
+      return idle ? 'idle' : mode;
     },
   };
 }
