@@ -1105,14 +1105,25 @@ included, folds the same relay list through `reduce` and renders
   the host's seat posts its own as `jlore-check/1`. On a mismatch a client first
   rebuilds from the start message and the full intent list; if that still
   disagrees it logs `DESYNC` to the console, asks with `jlore-resync/1`, and
-  adopts the host's state from a `jlore-state/1` reply (log trimmed to fit the
-  relay's 256KB cap). The session exposes `desynced` while that is under way.
+  adopts the host's state from a `jlore-state/1` reply (log trimmed). A state
+  too big for one post goes in parts (64K-character slices of its JSON, at
+  most 32), and a client still waiting asks again after 15 s, doubling to
+  2 min, in case the host was away when it first asked. The session exposes
+  `desynced` while that is under way.
 - **A reload is a rejoin.** The room is read from index 0 (intents are ~100
   bytes), the start is found, and the list is replayed; the seat cookie binds
   you back to your seat. That includes the host, which used to come back as a
   guest of its own room and had to resume on a new room code. The host's only
   remaining duty after Start is posting checksums; the turn timer never posted
   anything (TurnBar only counts down), so there was no timer duty to move.
+  A replaying client holds its own posts until it has read as far as the room
+  reached when it started (`GET ?since=end`), then drops what the list already
+  holds: no checksum for a past turn, no second answer to an answered resync.
+  Before that, a host reloading at turn N queued N checksum posts ahead of its
+  own presses, and a guest took each old one whose sum it had evicted for drift
+  and rebuilt the match (NET-R2). A guest now ignores a checksum for a boundary
+  it no longer remembers. `e2e/host-reload.spec.ts` drives the host case in two
+  browsers.
 - **Hotseat runs the same code** over the local relay, one session acting for
   every seat: no host loop, no N clients, no tick waits. It follows the seat
   that must choose (a prompt's owner) before the active seat, and a seat picked
@@ -1142,8 +1153,15 @@ one event per list entry. On Vercel it is backed by Upstash pub/sub: POST is one
 `/pipeline` call (RPUSH + EXPIRE + PUBLISH), and each open stream SUBSCRIBEs
 (REST, `text/event-stream`), reads the backlog, then reads from its cursor on
 every notification. A stream ends itself after ~50 s to fit `maxDuration: 60`,
-and the client reopens from its cursor. If the stream cannot be opened, shows no
-first byte within 4 s, or fails three times running, the client polls: 1 s at
+and the client reopens from its cursor. The server writes `: open` at once and
+`: ready` only when the upstream SUBSCRIBE has confirmed. A stream clears the
+client's failure count only after it has shown `: ready`, a heartbeat or an
+entry, and has then either lived 5 s or delivered an entry. `event: error` is
+always a failure, and so is a `bye` from a stream that proved nothing. Reopens
+are at least 1 s apart. Resetting on the first byte, as the first cut did, meant
+a refused SUBSCRIBE reopened every 250 ms forever, about 8 requests a second per
+client (NET-R1). If the stream cannot be opened, shows no first byte within 4 s,
+or fails three times running (about 2 s), the client polls: 1 s at
 rest, 250 ms for 5 s after any traffic, a kick right after its own post and when
 the tab becomes visible, no hidden-tab backoff during a match, and an idle stop
 that anything local undoes and that a visible live match never takes. Every
@@ -1175,6 +1193,15 @@ from ~1.8 s and ~1.7 s. Engine cost per press is small (reduce 1-2 ms, viewFor
 ~0.5 ms, a checksum 4-6 ms once per turn); the rest is React rendering the
 table. A cold rejoin that replays an entire 180-turn 4-player match (1,409
 actions) took 2.3 s in Node.
+
+**Verified against production services, and not.** `npm run relay:check` against
+the real Upstash database (2026-09-11) passes: the `/pipeline` append, LRANGE,
+`since=end`, TTL, and the REST `/subscribe` push path, with 139 ms from an append
+to the event on an open stream. It drives `streamRoom` directly, so two things
+remain unmeasured until a deploy: whether Vercel's Node runtime streams
+`res.write` unbuffered, and the latency other players see on the deployed site.
+If Vercel buffers, the 4 s first-byte timeout and the rule above send every
+client to polling rather than into a retry loop.
 
 Code: `src/net/lockstep.ts` (`LockstepCore`, `startSession`, `makeStart`,
 `stateChecksum`), `src/ui/useGame.ts`, `src/net/relay.ts` (`startPolling`,
