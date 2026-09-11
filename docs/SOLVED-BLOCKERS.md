@@ -224,7 +224,7 @@ Why it is still the better trade:
 
 - **23 piles is not a menu, it is a wall.** The Prophet column was longer than
   the other three shops put together, and the board grew to fit it — the direct
-  cause of the unresolved layout blocker in SB-63. A shop nobody can read is not
+  cause of the layout blocker in SB-63 (since resolved). A shop nobody can read is not
   offering a choice either.
 - **A fixed shop has no board variety.** Every match opened on the same Prophet
   column, so the Prophet track played out identically every time. The Draft Shop

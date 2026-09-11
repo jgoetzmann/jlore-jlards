@@ -2,25 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Jlore Jlards is a browser deck-builder (Dominion lineage) for 2–4 friends. The host's browser runs a pure rules engine, other players' browsers are dumb terminals that only get filtered views, and the backend is a message relay that parses nothing about the game (one Redis list per room). TypeScript strict, React 18, Vite, Vitest, Playwright. Node 20+.
+Jlore Jlards is a browser deck-builder (Dominion lineage) for 2–4 friends. Every browser runs the same pure rules engine in lockstep over one ordered message list per room (SB-65). The backend is a relay that parses nothing about the game: a Redis list plus pub/sub, pushed to browsers as server-sent events. TypeScript strict, React 18, Vite, Vitest, Playwright. Node 20+.
 
 ## Commands
 
 ```bash
 npm run dev                 # http://localhost:5173; the relay middleware is mounted, so two browser profiles can play multiplayer locally with no Upstash (one profile shares the jlore_seat cookie, so use e.g. a normal and a private window)
-npm test                    # vitest run (test/**/*.test.ts). Node environment, no DOM: UI tests use renderToStaticMarkup or pure functions
+npm test                    # vitest run (test/**/*.test.ts). Node environment, no DOM: UI tests use renderToStaticMarkup or pure functions. To cap workers pass --maxWorkers=N --minWorkers=1 (--maxWorkers alone errors)
 npx vitest run test/core-view.test.ts      # one file
 npx vitest run -t "B111"                   # tests whose name matches
 npm run typecheck           # tsc --noEmit over src, test, tools, api. e2e/ is outside tsconfig, so spec types are never checked
 npm run build               # typecheck + vite build
 npm run cards:validate      # catalog integrity. Run it after touching src/cards/
-npm run e2e                 # Playwright/Chromium on :5199, serial; skips the "visual record" and "production smoke" suites
+npm run e2e                 # Playwright/Chromium on :5199 (E2E_PORT=… moves it), serial; skips the "visual record", "production smoke" and "latency probe" suites
 npx playwright test e2e/hotseat.spec.ts    # one e2e spec
 npm run sim -- --games=25 --players=2 --seed=1          # headless bot matches
 npm run balance -- --games=500 --players=3 --seed=1     # bot matches -> telemetry/balance-<stamp>.md
 npm run replay -- --seed=42 --players=3 --out=telemetry/bug.json   # bot match; record its action log
 npm run replay -- --in=telemetry/bug.json --turn=14                # replay a recording, stop at the start of a turn
-npm run relay:check         # hit the real Upstash backend using .env credentials
+npm run relay:check         # hit the real Upstash backend using .env credentials (append, since=end, TTL, and the pub/sub push path)
+npm run latency             # e2e/latency.spec.ts: press-to-render times in hotseat and across two browsers; rows land in test-results/latency.json
 ```
 
 Without `--in` or `--turn`, `replay` replays the recorded log twice and exits 1 if the two results differ. That checks that replay is self-consistent. It does not compare against the original bot run.
@@ -30,7 +31,7 @@ Not in CI:
 - `npm run smoke` (`e2e/smoke.spec.ts`) runs against the live deployment (`SMOKE_URL=…` for a preview). It is the only check that catches a deploy missing its Upstash vars.
 - `art:generate` and `art:status` are described under Cards.
 
-A bare `npx playwright test` with no file also runs shots and smoke. Playwright always starts its own `vite --port 5199 --strictPort`, so if a server is already on 5199 the run fails.
+A bare `npx playwright test` with no file also runs shots and smoke. Playwright always starts its own `vite --strictPort` on `E2E_PORT` (default 5199), so if a server is already on that port the run fails.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, test, cards:validate, a 25-game sim smoke run, and e2e. Treat all five as the bar. There is no ESLint or Prettier. `tsc` is the only static check.
 
@@ -39,23 +40,23 @@ CI (`.github/workflows/ci.yml`) runs typecheck, test, cards:validate, a 25-game 
 ```
 src/engine/  pure rules engine: reduce(state, action) -> state
 src/cards/   the catalog (~535 CardDefinitions + 25 auras) as typed TS data
-src/net/     relay transport, lobby + host loop, client, storage tiers
-src/relay/   relay request logic (roomHandler) + Vite dev middleware
+src/net/     lockstep session (every browser runs reduce), relay transport (SSE + polling fallback), lobby host, storage tiers
+src/relay/   relay request logic (roomHandler, streamRoom), the fetch-based Upstash REST adapter, Vite dev middleware
 api/room/[code].ts   Vercel function: a thin wrapper over src/relay/roomHandler
-src/ui/      React app. Hash routes: '' start, #hotseat[:N], #ROOMCODE (lobby first, then the table)
+src/ui/      React app. Hash routes: '' start, #hotseat[:N], #ROOMCODE (lobby first, then the table), dev-only #fixture:<name>
 src/sim/     bots, headless runner, telemetry (no fs or clock; the tools/ CLIs do that)
 tools/       tsx CLIs (plus art_render.py, the Python renderer behind art:generate); tools/bootstrap.ts fills the registry and parses --flags
 ```
 
-Path aliases `@engine/*`, `@cards/*`, `@net/*`, `@ui/*`, `@sim/*` are set in three places: tsconfig, vite.config, and vitest.config. If you add or change one, change all three. The exception is `api/room/[code].ts` and what it imports at runtime (`src/relay/roomHandler.ts`). Vercel runs those as plain Node ESM, not through Vite, so they need relative imports with explicit `.js` extensions and never the aliases. Dev and e2e serve the relay through Vite middleware, so only `npm run smoke` catches a mistake there.
+Path aliases `@engine/*`, `@cards/*`, `@net/*`, `@ui/*`, `@sim/*` are set in three places: tsconfig, vite.config, and vitest.config. If you add or change one, change all three. The exception is `api/room/[code].ts` and what it imports at runtime (`src/relay/roomHandler.ts`, `src/relay/upstash.ts`). Vercel runs those as plain Node ESM, not through Vite, so they need relative imports with explicit `.js` extensions and never the aliases. Dev and e2e serve the relay through Vite middleware, so only `npm run smoke` catches a mistake there.
 
 ### Engine invariants
 
 B117–B119 and "reject leaves state unchanged" are tested. The import boundary, the console ban and synchronicity are convention only.
 
 - **Import boundary:** `src/engine/` never imports from `net/`, `ui/`, `sim/`, or `api/`. The one allowed exception is `registry.ts`, which imports `@cards/index` so it can lazily bootstrap the catalog on first access. No test checks this.
-- **Determinism (B117):** no `Math.random`, `Date.now`, or `new Date` anywhere under `src/engine/`. The test does a plain **substring search of file contents**, so comments count too. All randomness comes from `state.seed` + `state.rngCursor` (`rng.ts`, SB-31). There is no shared generator. Each randomness site calls `makeRng(s.seed, s.rngCursor)`, draws, then writes `s.rngCursor = rng.cursor()` back onto the draft. Forget the write-back and the next draw repeats. B119 still passes when that happens, so no test catches it. Pure reads (`costOf`, `legalActions`, rendering) must not advance the cursor. Derive a throwaway stream instead, as `shop/dynamic.ts` does.
-- **`reduce` never throws.** It deep-clones the input once at entry with the hand-rolled `core/clone.ts`, not `structuredClone`. So `GameState` must stay plain JSON: a `Map`, `Set`, or class instance becomes a plain object after the first `reduce`, so use records keyed by id. Helpers below `reduce` may mutate that draft freely (Addendum A5). An illegal action returns the state unchanged with a reject `LogEntry` appended, and every branch appends at least one log entry (B118). Throws below `reduce` are contained, not forbidden:
+- **Determinism (B117):** no `Math.random`, `Date.now`, or `new Date` anywhere under `src/engine/`. The test does a plain **substring search of file contents**, so comments count too. All randomness comes from `state.seed` + `state.rngCursor` (`rng.ts`, SB-31). There is no shared generator. Each randomness site calls `makeRng(s.seed, s.rngCursor)`, draws, then writes `s.rngCursor = rng.cursor()` back onto the draft. Forget the write-back and the next draw repeats. B119 still passes when that happens, so no test catches it. Pure reads (`costOf`, `legalActions`, rendering) must not advance the cursor. Derive a throwaway stream instead, as `shop/dynamic.ts` does. Because every browser runs `reduce` in lockstep (SB-65), results must also be identical across JS engines. Don't use implementation-approximated `Math` functions (`log`, `pow`, `exp`, trig) under `src/engine/`. `expr.ts`'s `log` is built from exactly-rounded operations for this reason (`test/effects-expr-determinism.test.ts`).
+- **`reduce` never throws.** It deep-clones the input once at entry with the hand-rolled `core/clone.ts`, not `structuredClone`. So `GameState` must stay plain JSON: a `Map`, `Set`, or class instance becomes a plain object after the first `reduce`, so use records keyed by id. `cloneState` copies the log array but shares its `LogEntry` objects, so never mutate a `LogEntry` (or its `detail`) on a state `reduce` returned. `core/log.ts` `makeLogEntry` deep-copies `detail` when an entry is created, so entries own their data. Helpers below `reduce` may mutate that draft freely (Addendum A5). An illegal action returns the state unchanged with a reject `LogEntry` appended, and every branch appends at least one log entry (B118). Throws below `reduce` are contained, not forbidden:
   - `getCard`/`getAura` throw on unknown ids. Systems code uses `tryGetCard`.
   - `expr.ts` throws `ExprError`. `evalAmount` maps it to 0 and `evalCondition` to false.
   - `reduce` turns any other exception into a reject with reason `engineError`. If an action silently does nothing, look for that in `state.log`, not the console.
@@ -75,33 +76,39 @@ B117–B119 and "reject leaves state unchanged" are tested. The import boundary,
 - **Shop (`src/engine/shop/`).** A match offers `config.prophetPileCount` Prophet piles (default 4), sampled one per threshold band from `PROPHET_SHOP_CARD_IDS` in `shop/prophet.ts`. Prophet buys cost no Money and no Buy. They need `threshold` Prophet banked, then drain `cost.prophet.drain`. A price that reads live state goes in `DYNAMIC_PRICES` (`shop/dynamic.ts`) and must be pure, because `costOf` also runs during rendering and in `legalActions`.
 - **`src/engine/types.ts` is the shared type surface.** Its header calls it frozen, but new fields and ops are added there. It imports nothing. By convention (not a test), no other file redeclares a name that appears in it.
 
-### Hidden information
+### Hidden information (waived for playtesting, SB-65)
 
-`engine/view.ts` `viewFor(state, player)` decides what each seat is given to render. Libraries (including your own) and opponents' hands appear only as counts. A pending prompt's options go only to the player who must choose. **B111** (in `test/net-host.test.ts`) serializes every published view and asserts no hidden instance id leaks. If you add a field to `GameState` that could carry card identities, decide how `viewFor` treats it. The client (`net/client.ts`) deliberately ignores `snapshot` messages and never holds a `GameState`. The UI (`useGame.ts`) only keeps `GameView`s in React state.
+Every browser holds the full `GameState`: every hand, every library in draw order, and the seed and RNG cursor. The relay list, readable by anyone with the room code, carries every action. The one boundary kept is the UI: React is only ever handed a `GameView` from `engine/view.ts` `viewFor(state, player)`, so the table never renders another player's hand. B111 (restated in `test/net-host.test.ts`) and the hidden-hand DOM test in `e2e/multiplayer.spec.ts` pin that. In a `GameView`, libraries (including your own) and opponents' hands are counts, and a pending prompt's options go only to its chooser.
 
-- `secret` values reach only their owner, and only on card faces. Instance `counters` are public to every seat (B24). The log scrub replaces strings that are hidden instance ids and blanks `defId` on entries that mention one. Any other detail you log reaches every seat. Never log a secret value or a hidden random-branch pick. Today `scoreOnCard` with `secret: true` logs its amount and `random` logs its branch index, which exposes Ascendant Spread's secret VP.
-- `viewFor` limits what a seat renders, not what the relay carries. A GET returns every message regardless of `to`, and the host posts the full `GameState` as a `snapshot` each turn. ARCHITECTURE.md §6 and §8 accept this. B111 audits only `view` messages, so don't write a test that expects the queue itself to be clean.
-- `vp` in `GameView` (`you.vp`, `others[].vp`) is `player.vp`, which holds only VP granted by effects. Printed and accrued card VP is counted only by the scorers (`core/scoring.ts`, and `meta/scoring.ts` `liveVp` for win conditions), so the VP stat in the UI is not the score. Don't publish a scorer's total for opponents as-is: it sums their hidden library and hand plus `secret` VP.
+- `you.vp` and `others[].vp` are the live score. You get `liveVp`, and opponents get `publicVp`, which is the live score minus `secret` VP. That is the same `scoreFor` the win conditions read. `player.vp` in state holds only effect-granted VP.
+- The log scrub in `viewFor` replaces hidden instance ids and blanks `defId` on entries that mention one. Anything else you log reaches every seat's screen.
 
-### Networking
+### Networking (lockstep, SB-65)
 
-Messages use the envelope `{seq, from, to?, kind: 'intent'|'view'|'hello'|'snapshot', payload}` (the four kinds are frozen) and ride one shared Redis list per room (`jlore:room:CODE`, 6h TTL). `net/host.ts` polls for intents, runs `reduce`, and posts one `view` per seat. `net/relay.ts` has two transports behind one `Relay` interface:
-- HTTP polls every 1s, or every 3s when the tab is hidden. It stops for good after 10 minutes with no received traffic: `bump()` resets the timer but does not restart a stopped loop.
-- `makeLocalRelay()` is used by hotseat and the tests.
+Messages use the envelope `{seq, from, to?, kind: 'intent'|'view'|'hello'|'snapshot', payload}` (the four kinds are frozen) and ride one Redis list per room (`jlore:room:CODE`, 6h TTL). `seq` is the list index, and that order is the one total order every browser applies. The code is `src/net/lockstep.ts` (`LockstepCore`, `startSession`) wired through `src/ui/useGame.ts`.
 
-`useGame.ts` wires three modes (hotseat, host, join) through one hook.
-
-- **Lobby (SB-64).** Networked rooms open as a lobby, and nothing is dealt until the host presses Start. `seedMatch` then deals for exactly the roster. Hotseat and a host resuming a snapshot deal immediately. The lobby adds no message kind:
-  - Presence is a `hello` that clients repeat every 4s. The host drops a seat after 20s of silence.
-  - The roster is a broadcast `view` (no `to`) carrying a `LobbyPayload`. `isLobbyPayload` and the client's `isView` must stay mutually exclusive (`test/net-lobby.test.ts`).
-  - `startHost(relay, state, {seats, since})` binds seats to `playerOrder` before it reads any message, then polls from the lobby's cursor.
-- **Seat identity** is the token in the `jlore_seat` cookie. It is the `from` of every client message, and the host maps it to a `PlayerId`, so a refresh reclaims the same seat. Whether `#CODE` hosts or joins is decided per tab: `App.tsx` hosts only when this tab's sessionStorage `jlore_open_lobbies` lists the code, and that entry is dropped once cards are dealt. So a host who reloads mid-match comes back as a joiner. They must resume from the snapshot on the start screen, which opens a new room code.
-- **The memory-fallback trap.** The relay falls back to an in-memory store when the Upstash vars are missing, when the URL is not `https://`, or when `new Redis()` throws. That's why e2e and dev need no credentials, and why a green test suite proves nothing about the live backend. On Vercel it silently breaks multiplayer, because serverless instances don't share memory, yet every request still returns 200. Diagnose it three ways:
+- **Start.** After the lobby, the host posts one `snapshot` tagged `jlore-start/1`. It carries the config, the seed, each seat's name and codex, the seat bindings (`seats[i]` acts for `playerOrder[i]`) and a checksum. Every browser builds the identical match from it (`makeStart`/`buildStartState`). The first start in a room is the match.
+- **Actions.** An intent is `{nonce, actions}`. The acting player comes from the envelope's `from` through the seat bindings, never from the payload. `applyActions` unrolls a batch in order (at most `MAX_BATCH` 64) and stops at the first refused action or the first prompt. There is no legality pre-gate: `reduce` refuses illegal actions identically on every client.
+- **Optimistic apply.** `session.send` and `sendMany` reduce onto the predicted state and render before posting. A client's posts leave in click order, and an in-order echo is adopted without a second `reduce`. If a foreign intent lands first, the pending actions are refolded onto it. So anything that feeds `reduce` must be deterministic across browsers (see Engine invariants).
+- **Desync safety net.** At each turn boundary the host's seat posts a `jlore-check/1` checksum (`stateChecksum`: key-sorted, log body excluded). A client that disagrees first rebuilds from the start plus the intent list. If that still disagrees, it asks with `jlore-resync/1` and adopts a `jlore-state/1` reply. `session.desynced` is true meanwhile.
+- **A reload is a rejoin.** A browser reads the room from index 0 and replays it. The token in the `jlore_seat` cookie is the `from` of every client message, so it binds the browser back to its seat, the host included. A replaying client holds its own posts until it has read up to `?since=end`. Whether `#CODE` opens the lobby as host or joins is decided per tab (sessionStorage `jlore_open_lobbies`). After the deal every browser runs the same session.
+- **Hotseat** runs the same session over `makeLocalRelay()`, acting for every seat. It follows the prompt's owner before the active seat, and a seat picked by hand holds only until the turn or prompt changes.
+- **Lobby (SB-64)** is still host-driven (`startLobbyHost`):
+  - `hello` heartbeats every 4s, and a seat is dropped after 20s of silence.
+  - The roster is a broadcast `view` carrying a `LobbyPayload`. `isLobbyPayload` and the client's `isView` must stay mutually exclusive (`test/net-lobby.test.ts`).
+  - The app no longer uses the old per-seat-view `startHost`/`startClient`. They are kept because the lobby tests drive them.
+- **Transport** (`src/net/relay.ts`, `src/relay/roomHandler.ts`). `GET /api/room/CODE?stream=1&since=N` is server-sent events, one event per list entry.
+  - In production a POST is one Upstash `/pipeline` call (RPUSH + EXPIRE + PUBLISH), and each open stream SUBSCRIBEs over REST. That goes through `src/relay/upstash.ts`, a fetch adapter shared by the function, the dev middleware and `relay:check`. `@upstash/redis` is no longer imported.
+  - A stream ends itself after ~50s (`STREAM_MAX_MS`) to fit `maxDuration: 60`, and the client reopens from its cursor.
+  - If a stream can't open, shows no first byte within 4s, or fails 3 times, the client polls: every 1s at rest and every 250ms for 5s after traffic. Every request has a timeout (4s GET, 8s POST).
+  - Whether Vercel streams `res.write` unbuffered is unverified until a deploy. If it buffers, clients fall back to polling without any error.
+- **Budget.** SB-65 estimates ~6,500 Upstash commands and ~1,100 Vercel invocations per 4-player hour on the push path, and ~15-20k commands if everyone falls back to polling. The free tier is 500k commands a month, so check the Upstash console after a real session.
+- **The memory-fallback trap.** The relay falls back to an in-memory store when the Upstash vars are missing or unusable. That's why e2e and dev need no credentials, and why a green test suite proves nothing about the live backend. On Vercel it silently breaks multiplayer, because serverless instances don't share memory, yet every request still returns 200. Diagnose it three ways:
   - the `x-jlore-store: redis|memory` response header, which says which store answered
-  - `relay:check`, which checks the credentials
+  - `relay:check`, which checks the credentials and the push path
   - `npm run smoke`, which checks the deployment
 
-  Use the Upstash **REST** URL (`https://…`), not the `redis://` one. The function and `relay:check` strip pasted quotes, but `devMiddleware` does not: a quoted URL there silently drops to the memory store. The Redis `RoomStore` adapter is copy-pasted in `api/room/[code].ts`, `src/relay/devMiddleware.ts`, and `tools/relay-check.ts`, so change all three together.
+  Use the Upstash **REST** URL (`https://…`), not the `redis://` one.
 
 ### Cards
 
@@ -120,6 +127,7 @@ Keep plain stat lines in `stats` (`{money, buys, actions, cards, vp, prophet}`) 
 **Art.** Give a new card `art: { key: '<id>', status: 'placeholder' }`. `art:status` rewrites it to `final` with an artist credit once the jpg exists. Existing slots may also carry `anim`. The art tools work like this:
 - `npm run art:generate` builds one prompt per card and aura from catalog data plus a fixed house style (`tools/gen-art.ts`). No prompt is hand-written. `tools/art_render.py` then renders locally with Python and torch/diffusers (CUDA, or very slowly on CPU; `$PYTHON` picks the interpreter) into `public/art/<key>.jpg`. It renders only keys with no file unless you pass `--force`. Seeds are a hash of the key. `--reroll=<key>` bumps that key's salt in `tools/art-seeds.json`, so commit the bump with the jpg.
 - `npm run art:status` does a literal text replace across `src/cards/**`, turning `placeholder` into `final` with an artist credit. It writes nothing while any key lacks a jpg; `--check` only verifies.
+- `npm run art:thumbs` (`tools/art_thumbs.py`, needs Pillow) derives `public/art/thumb/<key>.webp`: 256px, about 4 KB. Every small card face uses it (`src/ui/art.ts` `artThumbUrl`), and the jpg is only for the hover preview. Run it after `art:generate`.
 
 A missing image silently falls back to a gradient tile and CI never runs `art:status`, so after adding a card run `npm run art:status -- --check`. `docs/ART-MANIFEST.md` is generated by `npm run art:manifest`, so don't edit it by hand. Details are in `public/art/README.md`.
 
@@ -133,8 +141,14 @@ A missing image silently falls back to a gradient tile and CI never runs `art:st
   - `DEFAULT_SIM_CONFIG` (`sim/run.ts`, used by balance runs)
 
   Change a gameplay default in all three. They have drifted before.
-- UI: function components and hooks, no state or component libraries. Plain CSS: `styles.css` and `motion.css` are global (imported by `main.tsx`). `Hand`, `Lobby` and `Opponents` import their own sheets, which land *before* the global sheets in the bundle, so their rules win through scoped two-class selectors, not source order.
+- UI: function components and hooks, no state or component libraries. The one class component is `FlipScope` in `useFlip.ts`, because it needs `getSnapshotBeforeUpdate`.
+  - The table is one 100dvh grid (`TableLayout` in `App.tsx`): a topbar, an opponents strip, a board region that is the only scroll container for piles, and a dock holding the hand, stats and End turn. The log and graveyard sit in a drawer.
+  - Plain CSS: `styles.css` (the layout) and `motion.css` are global, imported by `main.tsx`. `Hand`, `Lobby` and `Opponents` import their own sheets. Those land *before* the global sheets in the bundle, so their rules win through scoped two-class selectors, not source order.
+- Rendering is memoised against `stabilizeView` (`src/ui/viewcache.ts`), which reuses unchanged CardView/PileView/seat objects by a per-object signature (`cardSignature` and friends). If you add a field to `CardView` or `PileView` that the UI shows, add it to the signature there. Otherwise memoised cards keep showing the old value.
+- Motion: cards that change zone fly as clones in a fixed `.motion-layer`, planned by `motion.ts` and measured by `FlipScope`. Everything else is a one-shot `el.animate()` from a layout effect. Timings live in `MOTION_MS` (`motion.ts`) and the `--t-*` tokens in `motion.css`. Never gate input on an animation, never remount a card to restart one, and animate only transform and opacity.
+- Keyboard (`keys.ts`, `useKeyboard.ts`): digits play the hand in the order it is shown, E ends the turn (not Space), M plays money, `[ ]` reorder on your turn, and ? lists the keys. Only advertise keys that work.
+- Dev-only fixture tables at `#fixture:<name>` (`Fixture.tsx`, behind `import.meta.env.DEV`) mount the real table over a crafted prompt or motion step for `e2e/fixtures.spec.ts`. The production build contains none of them.
 - E2E specs select by `data-testid` (`prompt`, `prompt-option`, `stat-<name>-value`, …) and by `data-*` state attributes (`data-card-id`, `data-pile-id`, `data-buyable`, `data-clickable`, `data-seat-to-move`), so keep both when you edit components. `test/ui-testid-contract.test.ts` pins the testids in `npm test` by rendering each screen with `renderToStaticMarkup`. When an e2e spec starts relying on a new id, add it there. The exceptions are `table`, `connecting`, `you-are`, `seat-btn` and `anomaly-banner`, which only e2e covers. Vitest only collects `test/**/*.test.ts`, so UI unit tests use `React.createElement`, not JSX. A `.test.tsx` file typechecks but never runs.
-- Hand order is game state: Loaf of Bread, Brownie and Feel so Clean read their neighbours. Never reorder the hand for display. A drag sends a `reorderHand` action so the engine's order matches what the player sees.
-- SB-63 (the hand can sit below the fold) is the one unresolved entry in SOLVED-BLOCKERS. Read it before changing the table layout. Two CSS fixes were tried and reverted because they left elements invisibly unclickable, which only `npm run e2e` catches.
+- Hand order is game state: Loaf of Bread, Brownie and Feel so Clean read their neighbours. Never reorder the hand for display. A drag sends a `reorderHand` action so the engine's order matches what the player sees. Reordering is offered only on your own turn (B20).
+- SB-63 (the hand below the fold) is resolved, and its entry lists the rules that keep it resolved. Read it before changing the table layout. `e2e/layout.spec.ts` checks two things at 1280x720 and 1366x768: the page never scrolls, and every Buy control is hit-testable. Earlier CSS fixes were reverted because they left elements invisibly unclickable, which only e2e catches.
 - Before resolving a rules question yourself, check `docs/SOLVED-BLOCKERS.md`; most ambiguities are already decided there. `docs/DESIGN-CHOICES.md` explains why the code is shaped the way it is. `ARCHITECTURE.md` and `jlore_jlards_gameplay.md` are the original handoff docs. Where they conflict with the code (a 3-arg `reduce`, JSON cards, inline instances), the code and SOLVED-BLOCKERS win.
