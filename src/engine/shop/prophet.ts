@@ -11,9 +11,15 @@ import type { CardDefId, GameState, PileId, PlayerId, ProphetCost } from '@engin
 import { pileDefId, safeGetCard } from './util';
 
 /**
- * SB-14 / B98. All 24 Prophet cards are present in every match — threshold-gated,
- * not supply-gated. Doomsday Button is in the list because it belongs to the
- * Prophet catalog, but it is `notPurchasable` and so never forms a pile.
+ * SB-14 / B98. The Prophet catalog: 24 entries, of which 23 are purchasable.
+ * A match no longer offers all of them — `buildShop` samples
+ * `config.prophetPileCount` of these (default 4), stratified across the
+ * threshold range, so this list is the pool rather than the board.
+ *
+ * Doomsday Button is in the list because it belongs to the Prophet catalog, but
+ * it is `notPurchasable` and so never forms a pile. Order matters: it is the
+ * deterministic tiebreak the sampler sorts against, so append new Prophet cards
+ * at the end rather than inserting them.
  */
 export const PROPHET_SHOP_CARD_IDS: CardDefId[] = [
   'chains_of_the_sovereign',

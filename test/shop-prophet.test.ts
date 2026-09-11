@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createMatch, reduce } from '@engine/index';
-import { canBuy } from '@engine/shop';
+import { PROPHET_SHOP_CARD_IDS, canBuy } from '@engine/shop';
 import { resolveEffects } from '@engine/effects';
 import type { EffectContext } from '@engine/effects';
 import { getCard } from '@engine/registry';
@@ -26,6 +26,13 @@ function mkConfig(over: Partial<MatchConfig> = {}): MatchConfig {
   return {
     playerCount: 2,
     draftPileCount: 10,
+    // SB-14 (revised) stocks only four sampled Prophet piles, so a default
+    // match usually has neither the plain pile nor the Lion these B57-B61
+    // *rules* tests need. Asking for the whole pool restores the old fixture:
+    // what is under test here is how a Prophet purchase behaves, never which
+    // piles a match happens to offer. Composition lives in
+    // test/shop-prophet-sample.test.ts.
+    prophetPileCount: PROPHET_SHOP_CARD_IDS.length,
     anomalyChance: 0,
     winCondition: { kind: 'standard', emptyPileFraction: 0.4, emptyPileAbsolute: 4, x: null },
     pileSizeScale: 1,

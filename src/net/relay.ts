@@ -271,3 +271,74 @@ export function makeRoomCode(): string {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Lobby wire format
+// ---------------------------------------------------------------------------
+
+/**
+ * `RelayMessage.kind` is a frozen four-value union in `@engine/types`, so the
+ * lobby does not get a kind of its own. It rides the two that already fit:
+ *
+ *   presence    `hello`  — the message a client already sends to announce
+ *                          itself. In a lobby it repeats every few seconds, so
+ *                          "who is here" is a fact the host keeps rather than
+ *                          guesses.
+ *   lobby state `view`   — a broadcast (no `to`), because a lobby has nothing
+ *                          hidden in it. `isLobbyPayload` and the game client's
+ *                          `isView` are mutually exclusive, so neither reader
+ *                          ever mistakes one for the other.
+ */
+export const LOBBY_TAG = 'jlore-lobby/1';
+
+/** How often a client in a lobby re-announces itself, and how long the host
+ *  keeps someone in the roster after their last `hello`. */
+export const LOBBY_HEARTBEAT_MS = 4000;
+export const LOBBY_PRESENCE_TIMEOUT_MS = 20000;
+/** The host re-broadcasts this often even when nothing changed: it heals a
+ *  dropped post and keeps every poll loop clear of the 10-minute idle stop. */
+export const LOBBY_KEEPALIVE_MS = 15000;
+
+export const MIN_SEAT_CAP = 2;
+export const MAX_SEAT_CAP = 4;
+
+export interface LobbyMemberWire {
+  /** The seat token from the player's cookie. Opaque to everyone but them. */
+  seat: string;
+  name: string;
+  host: boolean;
+}
+
+export interface LobbyPayload {
+  tag: typeof LOBBY_TAG;
+  code: string;
+  members: LobbyMemberWire[];
+  seatCap: number;
+  /** Set once the host has dealt. `seats` is then the frozen seating order. */
+  started: boolean;
+  /** Seat tokens in `playerOrder` order, so a latecomer can tell at a glance
+   *  whether the match that started is one they are in. */
+  seats: string[];
+  /** How many people are asking for a seat the room has no room for. The host
+   *  can raise the cap; without this the control has nothing to prompt it. */
+  knocking: number;
+  rev: number;
+}
+
+export function isLobbyPayload(payload: unknown): payload is LobbyPayload {
+  if (payload === null || typeof payload !== 'object') return false;
+  const p = payload as Partial<LobbyPayload>;
+  return (
+    p.tag === LOBBY_TAG &&
+    Array.isArray(p.members) &&
+    Array.isArray(p.seats) &&
+    typeof p.seatCap === 'number'
+  );
+}
+
+export function clampSeatCap(n: unknown): number {
+  const v = typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : MAX_SEAT_CAP;
+  if (v < MIN_SEAT_CAP) return MIN_SEAT_CAP;
+  if (v > MAX_SEAT_CAP) return MAX_SEAT_CAP;
+  return v;
+}

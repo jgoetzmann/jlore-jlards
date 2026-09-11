@@ -1,6 +1,10 @@
 /**
  * Shop construction. B44, B45, B48, SB-4, SB-10, SB-14, SB-28.
  *
+ * Two of the four shops are fixed lists and two are sampled from the seeded rng:
+ * the Draft Shop by rarity weight (SB-10) and the Prophet Shop by threshold band
+ * (SB-14). Both samples are drawn here so a match replays from its seed alone.
+ *
  * Every pile is populated with real CardInstances at build time — nothing is
  * lazily minted on purchase — because plague tokens, buffs and Chron Cache all
  * read a specific instance that is sitting in a shop pile.
@@ -24,6 +28,13 @@ import {
   VP_THRESHOLD_EXCLUDED_IDS,
   isVpThresholdMatch,
 } from './prophet';
+
+/**
+ * SB-14 (revised). Prophet piles a match offers when `config.prophetPileCount`
+ * says nothing. Four: enough to span the threshold range without turning the
+ * Prophet column into a menu you scroll (see SB-63).
+ */
+export const DEFAULT_PROPHET_PILE_COUNT = 4;
 
 /** B44. The Resource Shop is these four cards at these four prices, always. */
 export const RESOURCE_SHOP: { defId: CardDefId; cost: number }[] = [
@@ -127,6 +138,88 @@ export function draftCandidates(state: GameState): CardDefinition[] {
 }
 
 /**
+ * SB-14 (revised). Candidates for a Prophet Shop pile: catalogued in
+ * `PROPHET_SHOP_CARD_IDS`, actually purchasable, and legal in this match.
+ * Returned in catalog order, which is the deterministic base the sampler sorts.
+ */
+export function prophetCandidates(state: GameState): CardDefinition[] {
+  const vpMatch = isVpThresholdMatch(state);
+  const byId = new Map<CardDefId, CardDefinition>();
+  for (const def of cardsMatching({ defId: PROPHET_SHOP_CARD_IDS })) byId.set(def.id, def);
+
+  const out: CardDefinition[] = [];
+  for (const defId of PROPHET_SHOP_CARD_IDS) {
+    const def = byId.get(defId) ?? safeGetCard(defId);
+    if (!def) continue;
+    // B48/B62: Doomsday Button is catalogued here but is generated only.
+    if (def.notPurchasable) continue;
+    // SB-28: Prophesized Jlore is removed from VP-threshold matches.
+    if (vpMatch && VP_THRESHOLD_EXCLUDED_IDS.includes(def.id)) continue;
+    out.push(def);
+  }
+  return out;
+}
+
+/** The printed Prophet threshold of a definition; 0 when it prints none. */
+function thresholdOf(def: CardDefinition): number {
+  return def.cost.prophet ? def.cost.prophet.threshold : 0;
+}
+
+/**
+ * SB-14 (revised). Draw `count` distinct Prophet definitions, **stratified by
+ * threshold**, not uniformly at random.
+ *
+ * Sort the candidates by threshold, cut the sorted list into `count` contiguous
+ * bands of near-equal size, and take exactly one card from each band. Bands are
+ * disjoint and cover the list, so the result cannot duplicate a pile and cannot
+ * run short.
+ *
+ * Why not a flat 4-of-23: the catalog is bottom-heavy (13 of the 23 sit at
+ * threshold 4 or below, and the top three are 10, 16, 30). A uniform draw leaves
+ * roughly a third of matches with no card under threshold 3 — Prophet does
+ * nothing for the first ten turns — and a quarter with nothing above 8 — no
+ * reason to keep banking once you have bought the board out. Stratifying
+ * guarantees both ends: one cheap on-ramp, one thing to save for, two rungs in
+ * between. That is the shape that makes the track a decision rather than a coin
+ * flip on what showed up.
+ *
+ * Within a band the pick is uniform rather than rarity-weighted, unlike the
+ * Draft Shop. The Draft Shop pulls from ~500 cards where rarity is the only
+ * thing keeping commons common; the Prophet list is 23 hand-placed cards where
+ * the *threshold* already is the scarcity gate (B57). Weighting by rarity on top
+ * of that double-counts it: Mulligan (common) would land in half of all matches
+ * while a Scripture (legendary) would essentially never appear, which is the
+ * flat board this change exists to avoid.
+ *
+ * The result comes back in ascending-threshold order, so the shop column reads
+ * cheap to expensive and the Prophet track is legible at a glance.
+ */
+export function sampleProphetDefs(
+  candidates: CardDefinition[],
+  count: number,
+  rng: Rng,
+): CardDefinition[] {
+  const wanted = Math.min(Math.max(0, Math.floor(count)), candidates.length);
+  if (!(wanted > 0)) return [];
+
+  // Catalog position breaks threshold ties, so the sort is total and stable
+  // regardless of the engine's Array#sort implementation.
+  const sorted = candidates
+    .map((def, index) => ({ def, index }))
+    .sort((a, b) => thresholdOf(a.def) - thresholdOf(b.def) || a.index - b.index)
+    .map((entry) => entry.def);
+
+  const chosen: CardDefinition[] = [];
+  for (let band = 0; band < wanted; band += 1) {
+    const lo = Math.floor((band * sorted.length) / wanted);
+    const hi = Math.floor(((band + 1) * sorted.length) / wanted);
+    // wanted <= sorted.length, so every band holds at least one card.
+    chosen.push(rng.pick(sorted.slice(lo, hi)));
+  }
+  return chosen;
+}
+
+/**
  * B45, SB-10. Draw `count` distinct definitions with rarity pull weighting.
  * A chosen card is removed from the pool before the next draw, so no pile is
  * ever duplicated.
@@ -178,18 +271,11 @@ export function buildShop(state: GameState, rng: Rng): GameState {
     next = addPile(next, 'points', entry.defId, size, pinnedCostFor(entry.defId, entry.cost));
   }
 
-  // --- SB-14: the whole Prophet Shop, every match ---
-  const vpMatch = isVpThresholdMatch(next);
-  const prophetDefs = cardsMatching({ defId: PROPHET_SHOP_CARD_IDS });
-  const prophetById = new Map<CardDefId, CardDefinition>();
-  for (const def of prophetDefs) prophetById.set(def.id, def);
-  for (const defId of PROPHET_SHOP_CARD_IDS) {
-    const def = prophetById.get(defId) ?? safeGetCard(defId);
-    if (!def) continue;
-    // Doomsday Button is catalogued here but is generated only.
-    if (def.notPurchasable) continue;
-    // SB-28: Prophesized Jlore is removed from VP-threshold matches.
-    if (vpMatch && VP_THRESHOLD_EXCLUDED_IDS.includes(def.id)) continue;
+  // --- SB-14 (revised): a sampled Prophet Shop, spread across thresholds ---
+  const configuredProphet = state.config.prophetPileCount ?? DEFAULT_PROPHET_PILE_COUNT;
+  const wantedProphet = configuredProphet > 0 ? configuredProphet : DEFAULT_PROPHET_PILE_COUNT;
+  const prophetPicked = sampleProphetDefs(prophetCandidates(next), wantedProphet, rng);
+  for (const def of prophetPicked) {
     const size = prophetPileSize(def.rarity, players, scale);
     next = addPile(next, 'prophet', def.id, size);
   }
@@ -210,6 +296,7 @@ export function buildShop(state: GameState, rng: Rng): GameState {
     prophet: next.shop.order.prophet.length,
     draft: next.shop.order.draft.length,
     draftDefs: picked.map((d) => d.id),
+    prophetDefs: prophetPicked.map((d) => d.id),
     scale,
   });
 }

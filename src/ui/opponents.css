@@ -1,0 +1,573 @@
+/*
+ * Across the table.
+ *
+ * Scoped hard to `.opponent.seat` / `.seat-*`. main.tsx imports `./App` before
+ * `./styles.css`, so this file lands *earlier* in the bundle than the base
+ * sheet and would lose every tie on source order. The two-class selectors below
+ * are not decoration: `.opponent.seat` (0,2,0) beats `.opponent` (0,1,0)
+ * whatever the order ends up being. The old `.opponent*` rules stay useful as a
+ * floor if this sheet ever fails to load.
+ *
+ * Sized for the 320px sidebar with three seats in it. Nothing here may grow the
+ * column: the tableau scrolls sideways instead.
+ */
+
+.opponents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opponents-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.opponents-head h3 {
+  margin: 0;
+}
+
+.opponents-count {
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-none {
+  color: var(--ink-dim);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+/* ------------------------------------------------------------------- seat */
+
+.opponent.seat {
+  --seat-hue: 210;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Felt. One seam of colour so a seat reads as a place rather than a row. */
+.opponent.seat::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: hsl(var(--seat-hue) 40% 45%);
+  opacity: 0.45;
+}
+
+.opponent.seat.seat-active {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(127, 212, 160, 0.07), transparent 52px), var(--panel);
+}
+
+.opponent.seat.seat-active::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Mid-prompt. You can see them thinking; the options were never sent to you. */
+.opponent.seat.seat-deciding {
+  border-color: rgba(240, 198, 116, 0.55);
+}
+
+.opponent.seat.seat-deciding::before {
+  background: var(--accent-2);
+  opacity: 1;
+}
+
+.opponent.seat.seat-won::before {
+  background: var(--accent-2);
+  opacity: 1;
+}
+
+.opponent.seat.seat-out {
+  opacity: 0.5;
+  filter: saturate(0.4);
+}
+
+/* ------------------------------------------------------------------- head */
+
+.opponent.seat .seat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.seat-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: hsl(var(--seat-hue) 65% 88%);
+  background: hsl(var(--seat-hue) 35% 24%);
+  border: 1px solid hsl(var(--seat-hue) 40% 38%);
+}
+
+.seat-who {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.opponent.seat .seat-name {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seat-sub {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 13px;
+}
+
+.opponent.seat .opponent-turn.seat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.seat-badge.seat-badge-out {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
+
+.seat-badge-deciding {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.seat-badge-won {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.seat-waiting {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.7;
+}
+
+.seat-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: seat-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes seat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+
+.opponent.seat .seat-score {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-score-item b {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.seat-score-vp b {
+  color: var(--vp);
+}
+
+.seat-score-prophet b {
+  color: var(--prophet);
+}
+
+/* --------------------------------------------------------------- tableau */
+
+.opponent.seat .seat-tableau {
+  display: block;
+  margin: 0;
+  padding: 2px 0 0;
+}
+
+/* The edge of the table their cards are laid against, with a word on it so the
+   row cannot be mistaken for the discard pile below. */
+.seat-tableau-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.seat-tableau-head::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
+}
+
+.seat-tableau-row {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.seat-tableau-row::-webkit-scrollbar {
+  height: 5px;
+}
+
+.seat-tableau-row::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+/* ------------------------------------------------------------ mini faces */
+
+.seat-card {
+  flex: 0 0 auto;
+  width: 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  cursor: default;
+}
+
+/* The rarity class on `.seat-card` sets `color`, and the stripe borrows it. The
+   name does not: rarity tints bottom out around #7d8798, which is unreadable at
+   9px, so the stripe carries rarity and the name stays legible. */
+.seat-card-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 3px;
+  border-top: 2px solid currentColor;
+  background: #0f1219;
+}
+
+.seat-card-art-blank {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.seat-card-name {
+  color: var(--ink);
+  opacity: 0.88;
+  font-size: 9px;
+  line-height: 1.15;
+  height: 21px;
+  overflow: hidden;
+  text-align: center;
+  word-break: break-word;
+}
+
+/* The card they played most recently sits proud of the rest. */
+.seat-card-top {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px rgba(240, 198, 116, 0.25);
+}
+
+/* --------------------------------------------------------------- beats */
+
+.seat-beats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seat-beat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-dim);
+  min-width: 0;
+}
+
+.seat-beat::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.seat-beat-verb {
+  flex: 0 0 auto;
+}
+
+.seat-beat-subject {
+  color: var(--ink);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-beat-times {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* The last line is the live one; the ones above it have already happened. */
+.seat-beat:not(:last-child) {
+  opacity: 0.55;
+}
+
+.seat-beat-play {
+  color: var(--accent);
+}
+
+.seat-beat-buy {
+  color: var(--money);
+}
+
+.seat-beat-gain {
+  color: var(--prophet);
+}
+
+.seat-beat-loss {
+  color: var(--danger);
+}
+
+.seat-beat-aura {
+  color: var(--vp);
+}
+
+/* -------------------------------------------------------------- stacks */
+
+.seat-stacks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+  padding-top: 2px;
+}
+
+.seat-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.seat-stack-label {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.seat-stack-label b {
+  font-size: 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Their hand: backs you can count and cannot read. */
+.seat-fan {
+  display: flex;
+  align-items: flex-end;
+  height: 46px;
+  padding-left: 3px;
+}
+
+.seat-back {
+  width: 15px;
+  height: 30px;
+  flex: 0 0 auto;
+  margin-left: -7px;
+  border-radius: 3px;
+  border: 1px solid #38415a;
+  background: repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.06) 0 2px,
+      transparent 2px 4px
+    ),
+    linear-gradient(180deg, #2b3346, #1c2231);
+  /* Splayed from the bottom edge, the way a hand sits in somebody's fist. The
+     angle is computed in the component so it centres on the count actually
+     shown rather than on a fixed seven. */
+  transform: rotate(var(--rot, 0deg));
+  transform-origin: 50% 100%;
+}
+
+.seat-back:first-child {
+  margin-left: 0;
+}
+
+.seat-fan-more {
+  align-self: center;
+  margin-left: 3px;
+  font-size: 9px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-fan-empty,
+.seat-deck-empty,
+.seat-discard-empty {
+  width: 26px;
+  height: 30px;
+  border-radius: 3px;
+  border: 1px dashed var(--line);
+  opacity: 0.6;
+}
+
+.seat-discard-empty {
+  width: 58px;
+  height: 46px;
+}
+
+/* Their deck: a stack you can judge the thickness of. */
+.seat-deck {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 46px;
+}
+
+.seat-deck-empty {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+.seat-deck-layer {
+  position: absolute;
+  left: 0;
+  bottom: calc(var(--i) * 3px);
+  width: 26px;
+  height: 30px;
+  border-radius: 3px;
+  border: 1px solid #38415a;
+  background: linear-gradient(180deg, #2b3346, #1c2231);
+}
+
+.seat-stack-discard .seat-card {
+  width: 58px;
+}
+
+.seat-stack-discard .seat-card-art {
+  height: 34px;
+}
+
+.seat-stack-discard .seat-card-name {
+  height: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------- auras */
+
+.opponent.seat .seat-auras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+.opponent.seat .seat-aura {
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opponent.seat .seat-aura.aura-heroic {
+  border-color: rgba(240, 198, 116, 0.5);
+  color: var(--accent-2);
+}
+
+.opponent.seat .seat-aura.aura-celestial {
+  border-color: rgba(121, 192, 240, 0.5);
+  color: var(--prophet);
+}
+
+.opponent.seat .seat-aura.aura-hypercelestial {
+  border-color: rgba(183, 156, 240, 0.6);
+  color: var(--vp);
+  background: rgba(183, 156, 240, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seat-pip {
+    animation: none;
+  }
+}

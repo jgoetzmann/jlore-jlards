@@ -5,6 +5,10 @@
  * every seat and post one `view` message each (B109). A `hello` claims a seat,
  * records that seat's codex into match state, and gets a fresh view back
  * (B110). A `snapshot` goes out each turn so another client could take over.
+ *
+ * `startLobbyHost` is the phase before any of that: a room with people in it
+ * and no cards yet. It speaks the same relay with no new message kind — see
+ * the lobby wire format in `relay.ts`.
  */
 
 import { reduce, legalActions } from '@engine/index';
@@ -17,13 +21,37 @@ import type {
   PlayerId,
   RelayMessage,
 } from '@engine/types';
-import { startPolling, type PollLoop, type Relay } from './relay';
+import {
+  clampSeatCap,
+  startPolling,
+  LOBBY_KEEPALIVE_MS,
+  LOBBY_PRESENCE_TIMEOUT_MS,
+  LOBBY_TAG,
+  type LobbyPayload,
+  type PollLoop,
+  type Relay,
+} from './relay';
 import { saveSnapshot } from './storage';
 
 export interface HostHandle {
   stop(): void;
   getState(): GameState;
   submit(action: GameAction): void;
+}
+
+export interface HostOptions {
+  /**
+   * Seat tokens in seating order: `seats[i]` owns `playerOrder[i]`. A lobby
+   * hands this over so the match is dealt for the people who are actually
+   * here, and every one of them has a view addressed to them on the very first
+   * publish -- no hello round trip, no waiting for a seat to be assigned.
+   */
+  seats?: string[];
+  /**
+   * Relay cursor to start polling from. The lobby has already consumed its own
+   * traffic; replaying it would re-answer every heartbeat with a full view.
+   */
+  since?: number;
 }
 
 export const HOST_FROM = 'host';
@@ -57,7 +85,11 @@ function sameAction(a: GameAction, b: GameAction): boolean {
   return true;
 }
 
-export function startHost(relay: Relay, state: GameState): HostHandle {
+export function startHost(
+  relay: Relay,
+  state: GameState,
+  options: HostOptions = {},
+): HostHandle {
   let current = state;
   let stopped = false;
   let lastSnapshotTurn = -1;
@@ -66,6 +98,17 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
   /** seatId -> PlayerId. The only thing the host knows about who is who. */
   const seats = new Map<string, PlayerId>();
   const claimed = new Set<PlayerId>();
+
+  // A seating plan from the lobby, applied before a single message is read.
+  if (options.seats) {
+    options.seats.forEach((seatId, i) => {
+      const pid = current.playerOrder[i];
+      if (typeof seatId !== 'string' || seatId.length === 0 || !pid) return;
+      if (seats.has(seatId)) return;
+      seats.set(seatId, pid);
+      claimed.add(pid);
+    });
+  }
 
   function nextFreeSeat(): PlayerId | null {
     for (const pid of current.playerOrder) {
@@ -125,6 +168,13 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
     if (typeof name !== 'string' || name.length === 0) return;
     const player = current.players[pid];
     if (!player || player.name === name) return;
+    // A refresh re-sends this browser's own settings, which is how two people
+    // who both left the default alone arrive as the same name. Seating already
+    // resolved that once; do not let a reload undo it and put two identically
+    // named players at the same table.
+    for (const other of current.playerOrder) {
+      if (other !== pid && current.players[other]?.name === name) return;
+    }
     current = {
       ...current,
       players: { ...current.players, [pid]: { ...player, name } },
@@ -223,7 +273,7 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
   }
 
   let loopRef: PollLoop | null = null;
-  loopRef = startPolling(relay, 0, handle);
+  loopRef = startPolling(relay, options.since ?? 0, handle);
   const loop: PollLoop = loopRef;
 
   // Announce the opening position to whoever is already listening.
@@ -245,6 +295,216 @@ export function startHost(relay: Relay, state: GameState): HostHandle {
         loop.bump();
         publishAll();
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The lobby host — a room before it is a match
+// ---------------------------------------------------------------------------
+
+export interface LobbyHostOptions {
+  code: string;
+  /** The host's own seat token. It is member one, and it is never pruned. */
+  hostSeat: string;
+  hostName: string;
+  seatCap?: number;
+  /** Called with every roster the host publishes, including the first. */
+  onRoster?: (roster: LobbyPayload) => void;
+  /** Injectable clock, for tests. */
+  now?: () => number;
+}
+
+/** What the lobby hands the match when the host presses Start. */
+export interface LobbyHandoff {
+  /** Seat tokens in seating order. Length is the real player count. */
+  seats: string[];
+  /** Their names, same order. */
+  names: string[];
+  /** Relay cursor the match's host should start polling from. */
+  since: number;
+}
+
+export interface LobbyHostHandle {
+  stop(): void;
+  setSeatCap(cap: number): void;
+  roster(): LobbyPayload;
+  /**
+   * Freeze the roster, tell the room, and stop listening. Everything the match
+   * needs to seat exactly these people comes back.
+   */
+  start(): LobbyHandoff;
+}
+
+interface LobbyMemberRecord {
+  seat: string;
+  name: string;
+  host: boolean;
+  seen: number;
+}
+
+function helloName(payload: unknown): string {
+  if (payload === null || typeof payload !== 'object') return '';
+  const name = (payload as HelloPayload).name;
+  if (typeof name !== 'string') return '';
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 24) : '';
+}
+
+/**
+ * Holds a room open while people arrive.
+ *
+ * Presence is a fact rather than an inference: a client in a lobby re-sends
+ * `hello` every few seconds, so arriving shows up on the next poll (~2s end to
+ * end) and a closed tab drops off after `LOBBY_PRESENCE_TIMEOUT_MS`. The host
+ * broadcasts the roster on every change, plus a keepalive, and nothing here
+ * touches the engine -- no match exists yet.
+ */
+export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHostHandle {
+  const now = options.now ?? (() => Date.now());
+  const hostName = options.hostName.trim().slice(0, 24) || 'Host';
+
+  let stopped = false;
+  let started = false;
+  let rev = 0;
+  let seatCap = clampSeatCap(options.seatCap);
+  let frozenSeats: string[] = [];
+
+  const members: LobbyMemberRecord[] = [
+    { seat: options.hostSeat, name: hostName, host: true, seen: now() },
+  ];
+
+  /** Seats the room had no room for, and when each last asked. */
+  const turnedAway = new Map<string, number>();
+
+  function roster(): LobbyPayload {
+    return {
+      tag: LOBBY_TAG,
+      code: options.code,
+      members: members.map((m) => ({ seat: m.seat, name: m.name, host: m.host })),
+      seatCap,
+      started,
+      seats: frozenSeats.slice(),
+      knocking: turnedAway.size,
+      rev,
+    };
+  }
+
+  function publish(): LobbyPayload {
+    rev += 1;
+    const payload = roster();
+    if (!stopped) {
+      void relay
+        .post({ from: HOST_FROM, kind: 'view', payload })
+        .catch(() => undefined);
+    }
+    if (options.onRoster) options.onRoster(payload);
+    return payload;
+  }
+
+  /** Drop anyone whose heartbeat has stopped. The host keeps its own seat. */
+  function sweep(): void {
+    if (stopped || started) return;
+    const cutoff = now() - LOBBY_PRESENCE_TIMEOUT_MS;
+    let changed = false;
+    for (let i = members.length - 1; i >= 1; i--) {
+      if (members[i]!.seen < cutoff) {
+        members.splice(i, 1);
+        changed = true;
+      }
+    }
+    for (const [seat, seen] of turnedAway) {
+      if (seen < cutoff) {
+        turnedAway.delete(seat);
+        changed = true;
+      }
+    }
+    if (changed) publish();
+  }
+
+  function handle(msgs: RelayMessage[]): void {
+    if (stopped || started) return;
+    let changed = false;
+
+    for (const msg of msgs) {
+      if (!msg || msg.kind !== 'hello') continue;
+      const seat = msg.from;
+      if (typeof seat !== 'string' || seat.length === 0 || seat === HOST_FROM) continue;
+
+      const name = helloName(msg.payload);
+      const existing = members.find((m) => m.seat === seat);
+      if (existing) {
+        existing.seen = now();
+        if (name && existing.name !== name) {
+          existing.name = name;
+          changed = true;
+        }
+        continue;
+      }
+      // Beyond the cap they do not enter the roster, but they are still there:
+      // they keep knocking, the host is told so, and raising the cap lets them
+      // in on their next heartbeat without anybody reloading anything.
+      if (members.length >= seatCap) {
+        if (!turnedAway.has(seat)) changed = true;
+        turnedAway.set(seat, now());
+        continue;
+      }
+      turnedAway.delete(seat);
+      members.push({ seat, name: name || 'Navigator', host: false, seen: now() });
+      changed = true;
+    }
+
+    if (changed) publish();
+  }
+
+  const loop: PollLoop = startPolling(relay, 0, handle);
+
+  const sweepTimer = setInterval(sweep, 2000) as unknown as ReturnType<typeof setTimeout>;
+  const keepaliveTimer = setInterval(() => {
+    if (stopped || started) return;
+    publish();
+  }, LOBBY_KEEPALIVE_MS) as unknown as ReturnType<typeof setTimeout>;
+
+  function clearTimers(): void {
+    clearInterval(sweepTimer as unknown as ReturnType<typeof setInterval>);
+    clearInterval(keepaliveTimer as unknown as ReturnType<typeof setInterval>);
+  }
+
+  publish();
+
+  return {
+    stop() {
+      stopped = true;
+      clearTimers();
+      loop.stop();
+    },
+
+    setSeatCap(cap: number) {
+      if (stopped || started) return;
+      const next = clampSeatCap(cap);
+      const floor = members.length;
+      const applied = next < floor ? clampSeatCap(floor) : next;
+      if (applied === seatCap) return;
+      seatCap = applied;
+      publish();
+    },
+
+    roster,
+
+    start(): LobbyHandoff {
+      const seated = members.slice(0, seatCap);
+      started = true;
+      frozenSeats = seated.map((m) => m.seat);
+      const names = seated.map((m) => m.name);
+      // The last thing the room hears from the lobby. A browser that opens the
+      // link from here on reads this and knows the match is already dealt, and
+      // whether it was dealt with them in it.
+      publish();
+      const since = loop.cursor();
+      clearTimers();
+      loop.stop();
+      stopped = true;
+      return { seats: frozenSeats.slice(), names, since };
     },
   };
 }

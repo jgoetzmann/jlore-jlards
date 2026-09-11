@@ -73,11 +73,14 @@ export function buyablePiles(state: GameState, buyer: PlayerId): PileId[] {
 // ---------------------------------------------------------------------------
 
 export {
+  DEFAULT_PROPHET_PILE_COUNT,
   RESOURCE_SHOP,
   POINTS_SHOP,
   draftCandidates,
   draftPileSize,
+  prophetCandidates,
   sampleDraftDefs,
+  sampleProphetDefs,
 } from './build';
 
 export {

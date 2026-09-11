@@ -122,11 +122,50 @@ export function costLabel(card: CardView): string {
   return card.cost < 0 ? `(${card.cost})` : `(${card.cost})`;
 }
 
+/**
+ * How far the pointer may travel between press and release and still count as a
+ * click, in CSS pixels.
+ *
+ * Without this the hand had a real misfire: HTML5 drag-and-drop only *starts* a
+ * drag once the browser decides the gesture was a drag, and a short, slow tug
+ * on a card never crosses that line. The browser then delivers a plain click —
+ * so the card you were trying to slide one place left gets played instead, and
+ * in this game that is an irreversible action on a card whose neighbours matter.
+ * Six pixels is comfortably under every browser's own drag threshold, so a real
+ * click still registers and a nudged card no longer fires.
+ */
+export const DRAG_SLOP_PX = 6;
+
+/** True when a press/release pair moved far enough to have meant a drag. */
+export function travelledTooFar(
+  from: { x: number; y: number } | null,
+  to: { x: number; y: number },
+  slop: number = DRAG_SLOP_PX,
+): boolean {
+  if (!from) return false;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  return dx * dx + dy * dy > slop * slop;
+}
+
 export function Card(props: CardProps): JSX.Element {
   const { card, onClick, selected, disabled, compact, badge, footer } = props;
   const counters = Object.entries(card.counters ?? {}).filter(([, v]) => v !== 0);
   const stats = statLine(card);
   const clickable = Boolean(onClick) && !disabled;
+
+  // Where the pointer went down, and whether this gesture became a drag. Refs,
+  // not state: both are read inside the click handler for the *same* gesture,
+  // so a re-render would be a frame too late.
+  const pressedAt = React.useRef<{ x: number; y: number } | null>(null);
+  const wasDragged = React.useRef(false);
+
+  // The slop guard exists because a drag that never crossed the browser's own
+  // threshold arrives as a click. That only happens on a card you can drag, and
+  // a shop pile is not one: applying it there would mean a buy that silently
+  // did nothing because the pointer drifted seven pixels, with no gesture to
+  // gain from it. So it is scoped to draggable cards -- today, the hand.
+  const guardsDrag = props.draggable === true;
 
   const classes = ['card', rarityClass(card.rarity)];
   if (compact) classes.push('card-compact');
@@ -160,11 +199,37 @@ export function Card(props: CardProps): JSX.Element {
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       draggable={props.draggable}
-      onDragStart={props.onDragStart}
+      onPointerDown={(e) => {
+        pressedAt.current = { x: e.clientX, y: e.clientY };
+        wasDragged.current = false;
+      }}
+      onDragStart={(e) => {
+        wasDragged.current = true;
+        props.onDragStart?.(e);
+      }}
       onDragOver={props.onDragOver}
       onDrop={props.onDrop}
-      onDragEnd={props.onDragEnd}
-      onClick={() => {
+      onDragEnd={(e) => {
+        // A drag that ends outside the row fires no click, so without this the
+        // flag would still be set when the *next* real click arrives and would
+        // eat it -- the same one-click-lost misfire, pointing the other way.
+        wasDragged.current = false;
+        pressedAt.current = null;
+        props.onDragEnd?.(e);
+      }}
+      onClick={(e) => {
+        // `detail` is 0 for a click synthesised by script or by assistive tech,
+        // which carries no meaningful coordinates -- those are always honoured,
+        // unconditionally, so `.click()` still plays a card.
+        const scripted = e.detail === 0;
+        const dragged =
+          !scripted &&
+          guardsDrag &&
+          (wasDragged.current ||
+            travelledTooFar(pressedAt.current, { x: e.clientX, y: e.clientY }));
+        pressedAt.current = null;
+        wasDragged.current = false;
+        if (dragged) return;
         if (clickable && onClick) onClick(card);
       }}
       onKeyDown={(e) => {

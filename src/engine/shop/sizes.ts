@@ -67,8 +67,9 @@ export function basicPileSize(defId: CardDefId, playerCount: number, scale: numb
 
 /**
  * SB-14. The Prophet Shop is threshold-gated, not supply-gated, so its piles are
- * deliberately deep. Prophesized Jlore is the one exception: Mythic, terminal,
- * one copy.
+ * deliberately deep — and since SB-14 was re-decided there are only four of
+ * them, which makes running one dry a real possibility rather than a curiosity.
+ * Prophesized Jlore is the one exception: Mythic, terminal, one copy.
  */
 export function prophetPileSize(rarity: Rarity, playerCount: number, scale: number): number {
   const players = Math.max(1, playerCount);

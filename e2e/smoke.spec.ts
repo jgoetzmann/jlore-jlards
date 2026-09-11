@@ -69,12 +69,23 @@ test.describe('production smoke', () => {
       await host.getByTestId('create-room').click();
       await expect.poll(async () => new URL(host.url()).hash).not.toBe('');
       const code = new URL(host.url()).hash.replace(/^#/, '');
-      await expect(host.getByTestId('table')).toBeVisible({ timeout: 45_000 });
+      await expect(host.getByTestId('lobby')).toBeVisible({ timeout: 45_000 });
 
+      // The lobby roster is the sharpest reading of this deployment there is:
+      // the guest only enters it if the host's poll actually saw the guest's
+      // `hello`, which is the exact round trip a per-instance memory store
+      // breaks. It used to take a 60s timeout on a spinner to find that out.
       await guest.goto(`${URL_UNDER_TEST}/#${code}`);
       await expect(
+        host.getByTestId('lobby-player'),
+        'the host never saw the joiner arrive — the hello and the poll landed on different instances, which is what a per-instance memory store does',
+      ).toHaveCount(2, { timeout: 60_000 });
+
+      await host.getByTestId('lobby-start').click();
+      await expect(host.getByTestId('table')).toBeVisible({ timeout: 45_000 });
+      await expect(
         guest.getByTestId('table'),
-        'the joiner never got a table — the host never saw the hello, which is what a per-instance memory store does',
+        'the joiner was in the lobby but never got a table',
       ).toBeVisible({ timeout: 60_000 });
 
       await expect

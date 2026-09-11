@@ -241,9 +241,13 @@ localStorage.setItem('jlore_snapshot', JSON.stringify({ code, seq, state }));
 
 ## 8. Room lifecycle
 
-**Starting:** host generates a 6-char code, seeds the RNG, opens `#JLORE-4821`, pastes it in Discord.
+**Starting:** host generates a 6-char code, opens `#JLORE-4821`, pastes it in Discord. This opens a **lobby**, not a match — no RNG is seeded and no cards exist yet. The host holds the room open while people arrive, then presses Start, and the match is created for exactly the people in it (SB-64).
 
-**Joining:** open the link → client sends `hello` with your seat token (from cookie, or freshly generated) and Codex → host assigns a seat and pushes back a view.
+**Joining before the deal:** open the link → client sends `hello` with your seat token (from cookie, or freshly generated) and Codex, and repeats it every 4s → you appear in the host's roster within about a poll each way. The lobby host broadcasts the roster on every change; it never touches the engine.
+
+**Dealing:** the lobby freezes its roster and hands the match host an ordered list of seat tokens plus its relay cursor. `startHost` binds `seats[i] → playerOrder[i]` *before it reads a message*, so the opening `publishAll` is already addressed to every real browser — no hello round trip to get seated, and the new host does not replay the lobby's traffic.
+
+**Joining after the deal:** the final lobby broadcast carries `started: true` and the frozen seating order, so a latecomer gets a definite answer rather than a timeout: their token is in the list (a reconnect — their view is already on the wire) or it is not (the match was dealt without them, and the screen says so).
 
 **Refresh:** cookie restores your seat token, `hello` gets you a fresh view, you're back where you were. Takes about a second.
 

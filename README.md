@@ -6,8 +6,9 @@ A digital deck-builder in the Dominion lineage, for 2–4 people in different
 houses who are already in a Discord call.
 
 Click **Hotseat** to play immediately — two players, two hands, one browser, no
-account and no setup. **Create a room** gives you a `#ROOMCODE` link to paste
-into a call.
+account and no setup. **Create a room** opens a lobby with a `#ROOMCODE` link to
+paste into the call; you watch people arrive in it and deal when everyone is
+actually there.
 
 Three things make it not-Dominion:
 
@@ -68,9 +69,11 @@ npm run smoke          # is the *deployed* site actually playable?
 credentials still serve the app, still return 200 from the relay, and still pass
 a casual `curl` — sequential requests reuse one warm serverless instance. Two
 real players do not: their `hello` and the host's poll land on different
-instances with different memory, so the host never sees the join and the second
-player sits on "Joining…" forever. The relay reports which store answered in an
-`x-jlore-store` response header, so you can check without guessing:
+instances with different memory, so the host never sees the join. The symptom is
+in the lobby now — the host's roster stays at one person while the guest sits out
+there knocking — which is at least a screen that tells you something is wrong,
+rather than a spinner that never resolves. The relay reports which store answered
+in an `x-jlore-store` response header, so you can check without guessing:
 
 ```bash
 curl -sI -X POST https://jlore-jlards.vercel.app/api/room/CHECK   -H 'content-type: application/json' | grep -i x-jlore-store
@@ -109,6 +112,12 @@ npm run art:manifest   # docs/ART-MANIFEST.md — art worklist by status
 One browser — the host's — runs the engine. Everyone else runs a dumb terminal
 that renders a filtered view and posts button presses back. The server is a
 message queue that has never heard of a card game.
+
+A networked room has two phases. In the **lobby** nothing has been dealt: the
+host holds the room open and the roster is whoever has said hello in the last few
+seconds. The host presses Start and the match is created for exactly those
+people, every seat bound to a browser before the first view goes out. Hotseat
+skips the lobby — there is nobody to wait for (SB-64).
 
 ```
 Host browser                 Vercel relay              Friends' browsers
@@ -194,17 +203,19 @@ skipping what exists, and a card that draws a dud can be re-rolled on its own
 that needs a browser.
 
 ```bash
-npm run e2e            # 14 specs, real Chromium
+npm run e2e            # 19 specs, real Chromium
 npm run e2e:headed     # watch it play
 ```
 
 Two suites. `e2e/hotseat.spec.ts` plays a real two-player game by clicking:
 deals five cards, plays a Copper for money, buys from a pile, ends the turn,
 passes the seat, and runs twelve turns without falling over. `e2e/multiplayer.spec.ts`
-opens **two independent Chromium contexts** — separate cookies, separate
-localStorage, separate seats — has one host a room and the other join by URL,
-and checks that plays propagate, turns alternate, and a refresh puts you back
-in your own seat.
+opens **independent Chromium contexts** — separate cookies, separate
+localStorage, separate seats — has one host a room and the others join by URL,
+and checks that the host sees them arrive in the lobby, that plays propagate,
+that turns alternate, and that a refresh puts you back in your own seat. Two of
+its cases need a third browser: a three-player deal, and somebody who opens the
+link after the cards were dealt and is told so rather than left waiting.
 
 The hidden-information spec is worth understanding precisely. It asserts that
 neither browser's DOM contains the other player's hand instance ids, which is

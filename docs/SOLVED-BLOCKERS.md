@@ -207,13 +207,57 @@ Code: behaviors under S-FUSE; `CardInstance.fusedFrom`.
 
 ### SB-14. Is the whole Prophet Shop present every match?
 
-**Resolved:** **all 24, every match.** They are threshold-gated, not
-supply-gated: a player who never invests in Prophet cannot touch any of them, and
-a player who commits hard has earned the whole menu. Sampling the Prophet Shop
-would make the entire Prophet archetype a gamble on whether its payoff showed up,
-which is the one thing a slow investment track cannot survive.
+**Resolved:** **four piles, sampled per match**, spread across the threshold
+range. `MatchConfig.prophetPileCount` sets the number; the shop builder defaults
+it to 4, the way `draftPileCount` defaults to 10.
 
-Code: behavior B98.
+**This supersedes the original ruling, which was "all 24, every match."** That
+argument is not wrong and is worth keeping: Prophet cards are threshold-gated,
+not supply-gated, so a player who never invests cannot touch any of them and a
+player who commits hard has earned the whole menu. Sampling makes the Prophet
+archetype partly a gamble on whether its payoff showed up, and that is the one
+thing a slow investment track is least able to absorb. **That cost is real and
+we are paying it knowingly** — a player who banks Prophet for ten turns toward a
+Scripture can now open a board that has no Scripture on it.
+
+Why it is still the better trade:
+
+- **23 piles is not a menu, it is a wall.** The Prophet column was longer than
+  the other three shops put together, and the board grew to fit it — the direct
+  cause of the unresolved layout blocker in SB-63. A shop nobody can read is not
+  offering a choice either.
+- **A fixed shop has no board variety.** Every match opened on the same Prophet
+  column, so the Prophet track played out identically every time. The Draft Shop
+  has been sampled since SB-10 for exactly this reason; the Prophet Shop was the
+  odd one out.
+- **The gamble is bounded by the stratification, not by luck.** The sample is
+  not uniform. The candidates are sorted by threshold, cut into four contiguous
+  bands, and one card is taken from each, so *every* board offers a cheap
+  on-ramp (threshold 2 or less), two middle rungs, and one long-term target
+  (threshold 8 or more). You can always start investing on turn one and you
+  always have something to save for. What varies is *which* payoff, not
+  *whether* there is one — which is a read-the-board decision rather than a coin
+  flip.
+- **Within a band the pick is uniform, not rarity-weighted**, unlike the Draft
+  Shop. The Draft Shop pulls from ~500 cards where rarity is the only thing
+  keeping commons common. The Prophet list is 23 hand-placed cards where the
+  threshold already *is* the scarcity gate (B57), so weighting by rarity on top
+  double-counts it — Mulligan (common) would land in half of all matches while a
+  Scripture (legendary) essentially never would, which is the flat board this
+  change exists to avoid.
+
+The sample is drawn from the same seeded rng as the Draft Shop, so it replays
+exactly like everything else, and SB-28's VP-threshold exclusion is applied to
+the candidate pool before sampling rather than to the result.
+
+**REVISIT** — if playtests show the Prophet track feels like a lottery, the knob
+is `prophetPileCount`, not the sampler: 6 keeps the variety and roughly halves
+the odds of missing a given archetype.
+
+Code: `MatchConfig.prophetPileCount` (carried through `normalizeConfig`, so a
+count handed to `createMatch` reaches the shop builder), `prophetCandidates()`,
+`sampleProphetDefs()`. B98 still counts 23 in the *catalog*; how many of them
+reach a table is `test/shop-prophet-sample.test.ts`.
 
 ### SB-15. Tiebreaker when VP is level
 
@@ -913,6 +957,14 @@ column. At a 1600×1000 viewport the page runs about **3740px**, so IN PLAY and
 the hand sit roughly 2700px below the fold. A player cannot see their own cards
 and the shop at the same time, which is most of what playing consists of.
 
+**Update:** SB-14 has since been re-decided — the Prophet Shop now offers **4
+sampled piles**, not all 23 — so the tallest column is the 10-pile Draft Shop
+and the measurement above no longer describes the page. That removes the *cause*
+of the overflow, and quite possibly the symptom, but it does not make the layout
+correct: a 10-pile column at a short viewport still pushes the hand down, and
+the two-pane fix below is still the right shape. **Re-measure before doing any
+of it** — the numbers in this entry are from the 23-pile board.
+
 **Two fixes tried, both reverted, both worse than the problem:**
 
 | Attempt | Why it failed |
@@ -935,3 +987,74 @@ both failure modes. The clipping version fails `B5` on an unreachable Buy button
 the sticky version fails the screenshot run with `<div class="hand"> intercepts
 pointer events`. Neither shows up in the unit suite, and neither is visible in a
 screenshot — the layout looks *better* in both broken versions.
+
+---
+
+## From the multiplayer pass
+
+### SB-64. When are cards dealt, and what happens to somebody who arrives late?
+
+**Resolved:** a networked room is a **lobby first**. `seedMatch` runs when the
+host presses Start, for exactly the people in the room at that moment. A person
+who opens the link after that is told the match already started.
+
+The old flow dealt the moment a room was created, for a player count picked on
+the start screen before anyone had arrived. Three things followed from that, and
+all three were the same bug:
+
+- the second player waited out a hello/retry cycle for a seat that had been
+  minted for nobody in particular — about twenty seconds on a spinner;
+- a third player had no seat at all, because the host had guessed two, and there
+  was no way to say so;
+- and the only feedback for either was "Joining…", forever, which is
+  indistinguishable from a broken relay.
+
+**What a lobby needs that a spinner does not:** presence has to be a *fact*, not
+an inference. A client re-sends `hello` every 4s until it has a view, and the
+host drops anyone silent for 20s, so arriving shows up in about two seconds and
+a closed tab drops off on its own. Nothing here touches the engine — no match
+exists yet.
+
+**No new `RelayMessage.kind`.** The union in `@engine/types` stays four values.
+Presence rides `hello`, which already means "I am here"; lobby state rides a
+broadcast `view` with no `to`, because a lobby has nothing hidden in it.
+`isLobbyPayload` and the client's `isView` are mutually exclusive guards, so
+neither reader ever sees the other's traffic — `test/net-lobby.test.ts` asserts
+that property over every `view` on the wire.
+
+**The handoff is what actually kills the twenty seconds.** `startHost` takes an
+ordered list of seat tokens and binds `seats[i] -> playerOrder[i]` *before it
+reads a single message*, so the opening `publishAll` is already addressed to
+every real browser. It also takes the lobby's relay cursor, so the new host does
+not replay the lobby's history and answer every heartbeat with a full `GameView`.
+
+**A latecomer gets a definite answer, not a timeout.** The final lobby broadcast
+carries `started: true` plus the frozen seating order. Someone who opens the link
+afterwards reads it and knows immediately which case they are in: their seat
+token is in the list (they are a reconnect, and their view is already waiting) or
+it is not (the match was dealt without them, and the screen says so). There is no
+"free seat" case left to fall into, because the match is dealt for exactly the
+lobby roster. A room that is *full but not yet started* is a softer state: that
+person keeps knocking, the host sees "somebody is waiting for a seat" with a
+**Make room** button, and raising the cap seats them on their next heartbeat with
+nobody reloading anything.
+
+**Hotseat is untouched** and deals immediately — there is nobody to wait for. So
+does a host resuming a snapshot.
+
+Two details worth keeping:
+
+- **The heartbeat hello does not carry the codex.** It is several hundred card
+  ids, repeated every four seconds, into a history every new arrival downloads.
+  It goes out on the first hello and again on a reclaim-hello fired the moment a
+  client sees `started: true` with its own seat in the list, which is where the
+  match actually needs it.
+- **`recordName` refuses a name another seat already holds.** Two friends who
+  never changed the default both arrive as "Player 1"; `disambiguate()` resolves
+  that at deal time, and without the guard the second one's refresh would undo it
+  and put two identically named players at one table.
+
+Code: `startLobbyHost()`, `startHost(relay, state, { seats, since })`,
+`LobbyPayload` / `isLobbyPayload` in `net/relay.ts`, `useGame`'s `phase`,
+`src/ui/Lobby.tsx`. Tests: `test/net-lobby.test.ts`, and the lobby steps in
+`e2e/multiplayer.spec.ts` (including a three-browser deal and a latecomer).

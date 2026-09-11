@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import { createMatch } from '@engine/index';
-import { buildShop, costOf, pileSizeFor, rarityPullWeight } from '@engine/shop';
+import {
+  PROPHET_SHOP_CARD_IDS,
+  buildShop,
+  costOf,
+  pileSizeFor,
+  rarityPullWeight,
+} from '@engine/shop';
 import { makeRng } from '@engine/rng';
 import { allCards, getCard } from '@engine/registry';
 import type { CardDefId, GameState, MatchConfig, PileId, Rarity } from '@engine/types';
@@ -175,6 +181,49 @@ describe('B45 - the Draft Shop is draftPileCount distinct piles', () => {
     expect(new Set(defIds).size).toBe(defIds.length);
     expect(built.shop.order.resource).toHaveLength(4);
     expect(built.shop.order.points).toHaveLength(3);
+  });
+});
+
+// --- SB-14 -----------------------------------------------------------------
+
+describe('SB-14 - the Prophet Shop is sampled, not stocked whole', () => {
+  test('SB-14: a match offers four Prophet piles, not the whole 23-card catalog', () => {
+    const purchasable = PROPHET_SHOP_CARD_IDS.filter((id) => getCard(id).notPurchasable !== true);
+    expect(purchasable).toHaveLength(23);
+    for (const seed of SEEDS) {
+      // Superseded: this used to be every purchasable Prophet card, every match.
+      expect(mkMatch(seed).shop.order.prophet).toHaveLength(4);
+    }
+  });
+
+  test('SB-14: no two Prophet Shop piles ever share a card definition', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const defIds = shopDefIds(mkMatch(seed), 'prophet');
+      expect(new Set(defIds).size).toBe(defIds.length);
+    }
+  });
+
+  test('SB-14: buildShop on a state with no shop produces the same four piles', () => {
+    const base = mkMatch(11);
+    const empty = clone(base);
+    empty.shop = {
+      piles: {},
+      order: { resource: [], points: [], prophet: [], draft: [] },
+      globalCostMods: [],
+    };
+    const built = buildShop(empty, makeRng(11, 0));
+    expect(built.shop.order.prophet).toHaveLength(4);
+    expect(shopDefIds(built, 'prophet')).toEqual(shopDefIds(base, 'prophet'));
+  });
+
+  test('SB-14: every sampled Prophet pile prints a Prophet price and none is a Token', () => {
+    for (const seed of SEEDS) {
+      for (const defId of shopDefIds(mkMatch(seed), 'prophet')) {
+        const def = getCard(defId);
+        expect(def.cost.prophet).toBeDefined();
+        expect(def.notPurchasable ?? false).toBe(false);
+      }
+    }
   });
 });
 

@@ -1,0 +1,249 @@
+/* The hand — the one row where a misread costs you a card.
+ *
+ * Everything here is scoped under `.hand` or `.hand-row` on purpose. This file
+ * is pulled in by `Hand.tsx`, so the bundler emits it *before* `styles.css` and
+ * `motion.css` (both imported from `main.tsx`, which evaluates `App` first).
+ * Source order would lose every tie, so the scoping doubles as the specificity
+ * that makes these rules win. Durations and easings still come from motion.css
+ * tokens — custom properties resolve by cascade, not by source order — with
+ * fallbacks so the row is never left mid-animation if that file moves.
+ */
+
+/* ------------------------------------------------------------ the row */
+
+/* Top padding is the headroom the row never had: cards lift on hover and the
+   keyboard cursor lifts too, and `overflow-x: auto` computes `overflow-y: auto`,
+   which clips anything rising past the padding edge rather than scrolling to
+   it. Without this the lift was quietly cropped.
+
+   `.hand .hand-row`, not a bare `.hand-row`: styles.css sets `padding: 6px 2px`
+   on the same selector and lands later in the bundle, so the shorthand would
+   reset this back to 6px on a source-order tie. Every other rule in this file
+   already carries a second class for that reason; this one had missed it. */
+.hand .hand-row {
+  align-items: stretch;
+  padding-top: 14px;
+}
+
+/* Fixed-width cards in a scrolling row. Same reason the play area pins its
+   cards: a flex item that shrinks turns a card name into one letter per line. */
+.hand-row > .hand-slot {
+  flex: 0 0 auto;
+  position: relative;
+  display: flex;
+}
+
+.hand-row > .hand-slot > .card {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------- playable vs. not ---
+ *
+ * The question the row has to answer before anything else is "what can I do
+ * with this card right now?". Playable cards carry the accent; the rest go
+ * quiet and grey. The difference is deliberately not just opacity — a dimmed
+ * card and a card behind a hover state look far too alike at a glance.
+ */
+
+.hand-row .card-playable.card-clickable {
+  border-color: rgb(127 212 160 / 55%);
+  box-shadow: inset 0 0 0 1px rgb(127 212 160 / 14%);
+}
+
+.hand-row .card-clickable {
+  cursor: pointer;
+}
+
+.hand-row .card-clickable:hover {
+  border-color: var(--accent);
+  box-shadow:
+    0 12px 26px rgb(0 0 0 / 50%),
+    0 0 0 1px rgb(127 212 160 / 45%);
+  transform: translateY(-8px) scale(1.03);
+  z-index: 4;
+}
+
+.hand-row .card-clickable:active {
+  transform: translateY(-3px) scale(0.995);
+}
+
+/* Not playable, but still yours to rearrange — so the cursor offers the
+   gesture that *is* available rather than a "no entry" sign. */
+.hand-row .card-disabled {
+  opacity: 0.5;
+  filter: grayscale(0.6);
+  cursor: grab;
+}
+
+.hand-row .card-disabled:active {
+  cursor: grabbing;
+}
+
+.hand-row .card-disabled:hover {
+  opacity: 0.72;
+  filter: grayscale(0.25);
+}
+
+/* The affordance for the click itself: what a click on this card will do,
+   said in words, on the cards where it will do it.
+
+   It sits over the top of the art rather than the middle of the card, because
+   hovering a card is also how you read it — a pill across the rules text would
+   be answering one question by hiding another. `pointer-events: none` keeps it
+   from ever standing between the player and the card it is advertising. */
+.hand-row .card-clickable::after {
+  content: "▶ PLAY";
+  position: absolute;
+  left: 50%;
+  top: 30px;
+  transform: translate(-50%, 5px) scale(0.94);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(18 20 26 / 88%);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--t-quick, 220ms) var(--e-out, ease-out),
+    transform var(--t-quick, 220ms) var(--e-out, ease-out);
+  z-index: 2;
+}
+
+.hand-row .card-clickable:hover::after,
+.hand-row .card-clickable:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+/* Nothing advertises a click while a card is being dragged. */
+.hand-row-dragging .card-clickable::after {
+  opacity: 0;
+}
+
+/* --------------------------------------------------------- the launch --
+ *
+ * A click is an irreversible action whose confirmation is a network round-trip
+ * away. The card answers immediately instead: it lifts out of the row, goes
+ * inert, and waits there until the host's view removes it.
+ */
+
+.hand-row .card-committed {
+  opacity: 0.45;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(127 212 160 / 35%);
+  pointer-events: none;
+  animation: hand-launch var(--t-move, 320ms) var(--e-out, ease-out) both;
+}
+
+@keyframes hand-launch {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-16px) scale(1.04);
+  }
+  100% {
+    opacity: 0.45;
+    transform: translateY(-10px) scale(0.97);
+  }
+}
+
+/* ------------------------------------------------------------ the drag --
+ *
+ * Reordering is gameplay here, so the drop target is a caret in the gap the
+ * card will land in — not a highlight on a neighbour, which leaves "before or
+ * after this one?" for the player to guess. The caret is drawn with
+ * pseudo-elements and absolute positioning: nothing in the row moves during a
+ * drag, so the geometry the drop is computed from stays true while the pointer
+ * is over it.
+ */
+
+.hand-row .hand-slot-dragging .card {
+  opacity: 0.3;
+  filter: grayscale(0.5);
+  box-shadow: none;
+}
+
+/* The old whole-slot nudge would shift the row out from under the pointer. */
+.hand-row .hand-slot-over {
+  transform: none;
+}
+
+.hand-row .hand-slot-drop-before::before,
+.hand-row .hand-slot-drop-after::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent-2);
+  box-shadow: 0 0 10px rgb(240 198 116 / 65%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.hand-row .hand-slot-drop-before::before {
+  left: -6px;
+}
+
+.hand-row .hand-slot-drop-after::after {
+  right: -6px;
+}
+
+/* The reorder controls. The grip is a label, not a handle — the whole card
+   drags — so it must not eat the pointer on its way to the card. */
+.hand-nudge .hand-grip {
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -0.1em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hand-row .hand-slot:hover .hand-grip {
+  color: var(--accent-2);
+}
+
+/* ---------------------------------------------------------- the header */
+
+.hand-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.hand-status-yours {
+  border-color: rgb(127 212 160 / 45%);
+  color: var(--accent);
+}
+
+.hand-status[data-playable-count="0"].hand-status-yours {
+  border-color: var(--line);
+  color: var(--ink-dim);
+}
+
+/* The hint is the keyboard path's only signpost, so it never disappears — it
+   only gets out of the way when the row is narrow. */
+.hand-head {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .hand-hint {
+    display: none;
+  }
+}

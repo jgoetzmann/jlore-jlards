@@ -207,10 +207,23 @@ test.describe('visual record', () => {
       await host.getByTestId('create-room').click();
       await expect.poll(async () => new URL(host.url()).hash).not.toBe('');
       const code = new URL(host.url()).hash.replace(/^#/, '');
-      await expect(host.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+
+      // A room is a lobby before it is a match, and the lobby is a screen a
+      // player can spend half a minute on, so it belongs in the visual record.
+      await expect(host.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
       await host.waitForLoadState('networkidle').catch(() => undefined);
+      await host.screenshot({ path: `${OUT}/19a-lobby-host.png` });
+      console.log(`shot: ${OUT}/19a-lobby-host.png`);
 
       await guest.goto(`/#${code}`);
+      await expect(guest.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
+      await expect(host.getByTestId('lobby-player')).toHaveCount(2, { timeout: 30_000 });
+      await host.screenshot({ path: `${OUT}/19b-lobby-filling.png` });
+      console.log(`shot: ${OUT}/19b-lobby-filling.png`);
+
+      await host.getByTestId('lobby-start').click();
+      await expect(host.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await host.waitForLoadState('networkidle').catch(() => undefined);
       await expect(guest.getByTestId('table')).toBeVisible({ timeout: 30_000 });
       await guest.waitForLoadState('networkidle').catch(() => undefined);
 

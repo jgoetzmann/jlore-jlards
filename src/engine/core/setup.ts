@@ -18,7 +18,7 @@ import type {
 } from '@engine/types';
 import { makeRng } from '@engine/rng';
 import { allCards } from '@engine/registry';
-import { buildShop } from '@engine/shop';
+import { DEFAULT_PROPHET_PILE_COUNT, buildShop } from '@engine/shop';
 import { applyAnomalySetup, rollAnomaly } from '@engine/meta';
 import { appendLog } from './log.js';
 import { createInstance, shuffleLibrary, drawCards } from './zones.js';
@@ -32,6 +32,11 @@ export function defaultMatchConfig(playerCount: number): MatchConfig {
   return {
     playerCount,
     draftPileCount: 10, // SB-10
+    // SB-14 (revised): the Prophet Shop is sampled, not fully stocked.
+    // `buildShop` carries the same default; this is here so a caller that
+    // reads the config back sees the number the match actually used, and so
+    // a count handed to `createMatch` survives normalizeConfig.
+    prophetPileCount: DEFAULT_PROPHET_PILE_COUNT,
     // Gameplay doc 8.1: the source roll is 50% standard / 20% Anomalous /
     // 20% Formational / 10% Chaotic. Formations are out of scope this pass, and
     // the two anomaly-bearing rolls (Anomalous + Chaotic) sum to 30% — "the
@@ -57,6 +62,7 @@ function normalizeConfig(config: MatchConfig, playerCount: number): MatchConfig 
   return {
     playerCount: config?.playerCount ?? playerCount,
     draftPileCount: config?.draftPileCount ?? base.draftPileCount,
+    prophetPileCount: config?.prophetPileCount ?? base.prophetPileCount,
     anomalyChance: config?.anomalyChance ?? base.anomalyChance,
     winCondition: {
       kind: wc.kind ?? 'standard',

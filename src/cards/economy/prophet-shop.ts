@@ -2,7 +2,10 @@
  * A.3 Prophet Shop — all 24 entries.
  *
  * Every purchasable card here has `cost.prophet = { threshold, drain }` and
- * `shop: 'prophet'` (B99). All 24 are present in every match (SB-14).
+ * `shop: 'prophet'` (B99). This file is the *pool*, not the board: a match
+ * samples `config.prophetPileCount` of the 23 purchasable entries, stratified
+ * by threshold (SB-14 revised). Doomsday Button is the 24th and is generated
+ * only, never stocked.
  * Each carries the subtype 'Prophet' so cards that fish the Prophet menu
  * (Kwzki High Council Consultant) have a filterable handle.
  *

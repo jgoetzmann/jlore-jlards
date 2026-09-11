@@ -23,6 +23,7 @@ import type {
 } from '@engine/types';
 import { createMatch, finalScores, isGameOver, reduce } from '@engine/index';
 import { countdownTarget } from '@engine/meta';
+import { DEFAULT_PROPHET_PILE_COUNT } from '@engine/shop';
 import { botAction } from './bot';
 
 /** Hard turn ceiling for a simulated match (B112). */
@@ -66,6 +67,9 @@ export interface DetailedMatchResult extends MatchResult {
 export const DEFAULT_SIM_CONFIG: MatchConfig = {
   playerCount: 2,
   draftPileCount: 10,
+  // SB-14 (revised): four sampled Prophet piles, the number a real match gets.
+  // This is also the knob SB-14's REVISIT names, so a balance run can sweep it.
+  prophetPileCount: DEFAULT_PROPHET_PILE_COUNT,
   // Must track `defaultMatchConfig` — balance numbers measured at a different
   // anomaly rate than the game actually plays at describe a different game.
   anomalyChance: 0.3,
@@ -92,6 +96,10 @@ export function simConfig(playerCount: number, overrides?: Partial<MatchConfig>)
   return {
     playerCount,
     draftPileCount: overrides && overrides.draftPileCount !== undefined ? overrides.draftPileCount : base.draftPileCount,
+    prophetPileCount:
+      overrides && overrides.prophetPileCount !== undefined
+        ? overrides.prophetPileCount
+        : base.prophetPileCount,
     anomalyChance: overrides && overrides.anomalyChance !== undefined ? overrides.anomalyChance : base.anomalyChance,
     winCondition: {
       kind: win.kind,

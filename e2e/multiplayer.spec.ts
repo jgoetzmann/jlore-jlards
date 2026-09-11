@@ -37,6 +37,47 @@ async function roomCodeOf(page: Page): Promise<string> {
   return new URL(page.url()).hash.replace(/^#/, '');
 }
 
+/** Create a room and wait for its lobby. No cards exist yet at this point. */
+async function openRoom(page: Page): Promise<string> {
+  await page.goto('/');
+  await page.getByTestId('create-room').click();
+  const code = await roomCodeOf(page);
+  await expect(page.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
+  return code;
+}
+
+/**
+ * Open a room, get everybody into it, and deal.
+ *
+ * A room is a lobby before it is a match, so this is no longer "click create and
+ * wait for a table": the host opens the room, the guests arrive *into the
+ * lobby*, and the host deals only once the roster actually holds them. The
+ * `lobby-player` count is the assertion worth having -- it is the one that would
+ * have caught the bug this screen replaced, where a match was dealt for a number
+ * guessed on the start screen and a guest arriving afterwards had no seat.
+ */
+async function dealRoom(host: Page, guests: Page[]): Promise<string> {
+  const code = await openRoom(host);
+  const seats = guests.length + 1;
+
+  // Raise the cap before anyone knocks, so nobody is turned away and then let
+  // back in on a heartbeat. A room starts at the 2 seats the start screen offers.
+  if (seats > 2) {
+    await host.locator(`[data-testid="lobby-seat-cap"][data-cap="${seats}"]`).click();
+    await expect(host.getByTestId('lobby-count')).toContainText(`/ ${seats}`);
+  }
+
+  for (const guest of guests) await guest.goto(`/#${code}`);
+  await expect(host.getByTestId('lobby-player')).toHaveCount(seats, { timeout: 30_000 });
+
+  await host.getByTestId('lobby-start').click();
+  await expect(host.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+  for (const guest of guests) {
+    await expect(guest.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+  }
+  return code;
+}
+
 /**
  * Answer a pending prompt so play can continue.
  *
@@ -78,17 +119,22 @@ test.describe('two chromium players over the relay', () => {
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-
-      const code = await roomCodeOf(host.page);
+      // The host opens a room. Nothing is dealt yet: this is a lobby.
+      const code = await openRoom(host.page);
       expect(code).toMatch(/^[A-Z0-9]{3,}$/);
+      await expect(host.page.getByTestId('lobby-code')).toHaveText(code);
+      await expect(host.page.getByTestId('lobby-player')).toHaveCount(1);
 
-      // The host deals and shows a table.
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-
-      // A completely separate browser joins by URL.
+      // A completely separate browser joins by URL and lands in the same lobby,
+      // where the host can watch them arrive.
       await guest.page.goto(`/#${code}`);
+      await expect(guest.page.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
+      await expect(guest.page.getByTestId('lobby-waiting')).toBeVisible({ timeout: 30_000 });
+      await expect(host.page.getByTestId('lobby-player')).toHaveCount(2, { timeout: 30_000 });
+
+      // Only now are cards dealt, and for exactly these two.
+      await host.page.getByTestId('lobby-start').click();
+      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
       await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
 
       // Both are in the same match: same turn number.
@@ -127,13 +173,7 @@ test.describe('two chromium players over the relay', () => {
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-      const code = await roomCodeOf(host.page);
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-
-      await guest.page.goto(`/#${code}`);
-      await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await dealRoom(host.page, [guest.page]);
 
       // B1: five cards each, seen only by their owner — absent an anomaly, which
       // may legitimately change the draw (B85).
@@ -168,13 +208,7 @@ test.describe('two chromium players over the relay', () => {
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-      const code = await roomCodeOf(host.page);
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-
-      await guest.page.goto(`/#${code}`);
-      await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await dealRoom(host.page, [guest.page]);
 
       // The guest's own hand, by instance id — the ids that must never reach the host.
       const guestHandIids = await guest.page
@@ -231,12 +265,7 @@ test.describe('two chromium players over the relay', () => {
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-      const code = await roomCodeOf(host.page);
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-      await guest.page.goto(`/#${code}`);
-      await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await dealRoom(host.page, [guest.page]);
 
       // Whoever is to move plays a Copper.
       const hostId = await host.page.getByTestId('you-are').getAttribute('data-you-id');
@@ -287,12 +316,7 @@ test.describe('two chromium players over the relay', () => {
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-      const code = await roomCodeOf(host.page);
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-      await guest.page.goto(`/#${code}`);
-      await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await dealRoom(host.page, [guest.page]);
 
       const startTurn = Number(await host.page.getByTestId('turn-number').textContent());
 
@@ -344,18 +368,62 @@ test.describe('two chromium players over the relay', () => {
     }
   });
 
+  test('three browsers deal together, and three seats come out of it', async ({ browser }) => {
+    test.setTimeout(180_000);
+    const host = await openSeat(browser, 'host');
+    const a = await openSeat(browser, 'guest-a');
+    const b = await openSeat(browser, 'guest-b');
+
+    try {
+      // This is the case the lobby exists for. The old flow dealt for a number
+      // picked before anybody had arrived, so a third player had no seat at all.
+      await dealRoom(host.page, [a.page, b.page]);
+
+      const ids = await Promise.all(
+        [host, a, b].map((s) => s.page.getByTestId('you-are').getAttribute('data-you-id')),
+      );
+      expect(new Set(ids).size, 'three browsers, three distinct seats').toBe(3);
+
+      // Each of them sees the other two across the table, and no cards of theirs.
+      for (const seat of [host, a, b]) {
+        await expect(seat.page.getByTestId('opponent')).toHaveCount(2, { timeout: 30_000 });
+        await expect(seat.page.getByTestId('opponents').getByTestId('card')).toHaveCount(0);
+      }
+    } finally {
+      for (const seat of [host, a, b]) await seat.ctx.close().catch(() => undefined);
+    }
+  });
+
+  test('a browser that arrives after the deal is told so, not left spinning', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const host = await openSeat(browser, 'host');
+    const guest = await openSeat(browser, 'guest');
+    const late = await openSeat(browser, 'late');
+
+    try {
+      const code = await dealRoom(host.page, [guest.page]);
+
+      // The match was dealt for two, and this browser is not one of them. The
+      // answer has to be definite: the failure being fixed is a person sitting
+      // on "Joining…" with no information until they give up.
+      await late.page.goto(`/#${code}`);
+      const lobby = late.page.getByTestId('lobby');
+      await expect(lobby).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(async () => lobby.getAttribute('data-lobby-state'), { timeout: 30_000 })
+        .toBe('missed');
+      await expect(late.page.getByTestId('table')).toHaveCount(0);
+    } finally {
+      for (const seat of [host, guest, late]) await seat.ctx.close().catch(() => undefined);
+    }
+  });
+
   test('a refresh puts a player back in the same seat', async ({ browser }) => {
     const host = await openSeat(browser, 'host');
     const guest = await openSeat(browser, 'guest');
 
     try {
-      await host.page.goto('/');
-      await host.page.getByTestId('create-room').click();
-      const code = await roomCodeOf(host.page);
-      await expect(host.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
-
-      await guest.page.goto(`/#${code}`);
-      await expect(guest.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await dealRoom(host.page, [guest.page]);
       const seatBefore = await guest.page.getByTestId('you-are').getAttribute('data-you-id');
 
       await guest.page.reload();

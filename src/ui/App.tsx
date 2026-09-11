@@ -1,9 +1,13 @@
 /**
  * Routes on the URL hash.
  *
- *   (no hash)  start screen — create a room and seed a match, or go hotseat
+ *   (no hash)  start screen — open a room and wait for people, or go hotseat
  *   #hotseat   a local match on `makeLocalRelay`, no network at all
- *   #CODE      join that room (host if this browser is the one that made it)
+ *   #CODE      that room: its lobby first, then the table
+ *
+ * A networked room is a lobby before it is a match. Cards are dealt when the
+ * host presses Start, for the people who are in the room at that moment —
+ * never for a number picked on the start screen before anyone had arrived.
  */
 
 import React from 'react';
@@ -11,6 +15,7 @@ import type { CardView, GameAction, GameState, GameView, PlayerId } from '@engin
 import { makeRoomCode } from '@net/relay';
 import { getSeatId, getSettings, setSettings, loadSnapshot, clearSnapshot } from '@net/storage';
 import { useGame, type GameMode } from './useGame';
+import { Lobby } from './Lobby';
 import { Board } from './Board';
 import { Hand } from './Hand';
 import { Field } from './Field';
@@ -19,6 +24,9 @@ import { TurnBar } from './TurnBar';
 import { PromptOverlay } from './PromptOverlay';
 import { Card } from './Card';
 import { Opponents } from './Opponents';
+
+/** A room opens at the full table; the lobby narrows it if the host wants. */
+const MAX_ROOM_SEATS = 4;
 
 type Route =
   | { kind: 'start' }
@@ -83,20 +91,31 @@ function StartScreen({
       </label>
 
       <label className="start-field">
-        <span>Players</span>
+        <span>Hotseat seats</span>
         <select value={players} onChange={(e) => setPlayers(Number(e.target.value))}>
           <option value={2}>2</option>
           <option value={3}>3</option>
           <option value={4}>4</option>
         </select>
       </label>
+      <p className="start-hint">
+        How many seats Hotseat deals — everyone on this one screen, taking turns.
+        A room opens with all four seats instead, so anyone you send the link to
+        can walk in; narrow it from the lobby if you want a smaller table.
+        Nothing is dealt until the host starts it.
+      </p>
 
       <div className="start-actions">
         <button
           type="button"
           className="primary"
           data-testid="create-room"
-          onClick={() => onHost(makeRoomCode(), players)}
+          // A room opens at the full table. Seeding it from the Seats control
+          // meant the host had to predict the turnout before anyone arrived —
+          // the flaw the lobby exists to remove. Three friends following a link
+          // would find the third knocking at a two-seat room. The lobby's own
+          // cap control narrows it, which is the right place for that choice.
+          onClick={() => onHost(makeRoomCode(), MAX_ROOM_SEATS)}
         >
           Create a room
         </button>
@@ -148,11 +167,66 @@ function StartScreen({
       )}
 
       <p className="start-note">
-        Hotseat needs no relay: it plays entirely in this tab, with every seat getting its own
-        filtered view.
+        Creating a room opens a lobby — you get a code to paste into the call, and you
+        deal once everyone is actually in it. Hotseat needs no relay at all: it plays
+        entirely in this tab, with every seat getting its own filtered view.
       </p>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Which rooms this tab is hosting
+// ---------------------------------------------------------------------------
+
+/**
+ * A lobby is a place people linger, and lingering means refreshing. Hosting
+ * lives in React state, so without this a host who reloads while waiting comes
+ * back as a guest of their own room and everybody in it waits forever.
+ *
+ * `sessionStorage`, not the cookie or `localStorage` in `@net/storage`: this is
+ * a per-tab fact about a room that has not started, it must never ride a relay
+ * request, and it must not outlive the tab. The entry is dropped the moment
+ * cards are dealt — from then on the honest answer to a host reload is the
+ * snapshot resume on the start screen, not a second lobby over a live match.
+ */
+const OPEN_LOBBIES_KEY = 'jlore_open_lobbies';
+
+function readOpenLobbies(): Record<string, number> {
+  try {
+    if (typeof sessionStorage === 'undefined') return {};
+    const raw = sessionStorage.getItem(OPEN_LOBBIES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, number> = {};
+    for (const [code, n] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof n === 'number' && Number.isFinite(n)) out[code] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeOpenLobbies(value: Record<string, number>): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem(OPEN_LOBBIES_KEY, JSON.stringify(value));
+  } catch {
+    /* private mode; a host who reloads simply loses the room, as before */
+  }
+}
+
+function rememberOpenLobby(code: string, seatCap: number): void {
+  writeOpenLobbies({ ...readOpenLobbies(), [code]: seatCap });
+}
+
+function forgetOpenLobby(code: string): void {
+  const all = readOpenLobbies();
+  if (!(code in all)) return;
+  delete all[code];
+  writeOpenLobbies(all);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,15 +255,26 @@ function Table({
   seatId,
   playerCount,
   resumeState,
+  onDealt,
 }: {
   mode: GameMode;
   code: string | null;
   seatId: string;
   playerCount: number;
   resumeState: GameState | null;
+  onDealt?: () => void;
 }): JSX.Element {
   const session = useGame({ mode, roomCode: code, seatId, playerCount, resumeState });
   const view = session.view;
+
+  // Fires once, when this room stops being a lobby and becomes a match.
+  const phase = session.phase;
+  const dealtRef = React.useRef(false);
+  React.useEffect(() => {
+    if (phase !== 'playing' || dealtRef.current) return;
+    dealtRef.current = true;
+    if (onDealt) onDealt();
+  }, [phase, onDealt]);
 
   const names = React.useMemo(() => {
     const out: Record<PlayerId, string> = {};
@@ -221,11 +306,25 @@ function Table({
     );
   }
 
+  // No match yet: this is a room with people arriving in it.
+  if (session.phase === 'lobby' && session.lobby) {
+    return (
+      <Lobby
+        info={session.lobby}
+        onStart={session.startMatch}
+        onSeatCap={session.setSeatCap}
+        onLeave={() => {
+          window.location.hash = '';
+        }}
+      />
+    );
+  }
+
   if (!view) {
     return (
       <div className="connecting" data-testid="connecting">
         <div className="prompt-spinner" aria-hidden="true" />
-        <h2>{mode === 'join' ? 'Joining' : 'Dealing'}…</h2>
+        <h2>{mode === 'join' ? 'Taking your seat' : 'Dealing'}…</h2>
         {code && <p className="room-code">Room {code}</p>}
       </div>
     );
@@ -345,11 +444,14 @@ function Table({
 export function App(): JSX.Element {
   const route = useHashRoute();
   const seatId = React.useMemo(() => getSeatId(), []);
-  const [hostedRooms, setHostedRooms] = React.useState<Record<string, number>>({});
+  const [hostedRooms, setHostedRooms] = React.useState<Record<string, number>>(() =>
+    readOpenLobbies(),
+  );
   const [resumeState, setResumeState] = React.useState<GameState | null>(null);
 
   function host(code: string, playerCount: number): void {
     setHostedRooms((prev) => ({ ...prev, [code]: playerCount }));
+    rememberOpenLobby(code, playerCount);
     window.location.hash = `#${code}`;
   }
 
@@ -377,13 +479,15 @@ export function App(): JSX.Element {
   }
 
   const hosted = Object.prototype.hasOwnProperty.call(hostedRooms, route.code);
+  const code = route.code;
   return (
     <Table
       mode={hosted ? 'host' : 'join'}
-      code={route.code}
+      code={code}
       seatId={seatId}
-      playerCount={hosted ? hostedRooms[route.code] : 2}
+      playerCount={hosted ? hostedRooms[code] : 2}
       resumeState={hosted ? resumeState : null}
+      onDealt={() => forgetOpenLobby(code)}
     />
   );
 }
