@@ -17,9 +17,19 @@ import type { RelayMessage } from '@engine/types';
 export interface StreamHandlers {
   /** New entries, in order. */
   onMessages(msgs: RelayMessage[]): void;
-  /** The first byte arrived: the push path works. */
+  /**
+   * The first byte arrived. That proves only that the response is not
+   * buffered, not that the push path works: the server writes it before it
+   * subscribes upstream.
+   */
   onOpen(): void;
-  /** The server closed the stream on purpose (its time budget). Reopen now. */
+  /**
+   * Proof the push path works: the server confirmed its subscription
+   * (`: ready`), sent a heartbeat (it only does so once subscribed), or
+   * delivered an entry.
+   */
+  onLive?(): void;
+  /** The server closed the stream on purpose (its time budget). */
   onEnd(): void;
   /** The stream failed or went silent. */
   onError(err: unknown): void;
@@ -57,6 +67,16 @@ export const STREAM_SILENCE_MS = 25000;
 /** Consecutive stream failures before falling back to polling for a while. */
 export const STREAM_MAX_FAILURES = 3;
 export const STREAM_RETRY_AFTER_MS = 60000;
+/**
+ * A stream clears the failure count only once it has proved the push path
+ * (confirmed subscription, heartbeat or entry) AND either lived this long or
+ * delivered an entry. A stream that opens and dies at once — an upstream
+ * SUBSCRIBE that is refused, or that closes right after confirming — never
+ * clears it, so three of those in a row fall back to polling (NET-R1).
+ */
+export const STREAM_HEALTHY_MS = 5000;
+/** Never reopen a stream sooner than this after the previous one opened. */
+export const STREAM_MIN_REOPEN_MS = 1000;
 
 /** A local relay additionally lets readers subscribe instead of ticking. */
 export interface LocalRelay extends Relay {
@@ -213,8 +233,15 @@ export function makeRelay(roomCode: string, seatId: string, options: HttpRelayOp
     live.add(controller);
     let closed = false;
     let opened = false;
+    let proven = false;
     let bye = false;
+    let errored: string | null = null;
     let silence: ReturnType<typeof setTimeout> | null = null;
+    const markLive = (): void => {
+      if (proven) return;
+      proven = true;
+      if (h.onLive) h.onLive();
+    };
 
     const fail = (err: unknown): void => {
       if (closed) return;
@@ -280,7 +307,11 @@ export function makeRelay(roomCode: string, seatId: string, options: HttpRelayOp
             let event = 'message';
             let data = '';
             for (const line of block.split('\n')) {
-              if (line.startsWith(':')) continue;
+              if (line.startsWith(':')) {
+                const note = line.slice(1).trim();
+                if (note === 'ready' || note === 'hb') markLive();
+                continue;
+              }
               const colon = line.indexOf(':');
               const field = colon < 0 ? line : line.slice(0, colon);
               const val = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
@@ -297,10 +328,14 @@ export function makeRelay(roomCode: string, seatId: string, options: HttpRelayOp
                 /* a torn event is skipped; the next backlog read covers it */
               }
             } else if (event === 'error') {
-              bye = false;
+              // Always a failure, whatever else the stream said (NET-R1).
+              errored = data || 'error';
             }
           }
-          if (batch.length > 0) h.onMessages(batch);
+          if (batch.length > 0) {
+            markLive();
+            h.onMessages(batch);
+          }
         }
       } catch (err) {
         fail(err);
@@ -308,7 +343,8 @@ export function makeRelay(roomCode: string, seatId: string, options: HttpRelayOp
       }
       if (closed) return;
       close();
-      if (bye) h.onEnd();
+      if (errored !== null) h.onError(new Error(`stream_error: ${errored}`));
+      else if (bye) h.onEnd();
       else h.onError(new Error('stream_ended'));
     })();
 
@@ -400,6 +436,9 @@ export interface PollOptions {
   live?: () => boolean;
   /** Use the push path when the relay has one. Default true. */
   stream?: boolean;
+  /** Tests with short-lived streams shorten these. */
+  streamHealthyMs?: number;
+  streamMinReopenMs?: number;
 }
 
 function documentHidden(): boolean {
@@ -522,6 +561,12 @@ export function startPolling(
   let streamFailures = 0;
   let streamRetryAt = 0;
   let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+  const healthyMs = options.streamHealthyMs ?? STREAM_HEALTHY_MS;
+  const minReopenMs = options.streamMinReopenMs ?? STREAM_MIN_REOPEN_MS;
+  /** The current stream: when it was opened, and what it has proved. */
+  let streamOpenedAt = 0;
+  let streamLive = false;
+  let streamDelivered = false;
 
   const goHot = (): void => {
     hotUntil = Date.now() + POLL_HOT_WINDOW_MS;
@@ -567,44 +612,76 @@ export function startPolling(
   }
 
   // -- push --
+  /** Did the stream that just ended prove the push path works? */
+  function streamWasHealthy(): boolean {
+    if (!streamLive) return false;
+    return streamDelivered || Date.now() - streamOpenedAt >= healthyMs;
+  }
+
+  function reopenAfter(ms: number): void {
+    if (reopenTimer) clearTimeout(reopenTimer);
+    // Never faster than one open per `minReopenMs`, whatever the reason.
+    const wait = Math.max(ms, streamOpenedAt + minReopenMs - Date.now(), 0);
+    reopenTimer = setTimeout(() => {
+      reopenTimer = null;
+      if (mode === 'stream') openStream();
+    }, wait);
+  }
+
+  function streamFailed(err: unknown): void {
+    if (onError) onError(err);
+    if (streamWasHealthy()) streamFailures = 0;
+    streamFailures += 1;
+    if (streamFailures >= STREAM_MAX_FAILURES) {
+      // The push path is not working here. Poll, and try it again later.
+      mode = 'poll';
+      streamRetryAt = Date.now() + STREAM_RETRY_AFTER_MS;
+      run();
+      return;
+    }
+    // Catch up with one read while the stream comes back.
+    run();
+    reopenAfter(250 * streamFailures);
+  }
+
   function openStream(): void {
     if (stopped || idle || !relay.stream) return;
     if (closeStream) closeStream();
+    streamOpenedAt = Date.now();
+    streamLive = false;
+    streamDelivered = false;
     closeStream = relay.stream(cursor, {
       onMessages(msgs) {
         if (stopped) return;
         if (deliver(msgs)) {
+          streamDelivered = true;
           lastActivity = Date.now();
           goHot();
         }
       },
       onOpen() {
-        streamFailures = 0;
+        /* only the first byte: not proof of anything (NET-R1) */
+      },
+      onLive() {
+        streamLive = true;
       },
       onEnd() {
         closeStream = null;
         if (stopped || idle) return;
+        if (!streamWasHealthy()) {
+          // Ended "cleanly" before it proved anything: the upstream
+          // subscription closed as soon as it opened. That is a failure.
+          streamFailed(new Error('stream_ended_early'));
+          return;
+        }
+        streamFailures = 0;
         if (checkIdle()) return;
-        openStream();
+        reopenAfter(0);
       },
       onError(err) {
         closeStream = null;
         if (stopped || idle) return;
-        if (onError) onError(err);
-        streamFailures += 1;
-        if (streamFailures >= STREAM_MAX_FAILURES) {
-          // The push path is not working here. Poll, and try it again later.
-          mode = 'poll';
-          streamRetryAt = Date.now() + STREAM_RETRY_AFTER_MS;
-          run();
-          return;
-        }
-        // Catch up with one read while the stream comes back.
-        run();
-        reopenTimer = setTimeout(() => {
-          reopenTimer = null;
-          if (mode === 'stream') openStream();
-        }, 250 * streamFailures);
+        streamFailed(err);
       },
     });
   }

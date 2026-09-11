@@ -228,7 +228,9 @@ function sseEvent(msg: RelayMessage): string {
  * Server-sent events for one room, from `since` on.
  *
  * Subscribe first, then read the backlog, so nothing appended in between is
- * missed. Each notification reads the list from the cursor; a notification that
+ * missed. `: open` is written at once (a buffering platform shows up as its
+ * absence); `: ready` only once the subscription has confirmed. Each
+ * notification reads the list from the cursor; a notification that
  * arrives mid-read makes the read run once more instead of racing it. Ends with
  * `event: bye` after `maxMs` so it fits the platform's duration cap; the client
  * reopens from its cursor. Any failure writes `event: error` and ends, which
@@ -336,6 +338,11 @@ export async function streamRoom(
       }
     }
     if (!done) {
+      // The subscription is confirmed: this, not `: open`, is what tells the
+      // client the push path works. A client that only ever sees `: open`
+      // followed by an error keeps counting failures and falls back to polling
+      // (NET-R1); resetting on the first byte would retry forever.
+      safeWrite(`: ready\n\n`);
       await pump();
       heartbeat = setInterval(() => safeWrite(`: hb\n\n`), heartbeatMs);
       deadline = setTimeout(end, maxMs);

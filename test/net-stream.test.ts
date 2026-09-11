@@ -93,6 +93,30 @@ describe('streamRoom', () => {
     expect(chunks.join('')).not.toContain('event: bye');
   });
 
+  test('NET-R1: `: ready` is written only once the upstream subscription confirms', async () => {
+    const ok = makeMemoryStore();
+    const good: string[] = [];
+    await streamRoom('STRM04', 0, ok, { write: (c) => good.push(c), signal: new AbortController().signal }, { maxMs: 50 });
+    const g = good.join('');
+    expect(g.indexOf(': open')).toBeLessThan(g.indexOf(': ready'));
+
+    const mem = makeMemoryStore();
+    const refusing: RoomStore = {
+      append: mem.append,
+      lrange: mem.lrange,
+      llen: mem.llen,
+      async subscribe() {
+        throw new Error('upstash_subscribe_401');
+      },
+    };
+    const bad: string[] = [];
+    await streamRoom('STRM05', 0, refusing, { write: (c) => bad.push(c), signal: new AbortController().signal });
+    const b = bad.join('');
+    expect(b.startsWith(': open')).toBe(true); // the first byte still goes out at once
+    expect(b).toContain('event: error');
+    expect(b).not.toContain(': ready');
+  });
+
   test('GET since=end reports the tail without the history (NET-8)', async () => {
     const store = makeMemoryStore();
     for (let i = 0; i < 4; i++) await handleRoomRequest('POST', 'TAIL01', env('a', i), undefined, store);
@@ -304,6 +328,100 @@ describe('a real client over the dev middleware', () => {
       await new Promise<void>((r) => hang.close(() => r()));
     }
   }, 10000);
+});
+
+describe('NET-R1: a stream that opens and then fails falls back to polling', () => {
+  async function serve(store: RoomStore, timing?: { maxMs?: number; heartbeatMs?: number }) {
+    const mw = relayMiddleware({ store, timing });
+    const counts = { stream: 0, poll: 0 };
+    const server = http.createServer((req, res) => {
+      if ((req.url ?? '').includes('stream=1')) counts.stream++;
+      else if (req.method === 'GET') counts.poll++;
+      mw(req, res, () => {
+        res.statusCode = 404;
+        res.end();
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const close = () =>
+      new Promise<void>((r) => {
+        server.closeAllConnections?.();
+        server.close(() => r());
+      });
+    return { base, counts, close };
+  }
+
+  function withSubscribe(subscribe: RoomStore['subscribe']): RoomStore {
+    const mem = makeMemoryStore();
+    return { append: mem.append, lrange: mem.lrange, llen: mem.llen, subscribe };
+  }
+
+  const cases: [string, RoomStore['subscribe']][] = [
+    // The reviewer's repro: the server has already written `: open` when this fails.
+    [
+      'is refused',
+      async () => {
+        throw new Error('upstash_subscribe_401');
+      },
+    ],
+    // Confirms, then the upstream connection ends at once: the server says `bye`.
+    ['closes as soon as it confirms', async () => ({ closed: Promise.resolve() })],
+  ];
+
+  for (const [label, subscribe] of cases) {
+    test(`an upstream SUBSCRIBE that ${label}: polls within seconds, then stops opening streams`, async () => {
+      const srv = await serve(withSubscribe(subscribe));
+      const code = `FLAP${Date.now().toString(36)}${label.length}`;
+      const writer = makeRelay(code, 'w', { base: srv.base, stream: false });
+      await writer.post(env('w', 1));
+      const reader = makeRelay(code, 'r', { base: srv.base });
+      const got: RelayMessage[] = [];
+      const loop = startPolling(reader, 0, (m) => got.push(...m), () => {}, { live: () => true });
+      try {
+        expect(await until(() => loop.mode() === 'poll', 5000)).toBe(true);
+        const streamsAtFallback = srv.counts.stream;
+        // Three failures and out; a first stream that delivered backlog may add one.
+        expect(streamsAtFallback).toBeLessThanOrEqual(4);
+        await new Promise((r) => setTimeout(r, 1500));
+        expect(loop.mode()).toBe('poll');
+        expect(srv.counts.stream).toBe(streamsAtFallback);
+        // And the table still hears everything.
+        await writer.post(env('w', 2));
+        expect(await until(() => got.length >= 2, 4000)).toBe(true);
+        expect(got.map((m) => m.seq)).toEqual([1, 2]);
+      } finally {
+        loop.stop();
+        reader.stop();
+        writer.stop();
+        await srv.close();
+      }
+    }, 15000);
+  }
+
+  test('a healthy but quiet stream stays on push across the server ending it', async () => {
+    const srv = await serve(makeMemoryStore(), { maxMs: 300, heartbeatMs: 1000 });
+    const code = `QUIET${Date.now().toString(36)}`;
+    const writer = makeRelay(code, 'w', { base: srv.base, stream: false });
+    await writer.post(env('w', 1));
+    const reader = makeRelay(code, 'r', { base: srv.base });
+    const loop = startPolling(reader, 1, () => {}, () => {}, {
+      live: () => true,
+      streamHealthyMs: 200,
+      streamMinReopenMs: 50,
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 1600));
+      expect(loop.mode()).toBe('stream');
+      expect(srv.counts.stream).toBeGreaterThanOrEqual(3); // it did reopen after each bye
+      expect(srv.counts.poll).toBe(0);
+    } finally {
+      loop.stop();
+      reader.stop();
+      writer.stop();
+      await srv.close();
+    }
+  });
 });
 
 describe('the poll loop', () => {
