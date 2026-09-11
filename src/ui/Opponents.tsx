@@ -1,42 +1,36 @@
 /**
- * The other seats at the table.
+ * The other seats at the table, as a strip across the top of the board (SB-63,
+ * LAY-8).
  *
- * This used to be a scoreboard row — name, then four glyphs. You could read an
- * opponent's numbers off it and still have no idea what they had just done. The
- * point of this panel is the opposite: it should read like looking across a
- * table. Their played cards are face up in front of them, their discard shows
- * its top card, their deck is a stack you can judge the thickness of, and their
- * hand is a fan of backs you can count but not read.
+ * Each seat is one compact row, about 52px tall: avatar, name, a turn or
+ * deciding badge, VP and Prophet, hand / deck / discard counts, and the last
+ * thing they did on one line. Clicking a seat opens its tableau *in flow*
+ * below the strip — the strip's grid row grows and pushes the board down.
+ * Nothing overlays anything, so no click is ever lost to this panel.
  *
  * ## Hidden information
  *
  * Everything here comes out of `GameView.others`, which `viewFor` has already
  * stripped: `handCount` and `libraryCount` are numbers, and `play` / `gy` are
  * public zones that legitimately carry full `CardView`s. The hand fan is drawn
- * from the *count* — they are decorative backs with no identity behind them, not
- * hidden card faces. Nothing in this file can reach a card the view did not
- * already ship.
+ * from the *count* — they are decorative backs with no identity behind them.
  *
- * The activity ticker reads `GameView.log`, which is scrubbed by the same
- * filter: any instance id belonging to somebody else's hand or library is
- * rewritten to `'hidden'`, and a log line naming one has its `defId` blanked
- * too (B111). So a `defId` that survives into the log is public by construction,
- * and naming it here leaks nothing.
+ * The activity line reads `GameView.log`, which is scrubbed by the same filter:
+ * any instance id belonging to somebody else's hand or library is rewritten to
+ * `'hidden'`, and a log line naming one has its `defId` blanked too (B111).
  *
  * ## Why this file renders its own card faces
  *
- * It deliberately does not use `<Card>`. A full card face is 132px wide and
- * does not belong in a 320px column, but the real reason is the test contract:
- * the browser suite asserts that an opponent panel contains zero
- * `[data-testid="card"]` elements, which is how it proves no opponent hand is
- * being rendered. Rendering real `<Card>`s for their *play* zone technically
- * satisfied B22 while sitting one played Copper away from failing that
- * assertion. The miniatures below carry `data-testid="seat-card"` instead, so
- * the zero-cards invariant is structural rather than lucky.
+ * It deliberately does not use `<Card>`: the browser suite asserts that an
+ * opponent panel contains zero `[data-testid="card"]` elements, which is how it
+ * proves no opponent hand is being rendered. The miniatures below carry
+ * `data-testid="seat-card"` instead, so the zero-cards invariant is structural.
+ * They still drive the hover preview, which lives outside this panel.
  */
 
 import React from 'react';
 import type { CardView, GameView, LogEntry, OpponentView } from '@engine/types';
+import { hidePreview, showPreview } from './preview';
 import './opponents.css';
 
 // ---------------------------------------------------------------------------
@@ -44,7 +38,7 @@ import './opponents.css';
 // ---------------------------------------------------------------------------
 
 /** Deterministic hue from a name, so a seat's colour is stable all match. */
-function hueOf(name: string): number {
+export function hueOf(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return h;
@@ -90,13 +84,10 @@ function cardTitle(card: CardView): string {
 /**
  * Every card name the view already contains, keyed by defId.
  *
- * The activity ticker gets defIds out of the log but no names, and the naming
- * has to come from somewhere the client already has. Rather than pulling the
- * 533-card catalog into this component, harvest the names off the `CardView`s
- * the view shipped anyway: the shop covers anything that can be bought, and the
- * play and discard zones cover anything that can be played or gained, and the
- * Field zones cover aura ids. A miss falls back to the prettified id, which is
- * public regardless.
+ * The activity line gets defIds out of the log but no names, and the naming
+ * has to come from somewhere the client already has. Harvest the names off the
+ * `CardView`s the view shipped anyway. A miss falls back to the prettified id,
+ * which is public regardless.
  */
 function nameIndex(view: GameView): Map<string, string> {
   const out = new Map<string, string>();
@@ -134,11 +125,7 @@ interface BeatKind {
   card: boolean;
 }
 
-/**
- * The log kinds a person sitting opposite would actually notice. The effect
- * interpreter writes far more than this; a ticker that showed all of it would
- * be the log panel again, which already exists two boxes down.
- */
+/** The log kinds a person sitting opposite would actually notice. */
 const BEAT_KINDS: Record<string, BeatKind> = {
   play: { verb: 'plays', tone: 'play', card: true },
   playCard: { verb: 'replays', tone: 'play', card: true },
@@ -171,13 +158,9 @@ const UNKNOWN_CARD = 'a card';
 
 /**
  * B111 scrubs the log against where a card is *now*, not where it was when the
- * line was written. So a Gold bought on turn 3 and shuffled into the deck by
- * turn 9 has its old `buy` line blanked, even though the whole table watched it
- * happen. A buy carries its `pileId` too, and a pile id is not an instance id,
- * so it survives the scrub: `resource:gold` names the card the shop lost.
- *
- * This recovers no hidden information. The pile it names is face up on the
- * board in front of everybody.
+ * line was written. A buy carries its `pileId` too, and a pile id is not an
+ * instance id, so it survives the scrub: `resource:gold` names the card the
+ * shop lost. The pile it names is face up on the board in front of everybody.
  */
 function pileSubject(entry: LogEntry, names: Map<string, string>): string | null {
   const pileId = entry.detail?.['pileId'];
@@ -203,7 +186,7 @@ function subjectOf(entry: LogEntry, kind: BeatKind, names: Map<string, string>):
  *
  * Walks the log backwards so a long match costs the same as a short one, and
  * collapses consecutive repeats — four Coppers in a row is one line reading
- * "plays Copper ×4", not four lines that push everything else out of the box.
+ * "plays Copper ×4".
  */
 export function beatsFor(
   log: readonly LogEntry[],
@@ -235,6 +218,10 @@ export function beatsFor(
   return out.reverse();
 }
 
+function beatText(b: Beat): string {
+  return [b.verb, b.subject, b.times > 1 ? `×${b.times}` : null].filter(Boolean).join(' ');
+}
+
 // ---------------------------------------------------------------------------
 // Pieces of the seat
 // ---------------------------------------------------------------------------
@@ -247,13 +234,17 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
   const [failed, setFailed] = React.useState(false);
   const key = card.art?.key;
   const hue = hueOf(card.name);
+  const iid = card.iid;
+  React.useEffect(() => () => hidePreview(iid), [iid]);
   return (
     <div
       className={`seat-card rarity-${card.rarity}${latest ? ' seat-card-top' : ''}`}
       data-testid="seat-card"
       data-card-id={card.defId}
       data-card-name={card.name}
-      title={cardTitle(card)}
+      aria-label={cardTitle(card)}
+      onPointerEnter={(e) => showPreview(card, e.currentTarget)}
+      onPointerLeave={() => hidePreview(card.iid)}
     >
       {key && !failed ? (
         <img
@@ -281,16 +272,12 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
 
 /**
  * Their hand, as it looks from across the table: a fan of backs you can count.
- *
- * Drawn purely from `handCount`. There is no card identity behind any of these
- * elements, and deliberately no `data-iid` to be tempted into adding one.
+ * Drawn purely from `handCount`; deliberately no `data-iid` on anything.
  */
 function HandFan({ count }: { count: number }): JSX.Element {
   const shown = Math.max(0, Math.min(count, 7));
   const backs: JSX.Element[] = [];
   for (let i = 0; i < shown; i++) {
-    // Splayed symmetrically about the middle of however many are shown, so a
-    // three-card hand does not lean off to one side.
     const rot = `${((i - (shown - 1) / 2) * 4).toFixed(1)}deg`;
     backs.push(<span className="seat-back" key={i} style={{ ['--rot']: rot } as React.CSSProperties} />);
   }
@@ -320,7 +307,7 @@ function DeckStack({ count }: { count: number }): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
-// One seat
+// One seat: the compact strip row
 // ---------------------------------------------------------------------------
 
 function Seat({
@@ -330,23 +317,27 @@ function Seat({
   won,
   names,
   log,
+  expanded,
+  onToggle,
 }: {
   o: OpponentView;
   active: boolean;
-  /** They owe the table an answer to a prompt. You cannot see the options. */
+  /** They owe the table an answer to a prompt. */
   deciding: boolean;
   won: boolean;
   names: Map<string, string>;
   log: readonly LogEntry[];
+  expanded: boolean;
+  onToggle: () => void;
 }): JSX.Element {
-  const beats = beatsFor(log, o.id, names);
-  const topDiscard = o.gy.length > 0 ? o.gy[o.gy.length - 1] : null;
+  const last = beatsFor(log, o.id, names, 1)[0] ?? null;
   const hue = hueOf(o.name || o.id);
 
-  const classes = ['opponent', 'seat'];
+  const classes = ['opponent', 'seat', 'seat-strip'];
   if (active) classes.push('seat-active');
   if (deciding) classes.push('seat-deciding');
   if (won) classes.push('seat-won');
+  if (expanded) classes.push('seat-expanded');
   if (o.eliminated) classes.push('opponent-out', 'seat-out');
 
   return (
@@ -362,64 +353,96 @@ function Seat({
       data-deciding={deciding ? 'true' : 'false'}
       data-eliminated={o.eliminated ? 'true' : 'false'}
       style={{ ['--seat-hue']: String(hue) } as React.CSSProperties}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      title={expanded ? 'Hide their table' : 'Show their table'}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
     >
-      <div className="opponent-head seat-head">
-        <span className="seat-avatar" aria-hidden="true">
-          {initialsOf(o.name || o.id)}
-        </span>
-        <span className="seat-who">
+      <span className="seat-avatar" aria-hidden="true">
+        {initialsOf(o.name || o.id)}
+      </span>
+      <span className="seat-who">
+        <span className="seat-line1">
           <span className="opponent-name seat-name">{o.name}</span>
-          <span className="seat-sub">
-            {active && (
-              <span className="opponent-turn seat-badge">
-                <span className="seat-pip" aria-hidden="true" />
-                to move
-              </span>
-            )}
-            {deciding && (
-              <span className="seat-badge seat-badge-deciding" title="they have a prompt open — its options were never sent to you">
-                deciding…
-              </span>
-            )}
-            {won && <span className="seat-badge seat-badge-won">winner</span>}
-            {o.eliminated && <span className="opponent-elim seat-badge seat-badge-out">eliminated</span>}
-            {!active && !deciding && !won && !o.eliminated && <span className="seat-waiting">waiting</span>}
-          </span>
+          {active && (
+            <span className="opponent-turn seat-badge">
+              <span className="seat-pip" aria-hidden="true" />
+              to move
+            </span>
+          )}
+          {deciding && <span className="seat-badge seat-badge-deciding">deciding…</span>}
+          {won && <span className="seat-badge seat-badge-won">winner</span>}
+          {o.eliminated && <span className="opponent-elim seat-badge seat-badge-out">eliminated</span>}
         </span>
-        <span className="seat-score opponent-stats">
-          <span className="seat-score-item seat-score-vp" title="victory points">
-            <b>{o.vp}</b> VP
-          </span>
-          <span className="seat-score-item seat-score-prophet" title="banked Prophet">
-            <b>{o.prophet}</b> ◈
-          </span>
+        <span className={`seat-last${last ? ` seat-beat-${last.tone}` : ''}`} data-testid="seat-last">
+          {last ? beatText(last) : 'no moves yet'}
+          {o.play.length > 0 && <span className="seat-last-play"> · {o.play.length} in play</span>}
         </span>
+      </span>
+      <span className="seat-score opponent-stats">
+        <span className="seat-score-item seat-score-vp" title="victory points">
+          <b>{o.vp}</b> VP
+        </span>
+        <span className="seat-score-item seat-score-prophet" title="banked Prophet">
+          <b>{o.prophet}</b> ◈
+        </span>
+      </span>
+      <span
+        className="seat-counts"
+        title={`${o.handCount} in hand · ${o.libraryCount} in deck · ${o.gy.length} in discard`}
+      >
+        <span>
+          <b>{o.handCount}</b> hand
+        </span>
+        <span>
+          <b>{o.libraryCount}</b> deck
+        </span>
+        <span>
+          <b>{o.gy.length}</b> disc
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** A seat opened up: their tableau, discard, auras and recent moves. In flow. */
+function SeatDetail({
+  o,
+  names,
+  log,
+}: {
+  o: OpponentView;
+  names: Map<string, string>;
+  log: readonly LogEntry[];
+}): JSX.Element {
+  const beats = beatsFor(log, o.id, names);
+  const topDiscard = o.gy.length > 0 ? o.gy[o.gy.length - 1] : null;
+  const hue = hueOf(o.name || o.id);
+  return (
+    <div
+      className="seat-detail"
+      data-testid="seat-detail"
+      data-opponent-id={o.id}
+      style={{ ['--seat-hue']: String(hue) } as React.CSSProperties}
+    >
+      <div className="seat-detail-block seat-tableau" data-testid="seat-tableau">
+        <span className="seat-tableau-head">{o.name} · in play</span>
+        <div className="seat-tableau-row">
+          {o.play.length === 0 && <span className="seat-detail-empty">nothing in play</span>}
+          {o.play.map((c, i) => (
+            <SeatCard key={c.iid} card={c} latest={i === o.play.length - 1} />
+          ))}
+        </div>
       </div>
 
-      {o.play.length > 0 && (
-        <div className="opponent-play seat-tableau" data-testid="seat-tableau">
-          <span className="seat-tableau-head">in play</span>
-          <div className="seat-tableau-row">
-            {o.play.map((c, i) => (
-              <SeatCard key={c.iid} card={c} latest={i === o.play.length - 1} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {beats.length > 0 && (
-        <ul className="seat-beats" data-testid="seat-beats">
-          {beats.map((b) => (
-            <li className={`seat-beat seat-beat-${b.tone}`} key={b.seq}>
-              <span className="seat-beat-verb">{b.verb}</span>
-              {b.subject && <span className="seat-beat-subject">{b.subject}</span>}
-              {b.times > 1 && <span className="seat-beat-times">×{b.times}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="seat-stacks">
+      <div className="seat-detail-block seat-stacks">
         <div className="seat-stack" title={`${o.handCount} cards in hand — face down to you`}>
           <HandFan count={o.handCount} />
           <span className="seat-stack-label">
@@ -432,14 +455,7 @@ function Seat({
             <b>{o.libraryCount}</b> deck
           </span>
         </div>
-        <div
-          className="seat-stack seat-stack-discard"
-          title={
-            topDiscard
-              ? `${o.gy.length} in the discard — ${topDiscard.name} on top`
-              : 'their discard pile is empty'
-          }
-        >
+        <div className="seat-stack seat-stack-discard">
           {topDiscard ? <SeatCard card={topDiscard} /> : <span className="seat-discard-empty" aria-hidden="true" />}
           <span className="seat-stack-label">
             <b>{o.gy.length}</b> discard
@@ -448,7 +464,7 @@ function Seat({
       </div>
 
       {o.field.length > 0 && (
-        <div className="opponent-auras seat-auras">
+        <div className="seat-detail-block seat-auras">
           {o.field.map((a) => (
             <span className={`aura-chip seat-aura aura-${a.tier}`} key={a.auraId} title={`${a.name} — ${a.text}`}>
               {a.name}
@@ -456,45 +472,61 @@ function Seat({
           ))}
         </div>
       )}
+
+      {beats.length > 0 && (
+        <ul className="seat-detail-block seat-beats" data-testid="seat-beats">
+          {beats.map((b) => (
+            <li className={`seat-beat seat-beat-${b.tone}`} key={b.seq}>
+              <span className="seat-beat-verb">{b.verb}</span>
+              {b.subject && <span className="seat-beat-subject">{b.subject}</span>}
+              {b.times > 1 && <span className="seat-beat-times">×{b.times}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// The table
+// The strip
 // ---------------------------------------------------------------------------
 
 export function Opponents({ view }: { view: GameView }): JSX.Element {
   const names = React.useMemo(() => nameIndex(view), [view]);
+  const [openId, setOpenId] = React.useState<string | null>(null);
 
   // B23 hands the observer exactly one fact about somebody else's prompt: whose
-  // it is. That is the right amount — at a table you can see a person is
-  // thinking without seeing their cards — so it gets a badge rather than being
-  // thrown away.
+  // it is. That gets a badge rather than being thrown away.
+  const pending = view.pending;
   const waitingOn =
-    view.pending && 'waitingOn' in view.pending ? view.pending.waitingOn : null;
+    pending && 'waitingOn' in pending
+      ? pending.waitingOn
+      : pending && 'player' in pending && pending.player !== view.you.id
+        ? pending.player
+        : null;
   const winners = view.winners ?? [];
+  const open = openId !== null ? (view.others.find((o) => o.id === openId) ?? null) : null;
 
   return (
     <div className="opponents" data-testid="opponents">
-      <div className="opponents-head">
-        <h3>Across the table</h3>
-        <span className="opponents-count">
-          {view.others.length === 1 ? '1 other' : `${view.others.length} others`}
-        </span>
+      <div className="opponents-row">
+        {view.others.length === 0 && <div className="seat-none">nobody else is seated</div>}
+        {view.others.map((o) => (
+          <Seat
+            key={o.id}
+            o={o}
+            active={view.activePlayer === o.id}
+            deciding={waitingOn === o.id}
+            won={view.ended && winners.includes(o.id)}
+            names={names}
+            log={view.log}
+            expanded={openId === o.id}
+            onToggle={() => setOpenId((prev) => (prev === o.id ? null : o.id))}
+          />
+        ))}
       </div>
-      {view.others.length === 0 && <div className="seat-none">nobody else is seated</div>}
-      {view.others.map((o) => (
-        <Seat
-          key={o.id}
-          o={o}
-          active={view.activePlayer === o.id}
-          deciding={waitingOn === o.id}
-          won={view.ended && winners.includes(o.id)}
-          names={names}
-          log={view.log}
-        />
-      ))}
+      {open && <SeatDetail o={open} names={names} log={view.log} />}
     </div>
   );
 }

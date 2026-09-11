@@ -9,6 +9,12 @@
  * below — the slop guard in `Card`, the acknowledgement window, the launched
  * set — exists to keep that line sharp across a relay that can take a second
  * to answer.
+ *
+ * The row lives in the dock (SB-63). Cards use the `dock` variant and the row
+ * is a size container, so `--n` cards share its width before it scrolls.
+ * Reordering is offered only on your own turn: B20 makes an off-turn
+ * `reorderHand` illegal, and a gesture the engine will refuse is worse than no
+ * gesture. Off turn the cards stay at full opacity (LAY-5), just not clickable.
  */
 
 import React from 'react';
@@ -16,6 +22,13 @@ import type { CardView, GameAction, InstanceId, PlayerId } from '@engine/types';
 import { Card } from './Card';
 import type { AnimPreset } from './motion';
 import './hand.css';
+
+/** A hand prompt: the hand's own cards are the options. */
+export interface HandPick {
+  keyFor: ReadonlyMap<InstanceId, string>;
+  picked: readonly string[];
+  onToggle: (key: string) => void;
+}
 
 export interface HandProps {
   hand: CardView[];
@@ -31,6 +44,8 @@ export interface HandProps {
   flipRegister?: (key: string) => (el: HTMLElement | null) => void;
   /** Cards whose intent is in flight and not yet reflected in a view. */
   committed?: ReadonlySet<InstanceId>;
+  /** Set while your own prompt asks you to choose cards from this hand. */
+  pick?: HandPick | null;
 }
 
 /**
@@ -141,6 +156,19 @@ function slotMidpoints(row: HTMLElement | null): number[] {
   return out;
 }
 
+/** The one-line status the dock prints above the hand. */
+export function handStatus(opts: {
+  yourTurn: boolean;
+  picking: boolean;
+  playable: number;
+  actions: number;
+}): string {
+  if (opts.picking) return 'choose from your hand';
+  if (!opts.yourTurn) return 'not your turn';
+  const actionLabel = `${opts.actions} action${opts.actions === 1 ? '' : 's'}`;
+  return opts.playable === 0 ? `nothing playable · ${actionLabel}` : `${opts.playable} playable · ${actionLabel}`;
+}
+
 export function Hand({
   hand,
   playerId,
@@ -152,6 +180,7 @@ export function Hand({
   cueFor,
   flipRegister,
   committed,
+  pick,
 }: HandProps): JSX.Element {
   const [localOrder, setLocalOrder] = React.useState<CardView[] | null>(null);
   const [pendingSig, setPendingSig] = React.useState<string | null>(null);
@@ -174,6 +203,9 @@ export function Hand({
 
   const dragging = dragIndex !== null;
   const handSig = orderSignature(hand);
+  const picking = pick !== null && pick !== undefined;
+  // B20: reorderHand is legal only on your own turn, and never mid-prompt.
+  const canReorder = yourTurn && !picking;
 
   // While a drag is in flight the row must not rearrange under the pointer: the
   // geometry the caret is computed from would stop describing what is on screen.
@@ -237,7 +269,7 @@ export function Hand({
 
   function play(card: CardView): void {
     // Mark it launched *before* sending. The view that takes this card out of
-    // the hand is a relay round-trip away and the click needs an answer now —
+    // the hand may be a relay round-trip away and the click needs an answer now —
     // and the card has to stop being clickable, so an impatient second click
     // cannot land on whatever slides into its place.
     setLaunched((prev) => (prev.includes(card.iid) ? prev : [...prev, card.iid]));
@@ -289,47 +321,40 @@ export function Hand({
   const launchedSet = new Set(launched);
   const isPlayable = (card: CardView): boolean =>
     yourTurn && card.playable !== false && !launchedSet.has(card.iid);
-  const playableCount = shown.filter(isPlayable).length;
-  const actionLabel = `${actions} action${actions === 1 ? '' : 's'}`;
 
   // Only draw the caret where the drop would actually change something.
   const caret =
     dropPos !== null && dragIndex !== null && !isNoopDrop(dragIndex, dropPos) ? dropPos : null;
 
-  return (
-    <div className="hand">
-      <div className="hand-head">
-        <h3>Hand</h3>
-        <span className="hand-count">{shown.length} cards</span>
-        <span
-          className={`hand-status${yourTurn ? ' hand-status-yours' : ''}`}
-          data-testid="hand-status"
-          data-playable-count={playableCount}
-        >
-          {!yourTurn
-            ? 'not your turn — you can still reorder'
-            : playableCount === 0
-              ? `nothing playable · ${actionLabel}`
-              : `${playableCount} playable · ${actionLabel}`}
-        </span>
-        <span className="hand-hint">
-          press <kbd>1</kbd>–<kbd>9</kbd> to play · <kbd>[</kbd> <kbd>]</kbd> to reorder —
-          adjacency matters
-        </span>
-      </div>
+  const handClasses = ['hand'];
+  if (!yourTurn) handClasses.push('hand-offturn');
+  if (picking) handClasses.push('hand-picking');
 
+  return (
+    <div className={handClasses.join(' ')}>
       <div
         className={`hand-row${dragging ? ' hand-row-dragging' : ''}`}
         data-testid="hand"
         ref={rowRef}
-        onDragOver={onRowDragOver}
-        onDragLeave={onRowDragLeave}
-        onDrop={onRowDrop}
+        style={{ ['--n']: String(Math.max(1, shown.length)) } as React.CSSProperties}
+        onDragOver={canReorder ? onRowDragOver : undefined}
+        onDragLeave={canReorder ? onRowDragLeave : undefined}
+        onDrop={canReorder ? onRowDrop : undefined}
       >
         {shown.length === 0 && <div className="hand-empty">no cards in hand</div>}
         {shown.map((card, i) => {
           const playable = isPlayable(card);
           const inFlight = launchedSet.has(card.iid) || (committed?.has(card.iid) ?? false);
+          const optKey = picking ? (pick.keyFor.get(card.iid) ?? null) : null;
+          const pickIndex = optKey !== null && pick ? pick.picked.indexOf(optKey) : -1;
+          const onCardClick = picking
+            ? optKey !== null
+              ? () => pick.onToggle(optKey)
+              : undefined
+            : playable
+              ? play
+              : undefined;
+
           const classes = ['hand-slot'];
           if (caret === i) classes.push('hand-slot-drop-before', 'hand-slot-over');
           if (caret === shown.length && i === shown.length - 1) {
@@ -338,6 +363,7 @@ export function Hand({
           if (dragIndex === i) classes.push('hand-slot-dragging');
           if (cursorIndex === i) classes.push('hand-slot-cursor');
           if (inFlight) classes.push('hand-slot-launched');
+          if (optKey !== null) classes.push('hand-slot-option');
           return (
             <div
               className={classes.join(' ')}
@@ -348,15 +374,17 @@ export function Hand({
             >
               <Card
                 card={card}
-                draggable
+                variant="dock"
+                draggable={canReorder}
                 index={i}
-                hint={i < 9 ? String(i + 1) : i === 9 ? '0' : null}
                 cursor={cursorIndex === i}
                 cue={cueFor?.(card.iid) ?? null}
-                committed={inFlight}
+                committed={inFlight && !picking}
                 elementRef={flipRegister?.(card.iid)}
-                disabled={!playable}
-                onClick={playable ? play : undefined}
+                disabled={onCardClick === undefined}
+                selected={pickIndex >= 0}
+                badge={pickIndex >= 0 ? String(pickIndex + 1) : null}
+                onClick={onCardClick}
                 onDragStart={(e) => {
                   dragFromRef.current = i;
                   dragHandRef.current = contentSignature(hand);
@@ -371,37 +399,39 @@ export function Hand({
                 }}
                 onDragEnd={endDrag}
                 footer={
-                  <span className="hand-nudge">
-                    <button
-                      type="button"
-                      className="nudge"
-                      title="Move this card left"
-                      aria-label={`Move ${card.name} left`}
-                      disabled={i === 0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        shift(i, -1);
-                      }}
-                    >
-                      ◀
-                    </button>
-                    <span className="hand-grip" aria-hidden="true" title="Drag to reorder">
-                      ⠿
+                  canReorder ? (
+                    <span className="hand-nudge">
+                      <button
+                        type="button"
+                        className="nudge"
+                        title="Move this card left"
+                        aria-label={`Move ${card.name} left`}
+                        disabled={i === 0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          shift(i, -1);
+                        }}
+                      >
+                        ◀
+                      </button>
+                      <span className="hand-grip" aria-hidden="true" title="Drag to reorder">
+                        ⠿
+                      </span>
+                      <button
+                        type="button"
+                        className="nudge"
+                        title="Move this card right"
+                        aria-label={`Move ${card.name} right`}
+                        disabled={i === shown.length - 1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          shift(i, 1);
+                        }}
+                      >
+                        ▶
+                      </button>
                     </span>
-                    <button
-                      type="button"
-                      className="nudge"
-                      title="Move this card right"
-                      aria-label={`Move ${card.name} right`}
-                      disabled={i === shown.length - 1}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        shift(i, 1);
-                      }}
-                    >
-                      ▶
-                    </button>
-                  </span>
+                  ) : null
                 }
               />
             </div>

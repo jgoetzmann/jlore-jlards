@@ -1,10 +1,16 @@
 /**
  * The action log. Newest first, because the interesting entry is always the
  * one that just happened.
+ *
+ * The sentences come from `logtext.ts` (LAY-8): the log is the sole record of
+ * what an opponent did on a turn you were not watching, so it is worth reading
+ * rather than decoding. It lives in the table's drawer.
  */
 
 import React from 'react';
 import type { LogEntry } from '@engine/types';
+import { describeLog, type LogNaming } from './logtext';
+import { cardNameOf } from './cardview';
 
 export interface LogProps {
   log: LogEntry[];
@@ -12,6 +18,7 @@ export interface LogProps {
   limit?: number;
 }
 
+/** Kept exported: the raw shape is still what an unknown entry falls back to. */
 export function describeDetail(detail: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(detail ?? {})) {
@@ -26,31 +33,29 @@ export function describeDetail(detail: Record<string, unknown>): string {
 }
 
 export function Log({ log, names, limit = 120 }: LogProps): JSX.Element {
-  const [open, setOpen] = React.useState(true);
-  const entries = log.slice(-limit).reverse();
+  const naming = React.useMemo<LogNaming>(
+    () => ({
+      player: (id) => names[id] ?? id,
+      card: cardNameOf,
+    }),
+    [names],
+  );
+
+  const lines = React.useMemo(() => describeLog(log, naming, limit), [log, naming, limit]);
 
   return (
-    <div className={`log${open ? '' : ' log-collapsed'}`}>
-      <div className="log-head">
-        <h3>Log</h3>
-        <button type="button" className="log-toggle" onClick={() => setOpen((v) => !v)}>
-          {open ? 'hide' : 'show'}
-        </button>
-      </div>
-      {open && (
-        <ol className="log-list">
-          {entries.length === 0 && <li className="log-empty">nothing yet</li>}
-          {entries.map((e) => (
-            <li className={`log-entry log-kind-${e.kind}`} key={e.seq}>
-              <span className="log-seq">{e.seq}</span>
-              <span className="log-turn">T{e.turn}</span>
-              <span className="log-player">{e.player ? (names[e.player] ?? e.player) : '—'}</span>
-              <span className="log-what">{e.kind}</span>
-              <span className="log-detail">{describeDetail(e.detail)}</span>
-            </li>
-          ))}
-        </ol>
-      )}
+    <div className="log" data-testid="log">
+      <h3 className="log-head">Log</h3>
+      <ol className="log-list">
+        {lines.length === 0 && <li className="log-empty">nothing yet</li>}
+        {lines.map((line) => (
+          <li className={`log-entry log-tone-${line.tone}`} key={line.seq} data-testid="log-entry">
+            <span className="log-turn">T{line.turn}</span>
+            {line.who && <span className="log-player">{line.who}</span>}
+            <span className="log-text">{line.text}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
