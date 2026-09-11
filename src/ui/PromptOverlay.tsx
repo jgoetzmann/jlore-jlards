@@ -19,6 +19,8 @@ import React from 'react';
 import type { GameAction, GameView, InstanceId, PlayerId, Prompt, PromptOption } from '@engine/types';
 import { Card } from './Card';
 import { printedCardView } from './cardview';
+import { digitLabel } from './keys';
+import { submitsOnPick } from './turnflow';
 import {
   isPrompt,
   isWaiting,
@@ -55,6 +57,7 @@ function OptionButton({
   slot,
   faces,
   handSlot,
+  keyHint,
   onToggle,
 }: {
   option: PromptOption;
@@ -67,6 +70,8 @@ function OptionButton({
   faces: boolean;
   /** 1-based hand position for a hand option, so two Coppers can be told apart. */
   handSlot: number | null;
+  /** The digit that picks this option from the keyboard. */
+  keyHint: string | null;
   onToggle: () => void;
 }): JSX.Element {
   const face = faces && option.defId ? printedCardView(option.defId, option.key) : null;
@@ -85,6 +90,11 @@ function OptionButton({
       onClick={onToggle}
     >
       {selected && <span className="prompt-order-index">{index + 1}</span>}
+      {keyHint !== null && !selected && (
+        <span className="prompt-option-key" aria-hidden="true">
+          {keyHint}
+        </span>
+      )}
       {face ? (
         <>
           <Card card={face} selected={selected} />
@@ -166,19 +176,30 @@ export function PromptOverlay({
   const { ordering, min, max } = bounds;
   const ready = promptReady(prompt, picked);
 
-  function toggle(key: string): void {
-    setPicked(togglePick(picked, key, { ordering, max }));
-  }
-
   function submit(keys: readonly string[]): void {
     onAction({ type: 'resolve', player: playerId, promptId: prompt.id, keys: [...keys] });
   }
 
-  const meta = ordering
-    ? `Click all ${prompt.options.length} in order`
-    : min === max
-      ? `Pick ${min}`
-      : `Pick ${min}–${max}`;
+  // TURN-7: a one-of-N Discover or choose is answered by the click itself.
+  // Multi-selects, orderings and card selections (a trash, a discard) keep
+  // Confirm, because a misclick there costs a card.
+  const oneClick = submitsOnPick(prompt);
+
+  function toggle(key: string): void {
+    if (oneClick) {
+      submit([key]);
+      return;
+    }
+    setPicked(togglePick(picked, key, { ordering, max }));
+  }
+
+  const meta = oneClick
+    ? 'Click one to choose'
+    : ordering
+      ? `Click all ${prompt.options.length} in order`
+      : min === max
+        ? `Pick ${min}`
+        : `Pick ${min}–${max}`;
 
   const faces = placement === 'panel';
   const handIndex = new Map<string, number>();
@@ -193,6 +214,7 @@ export function PromptOverlay({
       selected={picked.includes(opt.key)}
       faces={faces}
       handSlot={placement === 'hand' && opt.iid ? (handIndex.get(opt.iid) ?? null) : null}
+      keyHint={digitLabel(i)}
       onToggle={() => toggle(opt.key)}
     />
   ));
@@ -263,6 +285,7 @@ export function PromptOverlay({
       data-testid="prompt"
       data-prompt-type={prompt.type}
       data-placement="panel"
+      data-one-click={oneClick ? 'true' : 'false'}
     >
       <div className="prompt-card">
         <h3 className="prompt-title">{title}</h3>

@@ -10,12 +10,21 @@
  * item in a row) and wraps only when the board is narrower than that. A grid
  * with `repeat(auto-fill, ...)` looks equivalent and isn't: it has no definite
  * width during intrinsic sizing, so each shop collapses to one tile wide.
+ *
+ * Render cost (RENDER-1): the tile is memoised, and `stabilizeView` hands back
+ * the same PileView for a pile that didn't change, so a Copper play re-renders
+ * the tiles whose affordability moved, not the whole board.
+ *
+ * Motion: the top card sits in a wrapper keyed and FLIP-registered by its
+ * instance id. A bought card keeps its iid on the way to the graveyard, so the
+ * flight from the tile to the discard falls out of that registration.
  */
 
 import React from 'react';
-import type { GameView, InstanceId, PileView, PileId } from '@engine/types';
+import type { GameView, PileView, PileId } from '@engine/types';
 import { Card } from './Card';
-import type { AnimPreset } from './motion';
+import { useFlipRef } from './useFlip';
+import { useOneShot, usePulse } from './useMotion';
 
 /** A pile prompt: which piles answer it, and what is picked so far. */
 export interface PilePick {
@@ -28,19 +37,10 @@ export interface BoardProps {
   view: GameView;
   onBuy: (pileId: PileId) => void;
   yourTurn: boolean;
-  /** Piles that lost a card in the last view. */
-  drained?: ReadonlySet<PileId>;
-  /** Piles that went to zero in the last view — four of these end the game. */
-  emptied?: ReadonlySet<PileId>;
-  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
-  /**
-   * FLIP registration. The bought instance keeps its iid when it moves from the
-   * pile to the graveyard, so registering the pile's top card here is the whole
-   * reason a purchase animates: the same node is measured in both places.
-   */
-  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
   /** Set while your own prompt asks you to pick piles. */
   pilePick?: PilePick | null;
+  /** A buy sent for this pile that no view has answered yet (TURN-8). */
+  inFlightPile?: PileId | null;
 }
 
 const SHOP_TITLES: { key: keyof GameView['shop']; label: string }[] = [
@@ -70,31 +70,33 @@ export function canAfford(pile: PileView, money: number, prophet: number): boole
   return money >= pile.cost;
 }
 
-/** Why a pile can't be bought right now, for the disabled Buy's tooltip. */
-function whyNot(pile: PileView, opts: { yourTurn: boolean; blocked: boolean; buys: number; affordable: boolean }): string {
+/** Why a pile can't be bought right now, for the disabled Buy's tooltip (TURN-8). */
+export function whyNot(
+  pile: PileView,
+  opts: { yourTurn: boolean; blocked: boolean; buys: number; money: number; prophet: number; inFlight?: boolean },
+): string {
+  if (opts.inFlight) return 'Buying…';
   if (pile.count <= 0 || pile.top === null) return 'This pile is empty';
-  if (pile.locked) return 'This pile is locked';
+  if (pile.locked) {
+    return pile.lockedUntil !== null && pile.lockedUntil !== undefined
+      ? `Locked until turn ${pile.lockedUntil}`
+      : 'This pile is locked';
+  }
   if (!opts.yourTurn) return 'Not your turn';
   if (opts.blocked) return 'Answer the open prompt first';
-  if (!pile.prophetCost && opts.buys <= 0) return 'No Buys left';
-  if (!opts.affordable) return pile.prophetCost ? 'Not enough Prophet' : 'Not enough Money';
+  if (pile.prophetCost) {
+    return opts.prophet >= pile.prophetCost.threshold
+      ? 'Buy'
+      : `Needs ${pile.prophetCost.threshold} Prophet, you have ${opts.prophet}`;
+  }
+  if (opts.buys <= 0) return 'No Buys left';
+  if (pile.cost !== null && pile.cost !== undefined && opts.money < pile.cost) {
+    return `Needs ${pile.cost} Money, you have ${opts.money}`;
+  }
   return 'Buy';
 }
 
-export function PileTile({
-  pile,
-  money,
-  prophet,
-  buys,
-  yourTurn,
-  blocked,
-  onBuy,
-  drained,
-  emptied,
-  cueFor,
-  flipRegister,
-  pilePick,
-}: {
+interface PileTileProps {
   pile: PileView;
   money: number;
   prophet: number;
@@ -103,17 +105,27 @@ export function PileTile({
   /** A prompt is open, so the engine would reject a buy. */
   blocked: boolean;
   onBuy: (pileId: PileId) => void;
-  drained?: boolean;
-  emptied?: boolean;
-  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
-  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
   pilePick?: PilePick | null;
-}): JSX.Element {
+  inFlight?: boolean;
+}
+
+function PileTileImpl({
+  pile,
+  money,
+  prophet,
+  buys,
+  yourTurn,
+  blocked,
+  onBuy,
+  pilePick,
+  inFlight = false,
+}: PileTileProps): JSX.Element {
   const empty = pile.count <= 0 || pile.top === null;
   const affordable = canAfford(pile, money, prophet);
   const buyable =
     yourTurn &&
     !blocked &&
+    !inFlight &&
     !empty &&
     affordable &&
     (pile.prophetCost ? true : buys > 0) &&
@@ -126,49 +138,68 @@ export function PileTile({
   if (pile.locked) classes.push('pile-locked');
   if (empty) classes.push('pile-empty');
   if (buyable) classes.push('pile-buyable');
-  if (drained) classes.push('pile-drained');
-  if (emptied) classes.push('pile-just-emptied');
+  if (inFlight) classes.push('pile-inflight');
   if (pickKey !== null) classes.push('pile-prompt-target');
   if (pickIndex >= 0) classes.push('pile-prompt-picked');
 
-  const onTileClick =
-    pickKey !== null && pilePick
-      ? () => pilePick.onToggle(pickKey)
-      : buyable
-        ? () => onBuy(pile.id)
-        : undefined;
+  const pileId = pile.id;
+  const onTileClick = React.useMemo(() => {
+    if (pickKey !== null && pilePick) return () => pilePick.onToggle(pickKey);
+    if (buyable) return () => onBuy(pileId);
+    return undefined;
+  }, [pickKey, pilePick, buyable, onBuy, pileId]);
+
+  // The count knocks down when a card leaves; an emptied pile flashes once.
+  const countRef = React.useRef<HTMLSpanElement>(null);
+  const tileRef = React.useRef<HTMLDivElement>(null);
+  usePulse(pile.count, countRef, pile.id, { only: 'down' });
+  useOneShot(
+    empty,
+    tileRef,
+    [{ boxShadow: '0 0 0 3px rgb(224 112 112 / 90%)' }, { boxShadow: '0 0 0 0 rgb(224 112 112 / 0%)' }],
+    { duration: 600, easing: 'ease-out' },
+    (v) => v === true,
+  );
+
+  const top = pile.top;
+  const topRef = useFlipRef(empty || !top ? null : top.iid);
 
   const overlay = (
     <>
       <span className="pile-cost-chip">{pileChipLabel(pile)}</span>
-      <span className="pile-count-badge">×{pile.count}</span>
+      <span className="pile-count-badge" ref={countRef}>
+        ×{pile.count}
+      </span>
     </>
   );
 
   return (
     <div
+      ref={tileRef}
       className={classes.join(' ')}
       data-testid="pile"
       data-pile-id={pile.id}
       data-pile-count={pile.count}
       data-buyable={buyable ? 'true' : 'false'}
     >
-      {empty ? (
+      {empty || !top ? (
         <div className="pile-slot-empty">
           <span className="pile-empty-label">empty</span>
           <span className="pile-empty-id">{pile.id.slice(pile.id.indexOf(':') + 1).replace(/_/g, ' ')}</span>
         </div>
       ) : (
-        <Card
-          card={pile.top as NonNullable<PileView['top']>}
-          variant="mini"
-          disabled={onTileClick === undefined}
-          selected={pickIndex >= 0}
-          artOverlay={overlay}
-          cue={cueFor?.((pile.top as NonNullable<PileView['top']>).iid) ?? null}
-          elementRef={flipRegister?.((pile.top as NonNullable<PileView['top']>).iid)}
-          onClick={onTileClick}
-        />
+        // Keyed by the top card: a new top is a new node, so the old one can
+        // fly to the discard while this one fades in.
+        <div className="pile-top" key={top.iid} ref={topRef}>
+          <Card
+            card={top}
+            variant="mini"
+            disabled={onTileClick === undefined}
+            selected={pickIndex >= 0}
+            artOverlay={overlay}
+            onClick={onTileClick}
+          />
+        </div>
       )}
 
       <div className="pile-foot">
@@ -182,29 +213,27 @@ export function PileTile({
           className="pile-buy"
           data-testid="buy"
           disabled={!buyable}
-          title={buyable ? `Buy for ${pileCostLabel(pile)}` : whyNot(pile, { yourTurn, blocked, buys, affordable })}
+          aria-busy={inFlight}
+          title={
+            buyable
+              ? `Buy for ${pileCostLabel(pile)}`
+              : whyNot(pile, { yourTurn, blocked, buys, money, prophet, inFlight })
+          }
           onClick={() => onBuy(pile.id)}
         >
-          Buy
+          {inFlight ? '…' : 'Buy'}
         </button>
       </div>
     </div>
   );
 }
 
+export const PileTile = React.memo(PileTileImpl);
+
 /** Kept under its old name for anything that imported it. */
 export const PileColumn = PileTile;
 
-export function Board({
-  view,
-  onBuy,
-  yourTurn,
-  drained,
-  emptied,
-  cueFor,
-  flipRegister,
-  pilePick,
-}: BoardProps): JSX.Element {
+function BoardImpl({ view, onBuy, yourTurn, pilePick, inFlightPile = null }: BoardProps): JSX.Element {
   const { money, prophet, buys } = view.you;
   const blocked = view.pending !== null && view.pending !== undefined;
   return (
@@ -229,11 +258,8 @@ export function Board({
                   yourTurn={yourTurn}
                   blocked={blocked}
                   onBuy={onBuy}
-                  drained={drained?.has(pile.id) ?? false}
-                  emptied={emptied?.has(pile.id) ?? false}
-                  cueFor={cueFor}
-                  flipRegister={flipRegister}
                   pilePick={pilePick}
+                  inFlight={inFlightPile === pile.id}
                 />
               ))}
             </div>
@@ -243,5 +269,7 @@ export function Board({
     </div>
   );
 }
+
+export const Board = React.memo(BoardImpl);
 
 export default Board;

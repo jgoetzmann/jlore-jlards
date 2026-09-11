@@ -1,51 +1,22 @@
 /**
- * Turns the view stream into transient animation state.
+ * The small, per-element half of the motion layer.
  *
- * The rule the whole layer is built on: **a cue expires.** Nothing here is a
- * lasting flag, because the view that arrives next is authoritative about what
- * is true and this hook is only ever authoritative about what just *changed*.
- * A stuck cue would be a card permanently mid-entrance.
- *
- * See `motion.ts` for the diff itself, which is pure and tested.
+ * Card flights live in useFlip.ts and are planned from the view diff in
+ * motion.ts. What is here is the motion that belongs to one element and needs
+ * no plan: a stat ticking, a pile's count knocking down, the turn banner. Each
+ * is an `el.animate()` from a layout effect on the element that changed — no
+ * React state, no class toggling, no second render (MOT-3), and no expiry
+ * timer re-rendering the table half a second later.
  */
 
 import React from 'react';
-import type { GameView, InstanceId } from '@engine/types';
-import {
-  cardCues,
-  diffViews,
-  settleMs,
-  statPulses,
-  type AnimPreset,
-  type MotionEvent,
-  type TickStat,
-} from './motion';
-
-export interface TurnFlash {
-  to: string;
-  turn: number;
-  yours: boolean;
-}
-
-export interface MotionState {
-  events: MotionEvent[];
-  /** The keyframe to run on this card right now, or null. */
-  cueFor: (iid: InstanceId) => AnimPreset | 'enter' | null;
-  pulses: Partial<Record<TickStat, number>>;
-  turnFlash: TurnFlash | null;
-  /** Changes exactly when the arrangement might have moved. Drives the FLIP group. */
-  signature: string;
-  reduced: boolean;
-}
-
-const EMPTY: MotionEvent[] = [];
+import type { GameView } from '@engine/types';
+import { EASE_OUT, MOTION_MS } from './motion';
+import { prefersReducedMotion } from './useFlip';
 
 /** Respects the OS setting, and keeps respecting it if the player changes it mid-match. */
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = React.useState(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  });
+  const [reduced, setReduced] = React.useState(() => prefersReducedMotion());
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -62,10 +33,8 @@ export function usePrefersReducedMotion(): boolean {
 }
 
 /**
- * A string that changes when the layout might have, and only then.
- *
- * Zone membership and order, plus the turn. Deliberately *not* money or the
- * log, so a stat tick does not make the FLIP group re-measure mid-flight.
+ * A string that changes when the layout might have, and only then. Zone
+ * membership and order, plus the turn; deliberately not money or the log.
  */
 export function arrangementSignature(view: GameView | null): string {
   if (!view) return 'none';
@@ -85,54 +54,63 @@ export function arrangementSignature(view: GameView | null): string {
   ].join('|');
 }
 
-export function useMotion(view: GameView | null): MotionState {
-  const reduced = usePrefersReducedMotion();
-  const previous = React.useRef<GameView | null>(null);
-  const [events, setEvents] = React.useState<MotionEvent[]>(EMPTY);
+/**
+ * useLayoutEffect in the browser (it must run before paint), useEffect where
+ * there is no DOM, so the unit suite's server render stays quiet.
+ */
+export const useIsoLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
 
-  React.useEffect(() => {
-    if (!view) return undefined;
-    const next = diffViews(previous.current, view);
-    previous.current = view;
-    if (next.length === 0) return undefined;
+const UP = '#7fd4a0';
+const DOWN = '#e07070';
 
-    setEvents(next);
-    const hold = settleMs(next);
-    if (hold <= 0) {
-      setEvents(EMPTY);
-      return undefined;
-    }
-    const timer = setTimeout(() => setEvents(EMPTY), hold);
-    return () => clearTimeout(timer);
-  }, [view]);
-
-  const cues = React.useMemo(() => {
-    if (reduced) return new Map<InstanceId, AnimPreset | 'enter'>();
-    const map = new Map<InstanceId, AnimPreset | 'enter'>();
-    for (const cue of cardCues(events)) map.set(cue.iid, cue.anim);
-    return map;
-  }, [events, reduced]);
-
-  const pulses = React.useMemo(
-    () => (reduced ? {} : statPulses(events)),
-    [events, reduced],
-  );
-
-  const turnFlash = React.useMemo<TurnFlash | null>(() => {
-    for (const e of events) {
-      if (e.kind === 'turnChange') return { to: e.to, turn: e.turn, yours: e.yours };
-    }
-    return null;
-  }, [events]);
-
-  const signature = React.useMemo(() => arrangementSignature(view), [view]);
-
-  const cueFor = React.useCallback(
-    (iid: InstanceId) => cues.get(iid) ?? null,
-    [cues],
-  );
-
-  return { events, cueFor, pulses, turnFlash, signature, reduced };
+/**
+ * Pulse `ref` when `value` changes: a 100-200ms scale tick, green up, red down.
+ * `scope` is whose number this is; when it changes (a hotseat seat swap) the
+ * new value is simply adopted, since nothing ticked.
+ */
+export function usePulse(
+  value: number,
+  ref: React.RefObject<HTMLElement>,
+  scope: string,
+  opts: { only?: 'up' | 'down' } = {},
+): void {
+  const last = React.useRef<{ value: number; scope: string } | null>(null);
+  const only = opts.only;
+  useIsoLayoutEffect(() => {
+    const prev = last.current;
+    last.current = { value, scope };
+    if (!prev || prev.scope !== scope || prev.value === value) return;
+    const up = value > prev.value;
+    if ((only === 'up' && !up) || (only === 'down' && up)) return;
+    const el = ref.current;
+    if (!el || typeof el.animate !== 'function' || prefersReducedMotion()) return;
+    el.animate([{ transform: 'scale(1.3)', color: up ? UP : DOWN }, { transform: 'none' }], {
+      duration: MOTION_MS.beat,
+      easing: EASE_OUT,
+    });
+  }, [value, scope, ref, only]);
 }
 
-export default useMotion;
+/**
+ * Run `keyframes` on `ref` whenever `trigger` changes after the first render.
+ * The turn banner and the End-turn "done" cue use it.
+ */
+export function useOneShot(
+  trigger: string | number | boolean | null,
+  ref: React.RefObject<HTMLElement>,
+  keyframes: Keyframe[],
+  timing: KeyframeAnimationOptions,
+  when: (value: typeof trigger) => boolean = () => true,
+): void {
+  const last = React.useRef<typeof trigger | undefined>(undefined);
+  useIsoLayoutEffect(() => {
+    const prev = last.current;
+    last.current = trigger;
+    if (prev === undefined || prev === trigger || !when(trigger)) return;
+    const el = ref.current;
+    if (!el || typeof el.animate !== 'function' || prefersReducedMotion()) return;
+    el.animate(keyframes, timing);
+    // keyframes/timing/when are literals at the call site; the trigger is the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
+}

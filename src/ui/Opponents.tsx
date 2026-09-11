@@ -31,6 +31,7 @@
 import React from 'react';
 import type { CardView, GameView, LogEntry, OpponentView } from '@engine/types';
 import { hidePreview, showPreview } from './preview';
+import { artPlaceholder, artThumbUrl } from './art';
 import './opponents.css';
 
 // ---------------------------------------------------------------------------
@@ -62,11 +63,6 @@ function prettyDefId(defId: string): string {
       i > 0 && SMALL_WORDS.has(w.toLowerCase()) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1),
     )
     .join(' ');
-}
-
-/** Same path Card.tsx uses. JPEG, no alpha — see the note there. */
-function artUrl(key: string): string {
-  return `/art/${encodeURIComponent(key)}.jpg`;
 }
 
 function costLabel(card: CardView): string | null {
@@ -233,7 +229,6 @@ function beatText(b: Beat): string {
 function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.Element {
   const [failed, setFailed] = React.useState(false);
   const key = card.art?.key;
-  const hue = hueOf(card.name);
   const iid = card.iid;
   React.useEffect(() => () => hidePreview(iid), [iid]);
   return (
@@ -249,17 +244,19 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
       {key && !failed ? (
         <img
           className="seat-card-art"
-          src={artUrl(key)}
+          src={artThumbUrl(key)}
           alt=""
+          width={256}
+          height={256}
+          decoding="async"
           draggable={false}
+          style={{ background: artPlaceholder(card.name) }}
           onError={() => setFailed(true)}
         />
       ) : (
         <span
           className="seat-card-art seat-card-art-blank"
-          style={{
-            background: `linear-gradient(150deg, hsl(${hue} 45% 28%), hsl(${(hue + 48) % 360} 40% 16%))`,
-          }}
+          style={{ background: artPlaceholder(card.name) }}
           aria-hidden="true"
         >
           {initialsOf(card.name)}
@@ -310,13 +307,17 @@ function DeckStack({ count }: { count: number }): JSX.Element {
 // One seat: the compact strip row
 // ---------------------------------------------------------------------------
 
-function Seat({
+/**
+ * Memoised (RENDER-1): every prop is a primitive, a stabilised OpponentView or
+ * a stable callback, so a seat whose player did nothing skips the render.
+ */
+const Seat = React.memo(function Seat({
   o,
   active,
   deciding,
   won,
-  names,
-  log,
+  lastText,
+  lastTone,
   expanded,
   onToggle,
 }: {
@@ -325,12 +326,12 @@ function Seat({
   /** They owe the table an answer to a prompt. */
   deciding: boolean;
   won: boolean;
-  names: Map<string, string>;
-  log: readonly LogEntry[];
+  /** Their last move, already worded, or null. */
+  lastText: string | null;
+  lastTone: string | null;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle: (id: string) => void;
 }): JSX.Element {
-  const last = beatsFor(log, o.id, names, 1)[0] ?? null;
   const hue = hueOf(o.name || o.id);
 
   const classes = ['opponent', 'seat', 'seat-strip'];
@@ -357,11 +358,11 @@ function Seat({
       tabIndex={0}
       aria-expanded={expanded}
       title={expanded ? 'Hide their table' : 'Show their table'}
-      onClick={onToggle}
+      onClick={() => onToggle(o.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onToggle();
+          onToggle(o.id);
         }
       }}
     >
@@ -381,8 +382,8 @@ function Seat({
           {won && <span className="seat-badge seat-badge-won">winner</span>}
           {o.eliminated && <span className="opponent-elim seat-badge seat-badge-out">eliminated</span>}
         </span>
-        <span className={`seat-last${last ? ` seat-beat-${last.tone}` : ''}`} data-testid="seat-last">
-          {last ? beatText(last) : 'no moves yet'}
+        <span className={`seat-last${lastTone ? ` seat-beat-${lastTone}` : ''}`} data-testid="seat-last">
+          {lastText ?? 'no moves yet'}
           {o.play.length > 0 && <span className="seat-last-play"> · {o.play.length} in play</span>}
         </span>
       </span>
@@ -410,7 +411,7 @@ function Seat({
       </span>
     </div>
   );
-}
+});
 
 /** A seat opened up: their tableau, discard, auras and recent moves. In flow. */
 function SeatDetail({
@@ -507,24 +508,28 @@ export function Opponents({ view }: { view: GameView }): JSX.Element {
         : null;
   const winners = view.winners ?? [];
   const open = openId !== null ? (view.others.find((o) => o.id === openId) ?? null) : null;
+  const onToggle = React.useCallback((id: string) => setOpenId((prev) => (prev === id ? null : id)), []);
 
   return (
     <div className="opponents" data-testid="opponents">
       <div className="opponents-row">
         {view.others.length === 0 && <div className="seat-none">nobody else is seated</div>}
-        {view.others.map((o) => (
-          <Seat
-            key={o.id}
-            o={o}
-            active={view.activePlayer === o.id}
-            deciding={waitingOn === o.id}
-            won={view.ended && winners.includes(o.id)}
-            names={names}
-            log={view.log}
-            expanded={openId === o.id}
-            onToggle={() => setOpenId((prev) => (prev === o.id ? null : o.id))}
-          />
-        ))}
+        {view.others.map((o) => {
+          const last = beatsFor(view.log, o.id, names, 1)[0] ?? null;
+          return (
+            <Seat
+              key={o.id}
+              o={o}
+              active={view.activePlayer === o.id}
+              deciding={waitingOn === o.id}
+              won={view.ended && winners.includes(o.id)}
+              lastText={last ? beatText(last) : null}
+              lastTone={last ? last.tone : null}
+              expanded={openId === o.id}
+              onToggle={onToggle}
+            />
+          );
+        })}
       </div>
       {open && <SeatDetail o={open} names={names} log={view.log} />}
     </div>

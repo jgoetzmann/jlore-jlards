@@ -15,12 +15,24 @@
  * Reordering is offered only on your own turn: B20 makes an off-turn
  * `reorderHand` illegal, and a gesture the engine will refuse is worse than no
  * gesture. Off turn the cards stay at full opacity (LAY-5), just not clickable.
+ *
+ * The keyboard reaches the hand through `HandHandle` (MOT-12): digits play by
+ * the order this row *shows*, which is the optimistic order after a drag, not
+ * the host's. The cursor lives here too, so hovering a card re-renders this
+ * row, not the table (MOT-6).
+ *
+ * Each slot is a memoised `HandSlot` with stable handlers (RENDER-1), and its
+ * wrapper is the transform-free element FLIP measures and moves (MOT-4); the
+ * hover lift is on the card inside it.
  */
 
 import React from 'react';
 import type { CardView, GameAction, InstanceId, PlayerId } from '@engine/types';
 import { Card } from './Card';
-import type { AnimPreset } from './motion';
+import { digitLabel } from './keys';
+import { planReorder } from './motion';
+import { isInertPlay } from './turnflow';
+import { FlipContext, FlipScope, prefersReducedMotion, useFlipRef } from './useFlip';
 import './hand.css';
 
 /** A hand prompt: the hand's own cards are the options. */
@@ -36,16 +48,24 @@ export interface HandProps {
   yourTurn: boolean;
   actions: number;
   onAction: (action: GameAction) => void;
-  /** Index the keyboard is on, or -1. Owned by the table so one key map drives everything. */
-  cursorIndex?: number;
-  onCursorChange?: (index: number) => void;
-  cueFor?: (iid: InstanceId) => AnimPreset | 'enter' | null;
-  /** FLIP registration, shared with the rest of the table. */
-  flipRegister?: (key: string) => (el: HTMLElement | null) => void;
-  /** Cards whose intent is in flight and not yet reflected in a view. */
-  committed?: ReadonlySet<InstanceId>;
   /** Set while your own prompt asks you to choose cards from this hand. */
   pick?: HandPick | null;
+  /**
+   * Changes whenever a view arrives (the last log seq). A launched card that is
+   * still in hand once a newer view lands was refused, so it is given back.
+   */
+  revision?: number;
+}
+
+/** What the table's keyboard can ask of the hand. Every index is a shown index. */
+export interface HandHandle {
+  /** Play the card at this position as shown. False if it can't be played. */
+  playAt(index: number): boolean;
+  /** Nudge the cursor's card left or right (your turn only). */
+  nudge(delta: -1 | 1): void;
+  moveCursor(delta: -1 | 1): void;
+  /** Mark cards as in flight (Play money), like a click does. */
+  markLaunched(iids: readonly InstanceId[]): void;
 }
 
 /**
@@ -57,7 +77,10 @@ export interface HandProps {
  */
 export const ORDER_ACK_TIMEOUT_MS = 2500;
 
-/** How long a played card stays visibly launched before the row gives up on it. */
+/**
+ * A fallback only: a launched card normally clears on the next view (HS-9).
+ * This covers an intent the host dropped without publishing anything.
+ */
 export const LAUNCH_TIMEOUT_MS = 2500;
 
 /** Move the item at `from` to index `to`, keeping everything else in order. */
@@ -169,25 +192,155 @@ export function handStatus(opts: {
   return opts.playable === 0 ? `nothing playable · ${actionLabel}` : `${opts.playable} playable · ${actionLabel}`;
 }
 
-export function Hand({
-  hand,
-  playerId,
-  yourTurn,
-  actions,
-  onAction,
-  cursorIndex = -1,
-  onCursorChange,
-  cueFor,
-  flipRegister,
-  committed,
-  pick,
-}: HandProps): JSX.Element {
+// ---------------------------------------------------------------------------
+// One slot
+// ---------------------------------------------------------------------------
+
+interface HandSlotProps {
+  card: CardView;
+  index: number;
+  count: number;
+  canReorder: boolean;
+  clickable: boolean;
+  inert: boolean;
+  inFlight: boolean;
+  picking: boolean;
+  option: boolean;
+  pickIndex: number;
+  dragging: boolean;
+  caretBefore: boolean;
+  caretAfter: boolean;
+  cursor: boolean;
+  hint: string | null;
+  onCardClick: (card: CardView) => void;
+  onDragStartAt: (index: number, e: React.DragEvent, card: CardView) => void;
+  onDragEnd: () => void;
+  onShift: (index: number, delta: -1 | 1) => void;
+  onHover: (index: number) => void;
+}
+
+const HandSlot = React.memo(function HandSlot({
+  card,
+  index,
+  count,
+  canReorder,
+  clickable,
+  inert,
+  inFlight,
+  picking,
+  option,
+  pickIndex,
+  dragging,
+  caretBefore,
+  caretAfter,
+  cursor,
+  hint,
+  onCardClick,
+  onDragStartAt,
+  onDragEnd,
+  onShift,
+  onHover,
+}: HandSlotProps): JSX.Element {
+  // The FLIP registration: this wrapper carries no transform of its own, so a
+  // measurement never includes a hover lift.
+  const flipRef = useFlipRef(card.iid);
+
+  const classes = ['hand-slot'];
+  if (caretBefore) classes.push('hand-slot-drop-before', 'hand-slot-over');
+  if (caretAfter) classes.push('hand-slot-drop-after', 'hand-slot-over');
+  if (dragging) classes.push('hand-slot-dragging');
+  if (cursor) classes.push('hand-slot-cursor');
+  if (inFlight) classes.push('hand-slot-launched');
+  if (option) classes.push('hand-slot-option');
+
+  return (
+    <div
+      ref={flipRef}
+      className={classes.join(' ')}
+      data-hand-index={index}
+      onMouseEnter={() => onHover(index)}
+      onFocus={() => onHover(index)}
+    >
+      <Card
+        card={card}
+        variant="dock"
+        draggable={canReorder}
+        index={index}
+        cursor={cursor}
+        committed={inFlight && !picking}
+        inert={inert && !picking}
+        disabled={!clickable}
+        selected={pickIndex >= 0}
+        badge={pickIndex >= 0 ? String(pickIndex + 1) : null}
+        hint={hint}
+        onClick={clickable ? onCardClick : undefined}
+        onDragStart={(e) => onDragStartAt(index, e, card)}
+        onDragEnd={onDragEnd}
+        footer={
+          canReorder ? (
+            <span className="hand-nudge">
+              <button
+                type="button"
+                className="nudge"
+                title="Move this card left"
+                aria-label={`Move ${card.name} left`}
+                disabled={index === 0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShift(index, -1);
+                }}
+              >
+                ◀
+              </button>
+              <span className="hand-grip" aria-hidden="true" title="Drag to reorder">
+                ⠿
+              </span>
+              <button
+                type="button"
+                className="nudge"
+                title="Move this card right"
+                aria-label={`Move ${card.name} right`}
+                disabled={index === count - 1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShift(index, 1);
+                }}
+              >
+                ▶
+              </button>
+            </span>
+          ) : null
+        }
+      />
+    </div>
+  );
+});
+
+/** A callback whose identity never changes but always runs the latest closure. */
+function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = React.useRef(fn);
+  ref.current = fn;
+  return React.useCallback((...args: A) => ref.current(...args), []);
+}
+
+// ---------------------------------------------------------------------------
+// The row
+// ---------------------------------------------------------------------------
+
+const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
+  { hand, playerId, yourTurn, onAction, pick, revision = 0 },
+  ref,
+) {
   const [localOrder, setLocalOrder] = React.useState<CardView[] | null>(null);
   const [pendingSig, setPendingSig] = React.useState<string | null>(null);
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
   const [dropPos, setDropPos] = React.useState<number | null>(null);
-  const [launched, setLaunched] = React.useState<readonly InstanceId[]>([]);
+  const [cursor, setCursor] = React.useState(-1);
+  // Launched cards remember the view they were launched against: once a newer
+  // view is showing and the card is still here, the play was refused.
+  const [launch, setLaunch] = React.useState<{ iids: readonly InstanceId[]; revision: number } | null>(null);
   const rowRef = React.useRef<HTMLDivElement | null>(null);
+  const registry = React.useContext(FlipContext);
 
   // `dragstart` sets state, but the first `dragover` can arrive before React
   // has re-rendered with it, and a dragover that does not `preventDefault` is a
@@ -231,14 +384,6 @@ export function Hand({
     return () => clearTimeout(timer);
   }, [pendingSig]);
 
-  // A launched card that left the hand was played; stop tracking it.
-  React.useEffect(() => {
-    setLaunched((prev) => {
-      const next = prev.filter((iid) => hand.some((c) => c.iid === iid));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [handSig, hand]);
-
   // If the hand changes mid-drag the card being dragged may have been unmounted
   // with it, and an unmounted source never delivers its `dragend` — which would
   // leave the row believing a drag was still in progress. End it here instead;
@@ -250,12 +395,25 @@ export function Hand({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handSig, hand]);
 
-  // ...and one that never left was refused, so give it back to the player.
+  // The fallback for an intent that no view ever answered.
   React.useEffect(() => {
-    if (launched.length === 0) return;
-    const timer = setTimeout(() => setLaunched([]), LAUNCH_TIMEOUT_MS);
+    if (launch === null) return;
+    const timer = setTimeout(() => setLaunch(null), LAUNCH_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [launched]);
+  }, [launch]);
+
+  // The cursor follows the hand: a card played out from under it would
+  // otherwise leave the highlight pointing at whatever slid into that slot.
+  React.useEffect(() => {
+    setCursor((c) => (c >= shown.length ? shown.length - 1 : c));
+  }, [shown.length]);
+
+  const launchedSet = React.useMemo(
+    () => new Set(launch !== null && launch.revision === revision ? launch.iids : []),
+    [launch, revision],
+  );
+  const isPlayable = (card: CardView): boolean =>
+    yourTurn && card.playable !== false && !launchedSet.has(card.iid);
 
   function commit(next: CardView[]): void {
     const sig = orderSignature(next);
@@ -267,17 +425,20 @@ export function Hand({
     onAction({ type: 'reorderHand', player: playerId, hand: next.map((c) => c.iid) });
   }
 
+  function launchCards(iids: readonly InstanceId[]): void {
+    setLaunch((prev) => ({
+      iids: prev !== null && prev.revision === revision ? [...prev.iids, ...iids] : [...iids],
+      revision,
+    }));
+  }
+
   function play(card: CardView): void {
     // Mark it launched *before* sending. The view that takes this card out of
     // the hand may be a relay round-trip away and the click needs an answer now —
     // and the card has to stop being clickable, so an impatient second click
     // cannot land on whatever slides into its place.
-    setLaunched((prev) => (prev.includes(card.iid) ? prev : [...prev, card.iid]));
+    launchCards([card.iid]);
     onAction({ type: 'play', player: playerId, iid: card.iid });
-  }
-
-  function shift(index: number, delta: number): void {
-    commit(moveInOrder(shown, index, index + delta));
   }
 
   function endDrag(): void {
@@ -286,6 +447,80 @@ export function Hand({
     setDragIndex(null);
     setDropPos(null);
   }
+
+  const onCardClick = useStable((card: CardView) => {
+    if (picking && pick) {
+      const key = pick.keyFor.get(card.iid);
+      if (key !== undefined) pick.onToggle(key);
+      return;
+    }
+    if (isPlayable(card)) play(card);
+  });
+
+  const onDragStartAt = useStable((index: number, e: React.DragEvent, card: CardView) => {
+    if (!canReorder) return;
+    dragFromRef.current = index;
+    dragHandRef.current = contentSignature(hand);
+    setDragIndex(index);
+    setDropPos(index);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', card.iid);
+    } catch {
+      /* some browsers refuse setData on synthetic drags */
+    }
+  });
+
+  const onDragEndStable = useStable(() => endDrag());
+
+  const onShift = useStable((index: number, delta: -1 | 1) => {
+    if (!canReorder) return;
+    commit(moveInOrder(shown, index, index + delta));
+  });
+
+  const onHover = useStable((index: number) => {
+    setCursor((c) => (c === index ? c : index));
+  });
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      playAt: (index: number) => latest.current.playAt(index),
+      nudge: (delta: -1 | 1) => latest.current.nudge(delta),
+      moveCursor: (delta: -1 | 1) => latest.current.moveCursor(delta),
+      markLaunched: (iids: readonly InstanceId[]) => latest.current.launchCards(iids),
+    }),
+    [],
+  );
+
+  const latest = React.useRef({
+    playAt: (_i: number): boolean => false,
+    nudge: (_d: -1 | 1): void => undefined,
+    moveCursor: (_d: -1 | 1): void => undefined,
+    launchCards: (_iids: readonly InstanceId[]): void => undefined,
+  });
+  latest.current = {
+    playAt(index) {
+      const card = shown[index];
+      if (!card || picking || !isPlayable(card)) return false;
+      setCursor(index);
+      play(card);
+      return true;
+    },
+    nudge(delta) {
+      if (!canReorder || cursor < 0) return;
+      const to = cursor + delta;
+      if (to < 0 || to >= shown.length) return;
+      commit(moveInOrder(shown, cursor, to));
+      setCursor(to);
+    },
+    moveCursor(delta) {
+      const n = shown.length;
+      if (n === 0) return;
+      setCursor((c) => (c < 0 ? (delta > 0 ? 0 : n - 1) : (((c + delta) % n) + n) % n));
+    },
+    launchCards,
+  };
 
   function onRowDragOver(e: React.DragEvent): void {
     // Not our drag — a file, a link, a selection from another app. Leaving it
@@ -318,10 +553,6 @@ export function Hand({
     commit(moveInOrder(shown, from, targetIndexFor(from, pos)));
   }
 
-  const launchedSet = new Set(launched);
-  const isPlayable = (card: CardView): boolean =>
-    yourTurn && card.playable !== false && !launchedSet.has(card.iid);
-
   // Only draw the caret where the drop would actually change something.
   const caret =
     dropPos !== null && dragIndex !== null && !isNoopDrop(dragIndex, dropPos) ? dropPos : null;
@@ -330,116 +561,78 @@ export function Hand({
   if (!yourTurn) handClasses.push('hand-offturn');
   if (picking) handClasses.push('hand-picking');
 
-  return (
-    <div className={handClasses.join(' ')}>
-      <div
-        className={`hand-row${dragging ? ' hand-row-dragging' : ''}`}
-        data-testid="hand"
-        ref={rowRef}
-        style={{ ['--n']: String(Math.max(1, shown.length)) } as React.CSSProperties}
-        onDragOver={canReorder ? onRowDragOver : undefined}
-        onDragLeave={canReorder ? onRowDragLeave : undefined}
-        onDrop={canReorder ? onRowDrop : undefined}
-      >
-        {shown.length === 0 && <div className="hand-empty">no cards in hand</div>}
-        {shown.map((card, i) => {
-          const playable = isPlayable(card);
-          const inFlight = launchedSet.has(card.iid) || (committed?.has(card.iid) ?? false);
-          const optKey = picking ? (pick.keyFor.get(card.iid) ?? null) : null;
-          const pickIndex = optKey !== null && pick ? pick.picked.indexOf(optKey) : -1;
-          const onCardClick = picking
-            ? optKey !== null
-              ? () => pick.onToggle(optKey)
-              : undefined
-            : playable
-              ? play
-              : undefined;
+  const showHints = yourTurn && !picking;
 
-          const classes = ['hand-slot'];
-          if (caret === i) classes.push('hand-slot-drop-before', 'hand-slot-over');
-          if (caret === shown.length && i === shown.length - 1) {
-            classes.push('hand-slot-drop-after', 'hand-slot-over');
-          }
-          if (dragIndex === i) classes.push('hand-slot-dragging');
-          if (cursorIndex === i) classes.push('hand-slot-cursor');
-          if (inFlight) classes.push('hand-slot-launched');
-          if (optKey !== null) classes.push('hand-slot-option');
-          return (
-            <div
-              className={classes.join(' ')}
-              data-hand-index={i}
-              key={card.iid}
-              onMouseEnter={() => onCursorChange?.(i)}
-              onFocus={() => onCursorChange?.(i)}
-            >
-              <Card
-                card={card}
-                variant="dock"
-                draggable={canReorder}
-                index={i}
-                cursor={cursorIndex === i}
-                cue={cueFor?.(card.iid) ?? null}
-                committed={inFlight && !picking}
-                elementRef={flipRegister?.(card.iid)}
-                disabled={onCardClick === undefined}
-                selected={pickIndex >= 0}
-                badge={pickIndex >= 0 ? String(pickIndex + 1) : null}
-                onClick={onCardClick}
-                onDragStart={(e) => {
-                  dragFromRef.current = i;
-                  dragHandRef.current = contentSignature(hand);
-                  setDragIndex(i);
-                  setDropPos(i);
-                  e.dataTransfer.effectAllowed = 'move';
-                  try {
-                    e.dataTransfer.setData('text/plain', card.iid);
-                  } catch {
-                    /* some browsers refuse setData on synthetic drags */
-                  }
-                }}
-                onDragEnd={endDrag}
-                footer={
-                  canReorder ? (
-                    <span className="hand-nudge">
-                      <button
-                        type="button"
-                        className="nudge"
-                        title="Move this card left"
-                        aria-label={`Move ${card.name} left`}
-                        disabled={i === 0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          shift(i, -1);
-                        }}
-                      >
-                        ◀
-                      </button>
-                      <span className="hand-grip" aria-hidden="true" title="Drag to reorder">
-                        ⠿
-                      </span>
-                      <button
-                        type="button"
-                        className="nudge"
-                        title="Move this card right"
-                        aria-label={`Move ${card.name} right`}
-                        disabled={i === shown.length - 1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          shift(i, 1);
-                        }}
-                      >
-                        ▶
-                      </button>
-                    </span>
-                  ) : null
-                }
-              />
-            </div>
-          );
-        })}
-      </div>
+  // A local reorder (drag, nudge, keyboard, or the revert when the host never
+  // confirms) re-renders only this row, so it gets its own FLIP scope. A change
+  // that came with a new view is the table's scope's business, not this one's.
+  const orderToken = React.useMemo(() => ({ hand, shown }), [hand, shown]);
+
+  const row = (
+    <div
+      className={`hand-row${dragging ? ' hand-row-dragging' : ''}`}
+      data-testid="hand"
+      ref={rowRef}
+      style={{ ['--n']: String(Math.max(1, shown.length)) } as React.CSSProperties}
+      onDragOver={canReorder ? onRowDragOver : undefined}
+      onDragLeave={canReorder ? onRowDragLeave : undefined}
+      onDrop={canReorder ? onRowDrop : undefined}
+    >
+      {shown.length === 0 && <div className="hand-empty">no cards in hand</div>}
+      {shown.map((card, i) => {
+        const optKey = picking ? (pick.keyFor.get(card.iid) ?? null) : null;
+        const pickIndex = optKey !== null && pick ? pick.picked.indexOf(optKey) : -1;
+        const inFlight = launchedSet.has(card.iid);
+        const clickable = picking ? optKey !== null : isPlayable(card);
+        return (
+          <HandSlot
+            key={card.iid}
+            card={card}
+            index={i}
+            count={shown.length}
+            canReorder={canReorder}
+            clickable={clickable}
+            inert={isInertPlay(card)}
+            inFlight={inFlight}
+            picking={picking}
+            option={optKey !== null}
+            pickIndex={pickIndex}
+            dragging={dragIndex === i}
+            caretBefore={caret === i}
+            caretAfter={caret === shown.length && i === shown.length - 1}
+            cursor={cursor === i}
+            hint={showHints ? digitLabel(i) : null}
+            onCardClick={onCardClick}
+            onDragStartAt={onDragStartAt}
+            onDragEnd={onDragEndStable}
+            onShift={onShift}
+            onHover={onHover}
+          />
+        );
+      })}
     </div>
   );
-}
+
+  return (
+    <div className={handClasses.join(' ')}>
+      {registry ? (
+        <FlipScope
+          registry={registry}
+          token={orderToken}
+          enabled={!prefersReducedMotion()}
+          plan={(a, b) =>
+            a.hand !== b.hand ? null : planReorder(a.shown.map((c) => c.iid), b.shown.map((c) => c.iid))
+          }
+        >
+          {row}
+        </FlipScope>
+      ) : (
+        row
+      )}
+    </div>
+  );
+});
+
+export const Hand = React.memo(HandImpl);
 
 export default Hand;

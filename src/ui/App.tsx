@@ -17,7 +17,7 @@ import { getSeatId, getSettings, setSettings, loadSnapshot, clearSnapshot } from
 import { useGame, type GameMode } from './useGame';
 import { Lobby } from './Lobby';
 import { Board, type PilePick } from './Board';
-import { Hand, handStatus, type HandPick } from './Hand';
+import { Hand, handStatus, type HandHandle, type HandPick } from './Hand';
 import { Field } from './Field';
 import { Log } from './Log';
 import { AnomalyChip, StatCluster, TurnClock } from './TurnBar';
@@ -25,7 +25,15 @@ import { PromptOverlay } from './PromptOverlay';
 import { Card, CardArt } from './Card';
 import { CardPreview } from './CardPreview';
 import { Opponents, hueOf } from './Opponents';
-import { ownPrompt, promptBounds, promptPlacement, togglePick, waitingOnOther } from './prompt';
+import { ownPrompt, promptBounds, promptPlacement, promptReady, togglePick, waitingOnOther } from './prompt';
+import { KEY_HELP, type KeyIntent } from './keys';
+import { useKeyboard } from './useKeyboard';
+import { ANCHOR_DISCARD, ANCHOR_LIBRARY, MOTION_MS, planFlip } from './motion';
+import { FlipContext, FlipScope, createFlipRegistry, type FlipRegistry } from './useFlip';
+import { useOneShot, usePrefersReducedMotion } from './useMotion';
+import { isUsefulPlay, playMoneyPlan, submitsOnPick, turnDone } from './turnflow';
+import { stabilizeView } from './viewcache';
+import { preloadArt } from './art';
 
 /** A room opens at the full table; the lobby narrows it if the host wants. */
 const MAX_ROOM_SEATS = 4;
@@ -236,7 +244,16 @@ function forgetOpenLobby(code: string): void {
 /** At or above this viewport width the log drawer starts open. */
 export const DRAWER_OPEN_MIN_WIDTH = 1600;
 
+/** A buy nobody answered is given back after this long (TURN-8 fallback). */
+export const BUY_INFLIGHT_TIMEOUT_MS = 4000;
+
 const NO_PICKS: readonly string[] = [];
+
+/** Changes whenever a view carries anything new: every action logs (B118). */
+export function viewRevision(view: GameView): number {
+  const last = view.log[view.log.length - 1];
+  return last ? last.seq : 0;
+}
 
 export interface TableLayoutProps {
   view: GameView;
@@ -247,7 +264,80 @@ export interface TableLayoutProps {
   activeSeat: string | null;
   setActiveSeat: (seat: string) => void;
   send: (action: GameAction) => void;
+  /**
+   * Several actions as one ordered intent (the NET track's `session.sendMany`).
+   * Absent, "Play money" falls back to one `send` per card, in order.
+   */
+  sendMany?: (actions: GameAction[]) => void;
   turnSeconds: number;
+}
+
+/**
+ * The one moment worth a beat: a turn change replaces the whole board at once.
+ * Always in the DOM, invisible, `pointer-events: none`; a turn change runs one
+ * 600ms sweep on it. Nothing waits on it.
+ */
+function TurnBanner({
+  view,
+  names,
+  mode,
+}: {
+  view: GameView;
+  names: Record<PlayerId, string>;
+  mode: GameMode;
+}): JSX.Element {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const yours = view.activePlayer === view.you.id;
+  const who = names[view.activePlayer] ?? view.activePlayer;
+  // In hotseat every seat is "you"; the name is what tells the table whose go it is.
+  const label = view.ended ? 'Game over' : yours && mode !== 'hotseat' ? 'Your turn' : `${who}’s turn`;
+  useOneShot(
+    `${view.turn}:${view.activePlayer}:${view.ended ? 1 : 0}`,
+    ref,
+    [
+      { opacity: 0, transform: 'translateY(10px) scale(0.96)' },
+      { opacity: 1, transform: 'none', offset: 0.2 },
+      { opacity: 1, transform: 'none', offset: 0.7 },
+      { opacity: 0, transform: 'translateY(-8px)' },
+    ],
+    { duration: MOTION_MS.turn, easing: 'ease-out' },
+  );
+  return (
+    <div ref={ref} className={`turn-banner${yours ? ' turn-banner-yours' : ''}`} data-testid="turn-banner" aria-hidden="true">
+      <div className="turn-banner-inner">
+        {label}
+        <span className="turn-banner-turn"> · turn {view.turn}</span>
+      </div>
+    </div>
+  );
+}
+
+/** The keyboard sheet, generated from the same table the handler dispatches on. */
+function KeyHelp({ onClose }: { onClose: () => void }): JSX.Element {
+  return (
+    <div className="prompt-panel-host key-help-host">
+      <div className="key-help" data-testid="key-help" role="dialog" aria-label="Keyboard shortcuts">
+        <h3>Keyboard</h3>
+        <dl className="key-help-list">
+          {KEY_HELP.map((row) => (
+            <React.Fragment key={row.keys}>
+              <dt>
+                {row.keys.split(/\s+/).map((k, i) => (
+                  <kbd key={`${k}-${i}`}>{k}</kbd>
+                ))}
+              </dt>
+              <dd>{row.what}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+        <div className="prompt-actions">
+          <button type="button" className="prompt-confirm" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -260,10 +350,15 @@ export interface TableLayoutProps {
  *   drawer  (right column)  graveyard and log; closed by default below 1600px
  *
  * The page itself never scrolls. Nothing is sticky, fixed or absolute over
- * anything clickable — the hover preview is `pointer-events: none`, and a
- * prompt panel covers the board region only — so every pile's Buy stays
- * hit-testable once the board region is scrolled to it. `e2e/layout.spec.ts`
- * holds all of that.
+ * anything clickable — the hover preview, the turn banner and the card-flight
+ * ghosts are all `pointer-events: none`, and a prompt panel covers the board
+ * region only — so every pile's Buy stays hit-testable once the board region is
+ * scrolled to it. `e2e/layout.spec.ts` holds all of that.
+ *
+ * Interaction (UI-2): the keyboard (keys.ts), Play money, one-click single
+ * picks, the per-pile buy guard and the "nothing left" cue on End turn. Motion:
+ * one FlipScope over the whole table plans card flights from the view diff
+ * (motion.ts `planFlip`) and runs them before paint (useFlip.ts).
  *
  * Pure: everything comes in through props, so the unit suite renders the whole
  * table without a session.
@@ -277,19 +372,40 @@ export function TableLayout({
   activeSeat,
   setActiveSeat,
   send,
+  sendMany,
   turnSeconds,
 }: TableLayoutProps): JSX.Element {
+  const viewRef = React.useRef(view);
+  viewRef.current = view;
+
+  // Names change only when someone renames, not on every view; keying the memo
+  // on the text keeps the log and prompt from re-rendering for nothing.
+  const namesKey = [`${view.you.id}=${view.you.name}`, ...view.others.map((o) => `${o.id}=${o.name}`)].join('|');
   const names = React.useMemo(() => {
     const out: Record<PlayerId, string> = {};
-    out[view.you.id] = view.you.name;
-    for (const o of view.others) out[o.id] = o.name;
+    for (const pair of namesKey.split('|')) {
+      const at = pair.indexOf('=');
+      out[pair.slice(0, at)] = pair.slice(at + 1);
+    }
     return out;
-  }, [view]);
+  }, [namesKey]);
 
   const me = view.you.id;
   const yourTurn = view.activePlayer === me && !view.ended;
+  const revision = viewRevision(view);
 
-  // --- drawer --------------------------------------------------------------
+  // --- motion ---------------------------------------------------------------
+  const reduced = usePrefersReducedMotion();
+  const registryRef = React.useRef<FlipRegistry | null>(null);
+  if (registryRef.current === null) registryRef.current = createFlipRegistry();
+  const registry = registryRef.current;
+
+  // Warm the art for everything this view shows, after paint (ART-1).
+  React.useEffect(() => {
+    preloadArt(view);
+  }, [view]);
+
+  // --- drawer ---------------------------------------------------------------
   const [drawerOpen, setDrawerOpen] = React.useState(
     () => typeof window !== 'undefined' && window.innerWidth >= DRAWER_OPEN_MIN_WIDTH,
   );
@@ -300,8 +416,9 @@ export function TableLayout({
     gyRef.current?.scrollIntoView({ block: 'start' });
     setGyWanted(false);
   }, [drawerOpen, gyWanted]);
+  const [helpOpen, setHelpOpen] = React.useState(false);
 
-  // --- your prompt ---------------------------------------------------------
+  // --- your prompt ------------------------------------------------------------
   const prompt = ownPrompt(view.pending, me);
   const placement = prompt ? promptPlacement(prompt, view) : null;
   const promptId = prompt ? prompt.id : null;
@@ -326,19 +443,30 @@ export function TableLayout({
     [promptId, bounds?.max, bounds?.ordering],
   );
 
-  let handPick: HandPick | null = null;
-  let pilePick: PilePick | null = null;
-  if (prompt && placement === 'hand') {
+  const handPick = React.useMemo<HandPick | null>(() => {
+    if (!prompt || placement !== 'hand') return null;
     const keyFor = new Map<InstanceId, string>();
     for (const o of prompt.options) if (o.iid) keyFor.set(o.iid, o.key);
-    handPick = { keyFor, picked, onToggle };
-  } else if (prompt && placement === 'board') {
+    return { keyFor, picked, onToggle };
+  }, [prompt, placement, picked, onToggle]);
+  const pilePick = React.useMemo<PilePick | null>(() => {
+    if (!prompt || placement !== 'board') return null;
     const keyFor = new Map<PileId, string>();
     for (const o of prompt.options) if (o.pileId) keyFor.set(o.pileId, o.key);
-    pilePick = { keyFor, picked, onToggle };
-  }
+    return { keyFor, picked, onToggle };
+  }, [prompt, placement, picked, onToggle]);
 
-  // --- somebody else's prompt ---------------------------------------------
+  const resolve = React.useCallback(
+    (keys: readonly string[]) => {
+      const v = viewRef.current;
+      const p = ownPrompt(v.pending, v.you.id);
+      if (!p) return;
+      send({ type: 'resolve', player: v.you.id, promptId: p.id, keys: [...keys] });
+    },
+    [send],
+  );
+
+  // --- somebody else's prompt -------------------------------------------------
   const waitingOn = waitingOnOther(view.pending, me);
   let onPass: (() => void) | null = null;
   if (mode === 'hotseat' && waitingOn !== null) {
@@ -346,240 +474,369 @@ export function TableLayout({
     if (seat && seat !== activeSeat) onPass = () => setActiveSeat(seat);
   }
 
-  // --- whose turn ----------------------------------------------------------
+  // --- whose turn --------------------------------------------------------------
   const ownerName = names[view.activePlayer] ?? view.activePlayer;
   const ownerLabel = view.ended ? 'Game over' : yourTurn ? 'Your turn' : `${ownerName}’s turn`;
 
+  // --- buying (TURN-8) ----------------------------------------------------------
+  // A buy is in flight until a newer view lands (then the pile's own state says
+  // what happened) or the fallback timeout passes. While it is, that pile's Buy
+  // is off, so a double-click cannot buy twice.
+  const [buyFlight, setBuyFlight] = React.useState<{ pileId: PileId; revision: number } | null>(null);
+  const inFlightPile = buyFlight !== null && buyFlight.revision === revision ? buyFlight.pileId : null;
+  React.useEffect(() => {
+    if (buyFlight === null) return;
+    const t = setTimeout(() => setBuyFlight(null), BUY_INFLIGHT_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [buyFlight]);
+
   const onBuy = React.useCallback(
-    (pileId: PileId) => send({ type: 'buy', player: me, pileId }),
-    [send, me],
+    (pileId: PileId) => {
+      const v = viewRef.current;
+      setBuyFlight({ pileId, revision: viewRevision(v) });
+      send({ type: 'buy', player: v.you.id, pileId });
+    },
+    [send],
   );
 
-  const playable = view.you.hand.filter((c) => yourTurn && c.playable !== false).length;
+  // --- Play money (TURN-2) ---------------------------------------------------------
+  const handRef = React.useRef<HandHandle>(null);
+  const money = React.useMemo(() => playMoneyPlan(view), [view]);
+  const onPlayMoney = React.useCallback(() => {
+    const v = viewRef.current;
+    const p = playMoneyPlan(v);
+    if (p.blocked !== null || p.iids.length === 0) return;
+    const actions: GameAction[] = p.iids.map((iid) => ({ type: 'play', player: v.you.id, iid }));
+    handRef.current?.markLaunched(p.iids);
+    // One ordered batch when the session has one; otherwise the same actions
+    // one at a time, in the same order.
+    if (sendMany) sendMany(actions);
+    else for (const a of actions) send(a);
+  }, [send, sendMany]);
+
+  const done = React.useMemo(() => turnDone(view), [view]);
+  const canEnd = yourTurn && view.pending === null;
+
+  // --- keyboard ---------------------------------------------------------------------
+  const promptReadyNow = prompt ? promptReady(prompt, picked) : false;
+  useKeyboard(
+    {
+      yourTurn,
+      ended: view.ended,
+      handSize: view.you.hand.length,
+      promptOpen: prompt !== null,
+      promptOptionCount: prompt ? prompt.options.length : 0,
+      promptReady: promptReadyNow,
+      promptCanSkip: prompt ? promptBounds(prompt).min === 0 : false,
+      promptHasDefault: prompt ? prompt.defaultKeys.length > 0 : false,
+    },
+    (intent: KeyIntent) => {
+      switch (intent.kind) {
+        case 'toggleHelp':
+          setHelpOpen((v) => !v);
+          return;
+        case 'toggleLog':
+          setDrawerOpen((v) => !v);
+          return;
+        case 'moveFocus':
+          handRef.current?.moveCursor(intent.delta);
+          return;
+        case 'nudgeHand':
+          handRef.current?.nudge(intent.delta);
+          return;
+        case 'playHand':
+          handRef.current?.playAt(intent.index);
+          return;
+        case 'playMoney':
+          onPlayMoney();
+          return;
+        case 'endTurn':
+          if (canEnd) send({ type: 'endTurn', player: me });
+          return;
+        case 'pickOption': {
+          const option = prompt?.options[intent.index];
+          if (!prompt || !option) return;
+          if (submitsOnPick(prompt)) resolve([option.key]);
+          else onToggle(option.key);
+          return;
+        }
+        case 'confirmPrompt':
+          if (prompt && promptReady(prompt, picked)) resolve(picked);
+          return;
+        case 'skipPrompt':
+          resolve([]);
+          return;
+        case 'takeDefault':
+          if (prompt) resolve(prompt.defaultKeys);
+          return;
+        case 'clearSelection':
+          setPicked([]);
+          return;
+        default:
+          return;
+      }
+    },
+  );
+
+  const playable = view.you.hand.filter((c) => isUsefulPlay(c, yourTurn)).length;
   const gy = view.you.gy;
   const topGy = gy.length > 0 ? gy[gy.length - 1] : null;
   const barPrompt = placement === 'hand' || placement === 'board';
 
   return (
-    <div
-      className="table"
-      data-testid="table"
-      data-your-turn={yourTurn ? 'true' : 'false'}
-      data-drawer={drawerOpen ? 'open' : 'closed'}
-    >
-      <header className="topbar" data-testid="topbar">
-        <span className="brand">Jlore Jlards</span>
-        {code && (
-          <button
-            type="button"
-            className="room-chip"
-            title="Copy the invite link"
-            onClick={() => {
-              try {
-                void navigator.clipboard.writeText(window.location.href);
-              } catch {
-                /* clipboard is a nicety */
-              }
-            }}
-          >
-            Room {code}
-          </button>
-        )}
-        {mode === 'hotseat' && (
-          <div className="seat-switch">
-            {seats.map((s) => {
-              const v = views[s];
-              const toMove = Boolean(v && v.you.id === v.activePlayer);
-              return (
-                <button
-                  type="button"
-                  key={s}
-                  className={`seat-btn${activeSeat === s ? ' seat-btn-on' : ''}${toMove ? ' seat-btn-active' : ''}`}
-                  data-testid="seat-btn"
-                  data-seat={s}
-                  data-seat-on={activeSeat === s ? 'true' : 'false'}
-                  data-seat-to-move={toMove ? 'true' : 'false'}
-                  onClick={() => setActiveSeat(s)}
-                >
-                  {v ? v.you.name : s}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <span
-          className="turn-owner"
-          data-testid="turn-owner"
+    <FlipContext.Provider value={registry}>
+      <FlipScope registry={registry} token={view} plan={planFlip} enabled={!reduced}>
+        <div
+          className="table"
+          data-testid="table"
           data-your-turn={yourTurn ? 'true' : 'false'}
-          style={{ ['--owner-hue']: String(hueOf(ownerName || view.activePlayer)) } as React.CSSProperties}
+          data-drawer={drawerOpen ? 'open' : 'closed'}
         >
-          {ownerLabel}
-        </span>
-        <TurnClock view={view} turnSeconds={turnSeconds} />
-        {waitingOn !== null && (
-          <PromptOverlay pending={view.pending} playerId={me} names={names} onAction={send} onPass={onPass} />
-        )}
-        <AnomalyChip anomaly={view.anomaly} />
-        <span className="topbar-spacer" />
-        <span className="who" data-testid="you-are" data-you-id={me}>
-          You are <strong>{view.you.name}</strong>
-        </span>
-        <button
-          type="button"
-          className="drawer-toggle"
-          data-testid="drawer-toggle"
-          aria-pressed={drawerOpen}
-          onClick={() => setDrawerOpen((v) => !v)}
-        >
-          {drawerOpen ? 'Hide log' : 'Log'}
-        </button>
-      </header>
-
-      <Opponents view={view} />
-
-      <main className="board-region" data-testid="board-region">
-        {view.ended && (
-          <div className="game-over" data-testid="game-over">
-            <h2>Game over</h2>
-            <p>{view.endReason ?? 'the game ended'}</p>
-            <p className="winners">
-              {(view.winners ?? []).map((w) => names[w] ?? w).join(', ') || 'nobody'} wins
-            </p>
-          </div>
-        )}
-        <Board view={view} onBuy={onBuy} yourTurn={yourTurn} pilePick={pilePick} />
-      </main>
-
-      {placement === 'panel' && (
-        <div className="prompt-panel-host">
-          <PromptOverlay
-            pending={view.pending}
-            playerId={me}
-            names={names}
-            onAction={send}
-            picked={picked}
-            onPickedChange={setPicked}
-            placement="panel"
-          />
-        </div>
-      )}
-
-      <aside className="drawer table-side" data-testid="drawer" hidden={!drawerOpen}>
-        {drawerOpen && (
-          <>
-            <section className="drawer-section drawer-gy" ref={gyRef}>
-              <h3>
-                Graveyard <span className="drawer-count">{gy.length}</span>
-              </h3>
-              {gy.length === 0 ? (
-                <div className="drawer-empty">empty</div>
-              ) : (
-                <div className="drawer-gy-list">
-                  {gy
-                    .slice()
-                    .reverse()
-                    .map((c) => (
-                      <Card key={c.iid} card={c} variant="chip" />
-                    ))}
-                </div>
-              )}
-              <div className="library-count">
-                Library <strong>{view.you.libraryCount}</strong> cards
-              </div>
-            </section>
-            <Log log={view.log} names={names} />
-          </>
-        )}
-      </aside>
-
-      <section className="dock" data-testid="dock">
-        <div className="dock-piles">
-          <div className="dock-deck" title="Cards left in your library">
-            <span className="dock-deck-back" aria-hidden="true" />
-            <span className="dock-pile-label">
-              <b>{view.you.libraryCount}</b> deck
-            </span>
-          </div>
-          <button
-            type="button"
-            className="dock-discard"
-            data-testid="discard-pile"
-            title="Show your graveyard"
-            onClick={() => {
-              setDrawerOpen(true);
-              setGyWanted(true);
-            }}
-          >
-            {topGy ? (
-              <CardArt artKey={topGy.art?.key} name={topGy.name} />
-            ) : (
-              <span className="dock-discard-empty" aria-hidden="true" />
+          <header className="topbar" data-testid="topbar">
+            <span className="brand">Jlore Jlards</span>
+            {code && (
+              <button
+                type="button"
+                className="room-chip"
+                title="Copy the invite link"
+                onClick={() => {
+                  try {
+                    void navigator.clipboard.writeText(window.location.href);
+                  } catch {
+                    /* clipboard is a nicety */
+                  }
+                }}
+              >
+                Room {code}
+              </button>
             )}
-            <span className="dock-pile-label">
-              <b>{gy.length}</b> discard
+            {mode === 'hotseat' && (
+              <div className="seat-switch">
+                {seats.map((s) => {
+                  const v = views[s];
+                  const toMove = Boolean(v && v.you.id === v.activePlayer);
+                  return (
+                    <button
+                      type="button"
+                      key={s}
+                      className={`seat-btn${activeSeat === s ? ' seat-btn-on' : ''}${toMove ? ' seat-btn-active' : ''}`}
+                      data-testid="seat-btn"
+                      data-seat={s}
+                      data-seat-on={activeSeat === s ? 'true' : 'false'}
+                      data-seat-to-move={toMove ? 'true' : 'false'}
+                      onClick={() => setActiveSeat(s)}
+                    >
+                      {v ? v.you.name : s}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <span
+              className="turn-owner"
+              data-testid="turn-owner"
+              data-your-turn={yourTurn ? 'true' : 'false'}
+              style={{ ['--owner-hue']: String(hueOf(ownerName || view.activePlayer)) } as React.CSSProperties}
+            >
+              {ownerLabel}
             </span>
-          </button>
-        </div>
+            <TurnClock view={view} turnSeconds={turnSeconds} />
+            {waitingOn !== null && (
+              <PromptOverlay pending={view.pending} playerId={me} names={names} onAction={send} onPass={onPass} />
+            )}
+            <AnomalyChip anomaly={view.anomaly} />
+            <span className="topbar-spacer" />
+            <span className="who" data-testid="you-are" data-you-id={me}>
+              You are <strong>{view.you.name}</strong>
+            </span>
+            <button
+              type="button"
+              className="help-btn"
+              data-testid="key-help-toggle"
+              title="Keyboard shortcuts (?)"
+              aria-pressed={helpOpen}
+              onClick={() => setHelpOpen((v) => !v)}
+            >
+              ?
+            </button>
+            <button
+              type="button"
+              className="drawer-toggle"
+              data-testid="drawer-toggle"
+              aria-pressed={drawerOpen}
+              title="Show or hide the log (L)"
+              onClick={() => setDrawerOpen((v) => !v)}
+            >
+              {drawerOpen ? 'Hide log' : 'Log'}
+            </button>
+          </header>
 
-        <div className="dock-strip">
-          {barPrompt ? (
-            <PromptOverlay
-              pending={view.pending}
-              playerId={me}
-              names={names}
-              onAction={send}
-              picked={picked}
-              onPickedChange={setPicked}
-              placement={placement ?? 'hand'}
-              handOrder={view.you.hand.map((c) => c.iid)}
-            />
-          ) : (
-            <>
-              <Field
-                variant="strip"
-                field={view.you.field}
+          <Opponents view={view} />
+
+          <main className="board-region" data-testid="board-region">
+            {view.ended && (
+              <div className="game-over" data-testid="game-over">
+                <h2>Game over</h2>
+                <p>{view.endReason ?? 'the game ended'}</p>
+                <p className="winners">
+                  {(view.winners ?? []).map((w) => names[w] ?? w).join(', ') || 'nobody'} wins
+                </p>
+              </div>
+            )}
+            <Board view={view} onBuy={onBuy} yourTurn={yourTurn} pilePick={pilePick} inFlightPile={inFlightPile} />
+          </main>
+
+          {placement === 'panel' && (
+            <div className="prompt-panel-host">
+              <PromptOverlay
+                pending={view.pending}
                 playerId={me}
-                money={view.you.money}
+                names={names}
+                onAction={send}
+                picked={picked}
+                onPickedChange={setPicked}
+                placement="panel"
+              />
+            </div>
+          )}
+
+          {helpOpen && <KeyHelp onClose={() => setHelpOpen(false)} />}
+
+          <aside className="drawer table-side" data-testid="drawer" hidden={!drawerOpen}>
+            {drawerOpen && (
+              <>
+                <section className="drawer-section drawer-gy" ref={gyRef}>
+                  <h3>
+                    Graveyard <span className="drawer-count">{gy.length}</span>
+                  </h3>
+                  {gy.length === 0 ? (
+                    <div className="drawer-empty">empty</div>
+                  ) : (
+                    <div className="drawer-gy-list">
+                      {gy
+                        .slice()
+                        .reverse()
+                        .map((c) => (
+                          <Card key={c.iid} card={c} variant="chip" />
+                        ))}
+                    </div>
+                  )}
+                  <div className="library-count">
+                    Library <strong>{view.you.libraryCount}</strong> cards
+                  </div>
+                </section>
+                <Log log={view.log} names={names} />
+              </>
+            )}
+          </aside>
+
+          <section className="dock" data-testid="dock">
+            <div className="dock-piles">
+              <div className="dock-deck" title="Cards left in your library" ref={registry.register(ANCHOR_LIBRARY)}>
+                <span className="dock-deck-back" aria-hidden="true" />
+                <span className="dock-pile-label">
+                  <b>{view.you.libraryCount}</b> deck
+                </span>
+              </div>
+              <button
+                type="button"
+                className="dock-discard"
+                data-testid="discard-pile"
+                title="Show your graveyard"
+                ref={registry.register(ANCHOR_DISCARD)}
+                onClick={() => {
+                  setDrawerOpen(true);
+                  setGyWanted(true);
+                }}
+              >
+                {topGy ? (
+                  // Keyed and registered by the top card, so a card that lands
+                  // on the discard flies here from wherever it was.
+                  <span className="dock-discard-top" key={topGy.iid} ref={registry.register(topGy.iid)}>
+                    <CardArt artKey={topGy.art?.key} name={topGy.name} />
+                  </span>
+                ) : (
+                  <span className="dock-discard-empty" aria-hidden="true" />
+                )}
+                <span className="dock-pile-label">
+                  <b>{gy.length}</b> discard
+                </span>
+              </button>
+            </div>
+
+            <div className="dock-strip">
+              {barPrompt ? (
+                <PromptOverlay
+                  pending={view.pending}
+                  playerId={me}
+                  names={names}
+                  onAction={send}
+                  picked={picked}
+                  onPickedChange={setPicked}
+                  placement={placement ?? 'hand'}
+                  handOrder={view.you.hand.map((c) => c.iid)}
+                />
+              ) : (
+                <>
+                  <Field
+                    variant="strip"
+                    field={view.you.field}
+                    playerId={me}
+                    money={view.you.money}
+                    yourTurn={yourTurn}
+                    onAction={send}
+                  />
+                  <span className="strip-label">
+                    In play <b>{view.you.play.length}</b>
+                  </span>
+                  <div className="strip-cards" data-testid="in-play">
+                    {view.you.play.map((c) => (
+                      <Card key={c.iid} card={c} variant="chip" elementRef={registry.register(c.iid)} />
+                    ))}
+                  </div>
+                  <span
+                    className={`hand-status${yourTurn ? ' hand-status-yours' : ''}`}
+                    data-testid="hand-status"
+                    data-playable-count={playable}
+                  >
+                    {handStatus({ yourTurn, picking: false, playable, actions: view.you.actions })}
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="dock-hand">
+              <Hand
+                ref={handRef}
+                hand={view.you.hand}
+                playerId={me}
+                yourTurn={yourTurn}
+                actions={view.you.actions}
+                onAction={send}
+                pick={handPick}
+                revision={revision}
+              />
+            </div>
+
+            <div className="dock-cluster">
+              <StatCluster
+                view={view}
+                playerId={me}
                 yourTurn={yourTurn}
                 onAction={send}
+                onPlayMoney={onPlayMoney}
+                playMoneyTotal={money.total}
+                playMoneyBlocked={money.blocked}
+                done={done}
               />
-              <span className="strip-label">
-                In play <b>{view.you.play.length}</b>
-              </span>
-              <div className="strip-cards" data-testid="in-play">
-                {view.you.play.map((c) => (
-                  <Card key={c.iid} card={c} variant="chip" />
-                ))}
-              </div>
-              <span
-                className={`hand-status${yourTurn ? ' hand-status-yours' : ''}`}
-                data-testid="hand-status"
-                data-playable-count={playable}
-              >
-                {handStatus({ yourTurn, picking: false, playable, actions: view.you.actions })}
-              </span>
-            </>
-          )}
-        </div>
+            </div>
+          </section>
 
-        <div className="dock-hand">
-          <Hand
-            hand={view.you.hand}
-            playerId={me}
-            yourTurn={yourTurn}
-            actions={view.you.actions}
-            onAction={send}
-            pick={handPick}
-          />
+          <CardPreview />
+          <TurnBanner view={view} names={names} mode={mode} />
         </div>
-
-        <div className="dock-cluster">
-          <StatCluster view={view} playerId={me} yourTurn={yourTurn} onAction={send} />
-        </div>
-      </section>
-
-      <CardPreview />
-    </div>
+      </FlipScope>
+    </FlipContext.Provider>
   );
 }
 
@@ -599,7 +856,6 @@ function Table({
   onDealt?: () => void;
 }): JSX.Element {
   const session = useGame({ mode, roomCode: code, seatId, playerCount, resumeState });
-  const view = session.view;
 
   // Fires once, when this room stops being a lobby and becomes a match.
   const phase = session.phase;
@@ -610,10 +866,35 @@ function Table({
     if (onDealt) onDealt();
   }, [phase, onDealt]);
 
-  const send = React.useCallback(
-    (action: GameAction) => session.send(action),
-    [session],
-  );
+  // Stable handlers (RENDER-1). The session object is new on every render, so
+  // anything that closed over it would defeat every memoised component below.
+  const sessionRef = React.useRef(session);
+  sessionRef.current = session;
+  const send = React.useCallback((action: GameAction) => sessionRef.current.send(action), []);
+  const sendMany = React.useCallback((actions: GameAction[]) => {
+    // Feature-detected: the NET track adds `sendMany` (one ordered batch
+    // intent). Without it, the same actions go one at a time, in order.
+    const s = sessionRef.current as unknown as {
+      send: (a: GameAction) => void;
+      sendMany?: (a: GameAction[]) => void;
+    };
+    if (typeof s.sendMany === 'function') s.sendMany(actions);
+    else for (const a of actions) s.send(a);
+  }, []);
+  const setActiveSeat = React.useCallback((seat: string) => sessionRef.current.setActiveSeat(seat), []);
+
+  // Structural sharing between consecutive views, so unchanged cards, piles and
+  // seats keep their identity and their memoised components skip.
+  const stableRef = React.useRef<{ raw: GameView | null; stable: GameView | null }>({ raw: null, stable: null });
+  const raw = session.view;
+  let view: GameView | null = null;
+  if (raw) {
+    if (stableRef.current.raw === raw && stableRef.current.stable) view = stableRef.current.stable;
+    else {
+      view = stabilizeView(stableRef.current.stable, raw);
+      stableRef.current = { raw, stable: view };
+    }
+  }
 
   if (session.status === 'error') {
     return (
@@ -664,8 +945,9 @@ function Table({
       seats={session.seats}
       views={session.views}
       activeSeat={session.activeSeat}
-      setActiveSeat={session.setActiveSeat}
+      setActiveSeat={setActiveSeat}
       send={send}
+      sendMany={sendMany}
       turnSeconds={session.turnSeconds}
     />
   );
