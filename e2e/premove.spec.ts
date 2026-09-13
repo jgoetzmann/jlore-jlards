@@ -175,10 +175,19 @@ test.describe('premoves over the relay (SB-68)', () => {
         timeout: 20_000,
       });
       await expect(waiter.page.getByTestId('stat-buys-value')).toHaveText('0');
-      // And the other browser saw them: one card fewer in that hand.
+      // And the other browser saw them: the play is on that seat's tile. The
+      // deal is random (Xushi's Game can leave no Copper), and a played card
+      // that draws keeps the hand size, so the hand count is exact only for Copper.
       await expect
-        .poll(async () => handCountSeenBy(mover.page), { timeout: 20_000 })
-        .toBe(waiterHandSeenBefore - 1);
+        .poll(async () => Number(await mover.page.getByTestId('opponent').first().getAttribute('data-play-count')), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThanOrEqual(1);
+      if (playedId === 'copper') {
+        await expect
+          .poll(async () => handCountSeenBy(mover.page), { timeout: 20_000 })
+          .toBe(waiterHandSeenBefore - 1);
+      }
       expect(pileId).toBeTruthy();
 
       // ---- roles swap: a cleared premove never reaches the table ----
