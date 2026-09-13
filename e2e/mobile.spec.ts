@@ -414,6 +414,23 @@ test.describe('phone 390x844, touch', () => {
       .toBe(true);
   });
 
+  test('a tap on a card whose references are not on the table opens its sheet, every time', async ({ page }) => {
+    await page.goto('/#fixture:links');
+    await expect(page.getByTestId('table')).toBeVisible();
+    // The Trilogy names three Books, and none of them is on this table.
+    const trilogy = page.locator('[data-testid="pile"] [data-testid="card"][data-card-id="the_trilogy"]').first();
+    const sheet = page.getByTestId('card-preview-sheet');
+    await expect(trilogy).toBeVisible();
+    for (let i = 0; i < 2; i++) {
+      await fingerTap(page, trilogy);
+      await expect(sheet).toBeVisible();
+      await expect(sheet.getByTestId('card-preview')).toHaveAttribute('data-card-id', 'the_trilogy');
+      await expect(page.locator('.card-linked')).toHaveCount(0);
+      await page.getByTestId('card-preview-close').tap();
+      await expect(sheet).toHaveCount(0);
+    }
+  });
+
   test('a tap on a Draft option picks it; a long press opens it and does not pick', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(String(e)));

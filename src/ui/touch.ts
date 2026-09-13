@@ -11,8 +11,9 @@
  *     graveyard chip, an opponent's card — lights the cards it references
  *     (links.ts) on the table, with nothing covering them. A second tap on the
  *     same card, or a tap on empty table, puts them out. A card that
- *     references nothing opens the preview sheet on a tap instead, so its text
- *     is still one tap away. A card with an action (a hand card, a buyable
+ *     references nothing, or none of whose references has a face on the table
+ *     (`linksOnTable`: lighting would show nothing), opens the preview sheet on
+ *     a tap instead, so its text is still one tap away. A card with an action (a hand card, a buyable
  *     pile, a prompt option's button) keeps that action on a tap.
  *
  * The highlight is set when the tap completes, never on pointerdown, and a
@@ -121,7 +122,11 @@ type ClickLike = { currentTarget: Element | null; preventDefault(): void; stopPr
  * The gesture tracker behind `useCardPress`, outside React so the unit suite
  * can drive it with plain event objects and fake timers.
  */
-export function createCardPress(getCard: () => CardView, enabled: boolean): CardPress {
+export function createCardPress(
+  getCard: () => CardView,
+  enabled: boolean,
+  faceShown: (defId: CardDefId) => boolean = faceOnTable,
+): CardPress {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let start: { x: number; y: number } | null = null;
   let fired = false;
@@ -182,7 +187,7 @@ export function createCardPress(getCard: () => CardView, enabled: boolean): Card
         moved,
         hasOwnAction,
         insideTapAction: insideTapAction(c.currentTarget),
-        hasLinks: linkedDefIds(card.defId).size > 0,
+        hasLinks: linksOnTable(card.defId, faceShown),
         ownsHighlight: src !== null && src.owner === card.iid && src.defId === card.defId,
       });
       fired = false;
@@ -308,6 +313,25 @@ export function followMention(sheetCard: CardView, targetDefId: CardDefId): void
     (el) => el.closest('.card-preview-sheet, .card-preview-layer') === null && el.getClientRects().length > 0,
   );
   face?.scrollIntoView({ block: 'center', inline: 'nearest' });
+}
+
+/**
+ * Whether any card `defId` references has a face on the table for a tap to
+ * light. When none does (a card that names only tokens nobody holds), lighting
+ * would show nothing at all, so a tap opens the sheet instead, where Mentions
+ * still names them.
+ */
+export function linksOnTable(defId: CardDefId, faceShown: (defId: CardDefId) => boolean = faceOnTable): boolean {
+  for (const id of linkedDefIds(defId)) if (faceShown(id)) return true;
+  return false;
+}
+
+/** Whether a face of `defId` is rendered on the table, outside the preview sheet and hover layer. Without a DOM, yes. */
+export function faceOnTable(defId: CardDefId): boolean {
+  if (typeof document === 'undefined') return true;
+  return Array.from(document.querySelectorAll(`[data-card-id="${cssEscape(defId)}"]`)).some(
+    (el) => el.closest('.card-preview-sheet, .card-preview-layer') === null && el.getClientRects().length > 0,
+  );
 }
 
 function cssEscape(s: string): string {

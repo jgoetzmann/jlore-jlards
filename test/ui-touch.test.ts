@@ -16,6 +16,8 @@
  *   TC7  MOB-1: the sheet's Mentions are buttons; the hover layer's are not
  *   TC8  MOB-6: the dock's discard top wears card-linked when its card is lit
  *   TC9  MOB-4: every seat tile carries the Prophet label, shown on phones only
+ *   TC10 a tap on a card none of whose references has a face on the table opens
+ *        the sheet (lighting would show nothing)
  *
  * The real fingers on a real screen are e2e/mobile.spec.ts.
  */
@@ -277,6 +279,31 @@ function tableHtml(s: GameState): string {
     }),
   );
 }
+
+describe('a tap has to show something (review round 4)', () => {
+  test('TC10: a tap on a card whose references have no face on the table opens the sheet', () => {
+    const trilogy = face('the_trilogy', 'k-trilogy');
+    const named = [...linkedDefIds('the_trilogy')];
+    expect(named.length).toBeGreaterThan(0);
+
+    // Nothing it names is on the table: lighting would light nothing, so the tap reads the card.
+    const offTable = createCardPress(() => trilogy, true, () => false);
+    expect(tap(offTable)).toBe(true);
+    expect(getPreview()).toMatchObject({ mode: 'sheet', card: { defId: 'the_trilogy' } });
+    expect(getLinkSource()).toBeNull();
+    // Every tap, not just the first.
+    closePreviewSheet();
+    expect(tap(offTable)).toBe(true);
+    expect(getPreview()).toMatchObject({ mode: 'sheet', card: { defId: 'the_trilogy' } });
+    closePreviewSheet();
+
+    // One named face on the table is enough to light them, with no sheet.
+    const onTable = createCardPress(() => trilogy, true, (defId) => defId === named[named.length - 1]);
+    expect(tap(onTable)).toBe(true);
+    expect(getPreview()).toBeNull();
+    expect(getLinkSource()).toEqual({ defId: 'the_trilogy', owner: trilogy.iid });
+  });
+});
 
 describe('linked outline and labels on the table', () => {
   test('TC8: the dock’s discard top wears card-linked while its card is lit (MOB-6)', () => {
