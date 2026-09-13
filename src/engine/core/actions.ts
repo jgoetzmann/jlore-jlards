@@ -11,11 +11,16 @@ import { canPlayCard } from './play.js';
 import { buyablePiles } from './buy.js';
 import { activatableAuras } from './aura.js';
 import { legalResolutions } from './resume.js';
+import { legalDraftPicks } from './draft.js'; // ---- draft ----
 
 export function legalActions(state: GameState, player: PlayerId): GameAction[] {
   if (state.ended) return [];
   const p = state.players[player];
   if (!p || p.eliminated) return [];
+
+  // ---- draft ----
+  if (state.draft) return legalDraftPicks(state, player);
+  // ---- /draft ----
 
   // A pending prompt freezes everything except its own answer, and the answer
   // may come from a player who is not the active player.

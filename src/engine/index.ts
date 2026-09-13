@@ -30,6 +30,7 @@ import { endTurn as endTurnImpl, advanceTurn, startTurn } from './core/turn.js';
 import { drainQueue, resolvePrompt } from './core/resume.js';
 import { finishGame, noteEndCondition, settleEndedGame } from './core/endgame.js';
 import { computeScores } from './core/scoring.js';
+import { applyDraftPick } from './core/draft.js'; // ---- draft ----
 
 export { createMatch } from './core/setup.js';
 export { legalActions } from './core/actions.js';
@@ -90,6 +91,17 @@ function dispatch(s: GameState, action: GameAction): GameState {
   if (s.ended) {
     return logReject(s, 'gameOver', actor, { action: action.type });
   }
+
+  // ---- draft ----
+  // While the Draft runs, picks are the only thing the table takes, from any
+  // player (everyone drafts at once, so B20 does not apply to them).
+  if (action.type === 'draftPick') {
+    return applyDraftPick(s, action);
+  }
+  if (s.draft) {
+    return logReject(s, 'drafting', actor, { action: action.type });
+  }
+  // ---- /draft ----
 
   // A pending prompt freezes the table. Only its own answer gets through, and
   // it may come from a player who is not the active player.

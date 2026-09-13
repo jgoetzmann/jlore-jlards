@@ -89,6 +89,7 @@ export function auraStartOfTurn(state: GameState, player: PlayerId): GameState {
 export {
   anomalies,
   anomalyStartOfTurn,
+  applyAnomalyToDraftedPiles, // ---- draft ----
   battleRoyaleTick,
   cashInjection,
   getAnomaly,

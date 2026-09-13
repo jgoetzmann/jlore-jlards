@@ -244,6 +244,40 @@ export function sampleDraftDefs(
   return chosen;
 }
 
+/** SB-10. How many Draft Shop piles this match holds. */
+export function draftSlotCount(state: GameState): number {
+  return state.config.draftPileCount > 0 ? state.config.draftPileCount : 10;
+}
+
+/** SB-14 (revised). How many Prophet Shop piles this match holds. */
+export function prophetSlotCount(state: GameState): number {
+  const configured = state.config.prophetPileCount ?? DEFAULT_PROPHET_PILE_COUNT;
+  return configured > 0 ? configured : DEFAULT_PROPHET_PILE_COUNT;
+}
+
+/**
+ * Add one pile per definition to the Draft or Prophet shop, in the order given,
+ * sized by rarity, player count and `config.pileSizeScale` (B46, SB-14). The one
+ * pile construction both the sampled shops and the Draft's picks use.
+ */
+export function addSampledPiles(
+  state: GameState,
+  shop: 'draft' | 'prophet',
+  defs: readonly CardDefinition[],
+): GameState {
+  const players = playerCountOf(state);
+  const scale = state.config.pileSizeScale > 0 ? state.config.pileSizeScale : 1;
+  let next = state;
+  for (const def of defs) {
+    const size =
+      shop === 'prophet'
+        ? prophetPileSize(def.rarity, players, scale)
+        : draftPileSize(def.rarity, players, scale);
+    next = addPile(next, shop, def.id, size);
+  }
+  return next;
+}
+
 /**
  * Build all four shops onto a fresh state. Called once from `createMatch`, after
  * players exist and after any anomaly has set `config.pileSizeScale`.
@@ -271,22 +305,21 @@ export function buildShop(state: GameState, rng: Rng): GameState {
     next = addPile(next, 'points', entry.defId, size, pinnedCostFor(entry.defId, entry.cost));
   }
 
+  // ---- draft ----
+  // The Draft fills these two shops from the players' picks (core/draft.ts), so
+  // nothing is sampled and no rng is consumed for them here.
+  const drafting = state.config.draftMode === true;
+  // ---- /draft ----
+
   // --- SB-14 (revised): a sampled Prophet Shop, spread across thresholds ---
-  const configuredProphet = state.config.prophetPileCount ?? DEFAULT_PROPHET_PILE_COUNT;
-  const wantedProphet = configuredProphet > 0 ? configuredProphet : DEFAULT_PROPHET_PILE_COUNT;
-  const prophetPicked = sampleProphetDefs(prophetCandidates(next), wantedProphet, rng);
-  for (const def of prophetPicked) {
-    const size = prophetPileSize(def.rarity, players, scale);
-    next = addPile(next, 'prophet', def.id, size);
-  }
+  const prophetPicked = drafting
+    ? []
+    : sampleProphetDefs(prophetCandidates(next), prophetSlotCount(state), rng);
+  next = addSampledPiles(next, 'prophet', prophetPicked);
 
   // --- B45 / B48 / SB-10: the Draft Shop ---
-  const wanted = state.config.draftPileCount > 0 ? state.config.draftPileCount : 10;
-  const picked = sampleDraftDefs(draftCandidates(next), wanted, rng);
-  for (const def of picked) {
-    const size = draftPileSize(def.rarity, players, scale);
-    next = addPile(next, 'draft', def.id, size);
-  }
+  const picked = drafting ? [] : sampleDraftDefs(draftCandidates(next), draftSlotCount(state), rng);
+  next = addSampledPiles(next, 'draft', picked);
 
   next = { ...next, rngCursor: rng.cursor() };
 
