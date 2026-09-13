@@ -24,7 +24,7 @@ import React from 'react';
 import type { CardView, Rarity, StatKey } from '@engine/types';
 import { artPlaceholder, artThumbUrl, artUrl, nameHue } from './art';
 import { hidePreview, showPreview } from './preview';
-import { clearLinkSource, linkedNames, setLinkSource, useLinked } from './links';
+import { clearLinkSource, linkedDefIds, linkedNames, setLinkSource, useLinked } from './links';
 import { useCardPress } from './touch';
 
 export { artUrl, artThumbUrl, nameHue } from './art';
@@ -58,6 +58,8 @@ export interface CardProps {
   cursor?: boolean;
   /** An intent for this card is in flight and the view has not caught up yet. */
   committed?: boolean;
+  /** Preview variant in the touch sheet: a tap on a "Mentions" name (touch.ts followMention). */
+  onMention?: (defId: string) => void;
   /** Playing it only adds combo (TURN-9): clickable, but not advertised as playable. */
   inert?: boolean;
   /** Ref to the face's root element. */
@@ -207,7 +209,8 @@ function CardImpl(props: CardProps): JSX.Element {
   // Lit while the hovered or tapped card references this one (links.ts). A
   // boolean snapshot, so only faces whose state flips re-render.
   const linked = useLinked(card.defId);
-  // Long-press for the preview sheet, tap-to-preview on a card with no action.
+  // Long-press for the preview sheet; on a card with no action, a tap lights
+  // its links (or opens the sheet when it links to nothing).
   const press = useCardPress(card, previewable);
 
   // The slop guard exists because a drag that never crossed the browser's own
@@ -313,7 +316,7 @@ function CardImpl(props: CardProps): JSX.Element {
             Prophet {card.prophetCost.threshold} · drain {card.prophetCost.drain}
           </div>
         )}
-        {variant === 'preview' && <CardLinks defId={card.defId} />}
+        {variant === 'preview' && <CardLinks defId={card.defId} onMention={props.onMention} />}
       </>
     );
   }
@@ -427,23 +430,65 @@ function CardImpl(props: CardProps): JSX.Element {
   );
 }
 
-/** The preview's list of the cards this one references (links.ts), each lit like its face would be. */
-function CardLinks({ defId }: { defId: string }): JSX.Element | null {
+/**
+ * The preview's list of the cards this one references (links.ts), each lit
+ * like its face would be. With `onMention` (the touch sheet) each name is a
+ * button: close the sheet, light the links, show the referenced face (MOB-1).
+ * The hover layer takes no pointer, so there they stay plain text.
+ */
+function CardLinks({ defId, onMention }: { defId: string; onMention?: (defId: string) => void }): JSX.Element | null {
   const names = linkedNames(defId);
   if (names.length === 0) return null;
+  const ids = Array.from(linkedDefIds(defId));
   return (
     <div className="card-links" data-testid="card-links">
       <span className="card-links-label">Mentions</span>
-      {names.map((n) => (
-        <span key={n} className="card-link-name">
-          {n}
-        </span>
-      ))}
+      {names.map((n, i) =>
+        onMention ? (
+          <button
+            key={ids[i]}
+            type="button"
+            className="card-link-name card-link-button"
+            data-testid="card-link"
+            data-link-def={ids[i]}
+            onClick={() => onMention(ids[i]!)}
+          >
+            {n}
+          </button>
+        ) : (
+          <span key={ids[i]} className="card-link-name">
+            {n}
+          </span>
+        ),
+      )}
     </div>
   );
 }
 
 export const Card = React.memo(CardImpl);
+
+/**
+ * A span that wears the linked outline (`card-linked`) when `defId` is lit, for
+ * card art drawn outside a `<Card>` face: the dock's discard top (MOB-6).
+ */
+export function LinkedSpan({
+  defId,
+  className,
+  spanRef,
+  children,
+}: {
+  defId: string;
+  className: string;
+  spanRef?: React.Ref<HTMLSpanElement>;
+  children?: React.ReactNode;
+}): JSX.Element {
+  const linked = useLinked(defId);
+  return (
+    <span className={linked ? `${className} card-linked` : className} ref={spanRef} data-card-linked={linked ? 'true' : undefined}>
+      {children}
+    </span>
+  );
+}
 
 /** Kept for importers that used the placeholder hue directly. */
 export const cardHue = nameHue;

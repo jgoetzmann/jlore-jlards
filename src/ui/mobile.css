@@ -25,7 +25,8 @@
 /* ======================================================== 1. linked cards */
 
 .card.card-linked,
-.seat-card.card-linked {
+.seat-card.card-linked,
+.dock-discard-top.card-linked {
   outline: 2px solid var(--prophet);
   outline-offset: -2px;
   box-shadow:
@@ -48,6 +49,23 @@
   border: 1px solid rgb(121 192 240 / 60%);
   color: var(--prophet);
   font-weight: 700;
+}
+
+/* In the touch sheet each name is a button (touch.ts followMention). */
+.card-link-button {
+  font: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.card-preview-sheet .card-link-button {
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+/* MOB-4: the word after ◈ on a seat tile, shown on phones only (section 3). */
+.seat-score-label {
+  display: none;
 }
 
 /* ============================================= 2. touch: sheet and bubble */
@@ -459,6 +477,11 @@
 
   .seat-score-item b {
     font-size: 14px;
+  }
+
+  /* MOB-4: a finger can't hover the tile's "banked Prophet" title. */
+  .seat-score-label {
+    display: inline;
   }
 
   .opponent.seat .opponent-turn.seat-badge,

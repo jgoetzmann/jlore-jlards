@@ -9,17 +9,17 @@
  * pointing at. That rule is what keeps it clear of SB-63's failure modes.
  *
  * Touch has no hover, so the same card can also be opened as a **sheet**
- * (touch.ts: long-press any card, or tap one that has no click action). A
- * sheet is the one deliberate exception to "never takes the pointer": the
- * player asked for it, it covers the screen with its own backdrop, and it stays
- * until they close it. Hover calls never close or replace a sheet.
+ * (touch.ts: long-press any card, or tap one that has no click action and
+ * references no other card). A sheet is the one deliberate exception to
+ * "never takes the pointer": the player asked for it, it covers the screen with
+ * its own backdrop, and it stays until they close it. Hover calls never close
+ * or replace a sheet.
  *
  * A tiny external store rather than React state on the table: hovering must not
  * re-render the whole table, only the preview layer.
  */
 
 import type { CardView } from '@engine/types';
-import { clearLinkSource } from './links';
 
 export interface PreviewState {
   card: CardView;
@@ -110,10 +110,12 @@ export function openPreviewSheet(card: CardView): void {
   emit();
 }
 
-/** Close the sheet, and the link highlight it was showing. */
+/**
+ * Close the sheet. A link highlight a tap set stays lit (MOB-1): the sheet
+ * never set one, so closing it has nothing of its own to clear.
+ */
 export function closePreviewSheet(): void {
   if (!isSheet()) return;
   current = null;
-  clearLinkSource();
   emit();
 }

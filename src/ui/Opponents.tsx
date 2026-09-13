@@ -459,6 +459,8 @@ const Seat = React.memo(function Seat({
         </span>
         <span className="seat-score-item seat-score-prophet" title="banked Prophet">
           <b>{o.prophet}</b> ◈
+          {/* ---- fix:mobile ---- MOB-4: the title is hover-only; phones show the word (mobile.css). */}
+          <span className="seat-score-label"> Prophet</span>
         </span>
       </span>
       <span
