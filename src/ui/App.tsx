@@ -46,6 +46,8 @@ import {
 import { endReasonText } from './logtext';
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
+// ---- premove ----
+import { PremoveBar, type PremoveBarProps } from './PremoveBar';
 
 /**
  * Dev-only fixture tables. The condition is a build-time constant, so a
@@ -314,6 +316,9 @@ export interface TableLayoutProps {
   turnEndsAt?: number | null;
   /** Own intents the relay has not echoed yet; drives the Buy busy state (TURN-8). */
   pendingIntents?: number;
+  // ---- premove ----
+  /** Rooms only: the premove bar's state (SB-68). `showing` means `view` is your premoved next turn. */
+  premove?: PremoveBarProps | null;
 }
 
 /**
@@ -325,10 +330,13 @@ function TurnBanner({
   view,
   names,
   mode,
+  suppress = false,
 }: {
   view: GameView;
   names: Record<PlayerId, string>;
   mode: GameMode;
+  // ---- premove ---- no sweep for a premove branch, which is not a real turn change.
+  suppress?: boolean;
 }): JSX.Element {
   const ref = React.useRef<HTMLDivElement>(null);
   const yours = view.activePlayer === view.you.id;
@@ -336,7 +344,7 @@ function TurnBanner({
   // In hotseat every seat is "you"; the name is what tells the table whose go it is.
   const label = view.ended ? 'Game over' : yours && mode !== 'hotseat' ? 'Your turn' : `${who}’s turn`;
   useOneShot(
-    `${view.turn}:${view.activePlayer}:${view.ended ? 1 : 0}`,
+    suppress ? 'premove' : `${view.turn}:${view.activePlayer}:${view.ended ? 1 : 0}`,
     ref,
     [
       { opacity: 0, transform: 'translateY(10px) scale(0.96)' },
@@ -345,6 +353,7 @@ function TurnBanner({
       { opacity: 0, transform: 'translateY(-8px)' },
     ],
     { duration: MOTION_MS.turn, easing: 'ease-out' },
+    (v) => v !== 'premove',
   );
   return (
     <div ref={ref} className={`turn-banner${yours ? ' turn-banner-yours' : ''}`} data-testid="turn-banner" aria-hidden="true">
@@ -476,6 +485,7 @@ export function TableLayout({
   turnSeconds,
   turnEndsAt,
   pendingIntents = 0,
+  premove = null,
 }: TableLayoutProps): JSX.Element {
   const viewRef = React.useRef(view);
   viewRef.current = view;
@@ -594,6 +604,8 @@ export function TableLayout({
   // --- whose turn --------------------------------------------------------------
   const ownerName = names[view.activePlayer] ?? view.activePlayer;
   const ownerLabel = view.ended ? 'Game over' : yourTurn ? 'Your turn' : `${ownerName}’s turn`;
+  // ---- premove ---- the view is your premoved next turn, not the live table (SB-68).
+  const premoveShowing = premove !== null && premove.active && premove.showing;
 
   // --- buying (TURN-8) ----------------------------------------------------------
   // A buy is in flight until a newer view lands (then the pile's own state says
@@ -769,6 +781,7 @@ export function TableLayout({
           data-testid="table"
           data-your-turn={yourTurn ? 'true' : 'false'}
           data-drawer={drawerOpen ? 'open' : 'closed'}
+          data-premove={premoveShowing ? 'true' : 'false'}
         >
           <header className="topbar" data-testid="topbar">
             <span className="brand">Jlore Jlards</span>
@@ -816,7 +829,7 @@ export function TableLayout({
               data-your-turn={yourTurn ? 'true' : 'false'}
               style={{ ['--owner-hue']: String(hueOf(ownerName || view.activePlayer)) } as React.CSSProperties}
             >
-              {ownerLabel}
+              {premoveShowing ? 'Premove · your next turn' : ownerLabel}
             </span>
             <TurnClock view={view} turnSeconds={turnSeconds} endsAt={turnEndsAt} />
             {waitingOn !== null && (
@@ -946,6 +959,8 @@ export function TableLayout({
             </div>
 
             <div className="dock-strip">
+              {/* ---- premove ---- */}
+              {premove && <PremoveBar {...premove} />}
               {barPrompt ? (
                 <PromptOverlay
                   pending={view.pending}
@@ -1012,7 +1027,7 @@ export function TableLayout({
           </section>
 
           <CardPreview />
-          <TurnBanner view={view} names={names} mode={mode} />
+          <TurnBanner view={view} names={names} mode={mode} suppress={premoveShowing} />
         </div>
       </FlipScope>
     </FlipContext.Provider>
@@ -1053,8 +1068,16 @@ function Table({
   // anything that closed over it would defeat every memoised component below.
   const sessionRef = React.useRef(session);
   sessionRef.current = session;
-  const send = React.useCallback((action: GameAction) => sessionRef.current.send(action), []);
+  const send = React.useCallback((action: GameAction) => {
+    // ---- premove ---- while the table shows your premoved next turn, a press queues a premove.
+    const pm = sessionRef.current.premove;
+    if (pm.active && pm.view) return pm.add(action);
+    sessionRef.current.send(action);
+  }, []);
   const sendMany = React.useCallback((actions: GameAction[]) => {
+    // ---- premove ----
+    const pm = sessionRef.current.premove;
+    if (pm.active && pm.view) return pm.addMany(actions);
     // Feature-detected: the NET track adds `sendMany` (one ordered batch
     // intent). Without it, the same actions go one at a time, in order.
     const s = sessionRef.current as unknown as {
@@ -1066,10 +1089,32 @@ function Table({
   }, []);
   const setActiveSeat = React.useCallback((seat: string) => sessionRef.current.setActiveSeat(seat), []);
 
+  // ---- premove ---- SB-68, rooms only.
+  const pm = session.premove;
+  const premoveShowing = mode !== 'hotseat' && pm.active && pm.view !== null;
+  const onPremoveActive = React.useCallback((on: boolean) => sessionRef.current.premove.setActive(on), []);
+  const onPremoveClear = React.useCallback(() => sessionRef.current.premove.clear(), []);
+  const premoveBar = React.useMemo<PremoveBarProps | null>(
+    () =>
+      mode === 'hotseat'
+        ? null
+        : {
+            available: pm.available,
+            active: pm.active,
+            showing: premoveShowing,
+            count: pm.count,
+            rolledBack: pm.rolledBack,
+            onActive: onPremoveActive,
+            onClear: onPremoveClear,
+          },
+    [mode, pm.available, pm.active, premoveShowing, pm.count, pm.rolledBack, onPremoveActive, onPremoveClear],
+  );
+  // ---- end premove ----
+
   // Structural sharing between consecutive views, so unchanged cards, piles and
   // seats keep their identity and their memoised components skip.
   const stableRef = React.useRef<{ raw: GameView | null; stable: GameView | null }>({ raw: null, stable: null });
-  const raw = session.view;
+  const raw = premoveShowing ? pm.view : session.view; // ---- premove ----
   let view: GameView | null = null;
   if (raw) {
     if (stableRef.current.raw === raw && stableRef.current.stable) view = stableRef.current.stable;
@@ -1134,7 +1179,8 @@ function Table({
       sendMany={sendMany}
       turnSeconds={session.turnSeconds}
       turnEndsAt={session.turnEndsAt}
-      pendingIntents={session.pendingIntents}
+      pendingIntents={premoveShowing ? 0 : session.pendingIntents}
+      premove={premoveBar}
     />
   );
 }

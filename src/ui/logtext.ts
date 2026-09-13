@@ -280,6 +280,9 @@ export function describeEntry(entry: LogEntry, naming: LogNaming): LogLine {
           : `nerfs ${who}: ${sign} ${stat}`,
       );
     }
+    // ---- premove ---- SB-68
+    case 'reroll':
+      return line('reshuffles — an undone premove is re-rolled');
     case 'concede':
       return line('concedes');
 

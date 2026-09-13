@@ -280,7 +280,8 @@ export function parseIntent(payload: unknown): { nonce: string | null; actions: 
 
 type ReduceFn = (state: GameState, action: GameAction) => GameState;
 
-function isRejected(prev: GameState, next: GameState): boolean {
+// ---- premove ---- exported so premove folds detect a refusal exactly the way a batch does.
+export function isRejected(prev: GameState, next: GameState): boolean {
   if (next.logSeq === prev.logSeq) return false;
   for (let i = next.log.length - 1; i >= 0; i--) {
     const e = next.log[i]!;
