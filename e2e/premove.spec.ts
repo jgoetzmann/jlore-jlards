@@ -80,6 +80,20 @@ async function endTurnLook(page: Page): Promise<{ bg: string; color: string; bor
   });
 }
 
+/**
+ * Whether the turn banner runs its sweep at any point in the next `ms`. Leaving
+ * or entering premove mode is not a turn change, so it must not (MERGE-3).
+ */
+async function bannerSweeps(page: Page, ms = 800): Promise<boolean> {
+  expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false);
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (await page.getByTestId('turn-banner').evaluate((el) => el.getAnimations().length > 0)) return true;
+    await page.waitForTimeout(50);
+  }
+  return false;
+}
+
 /** A Copper in the hand on screen, or any playable card when the deal gave none. */
 function copperOrAny(page: Page) {
   return page
@@ -110,10 +124,18 @@ test.describe('premoves over the relay (SB-68)', () => {
       const waiterHandSeenBefore = await handCountSeenBy(mover.page);
       // The waiting seat's End turn, disabled because it is not its turn.
       const liveLook = await endTurnLook(waiter.page);
+      const moverTile = waiter.page.getByTestId('opponent').first();
+      const moverDiscard = await moverTile.getAttribute('data-discard-count');
       await toggle.click();
       await expect(waiter.page.getByTestId('premove-bar')).toBeVisible();
       await expect(waiter.page.getByTestId('table')).toHaveAttribute('data-premove', 'true');
       await expect(waiter.page.getByTestId('premove-bar')).toHaveAttribute('data-count', '0');
+      // Entering premove mode is not a turn change: no banner sweep (MERGE-3).
+      expect(await bannerSweeps(waiter.page), 'entering premove mode sweeps the banner').toBe(false);
+      // And it shows nothing of the hand the mover holds now: the hypothetical end
+      // of the mover's turn discards that hand, but the mover's seat is shown as it
+      // is, not as the branch left it (PS-M1).
+      await expect(moverTile).toHaveAttribute('data-discard-count', moverDiscard ?? '');
 
       // In premove mode the branch is "your turn", but End turn does nothing
       // there: it must look like the disabled button, not the live turn's green.
@@ -202,6 +224,8 @@ test.describe('premoves over the relay (SB-68)', () => {
       await expect(mover.page.getByTestId('in-play').getByTestId('card')).toHaveCount(0);
       await mover.page.getByTestId('premove-live').click();
       await expect(mover.page.getByTestId('table')).toHaveAttribute('data-premove', 'false');
+      // Leaving premove mode is not a turn change either (MERGE-3).
+      expect(await bannerSweeps(mover.page), 'leaving premove mode sweeps the banner').toBe(false);
       await expect(mover.page.getByTestId('premove-toggle')).toBeVisible();
 
       await clearPrompt(waiter.page);
@@ -212,6 +236,57 @@ test.describe('premoves over the relay (SB-68)', () => {
       await mover.page.waitForTimeout(1000);
       await expect(mover.page.getByTestId('in-play').getByTestId('card')).toHaveCount(0);
       await expect(mover.page.getByTestId('hand').getByTestId('card')).toHaveCount(moverLiveHand);
+    } finally {
+      await host.ctx.close().catch(() => undefined);
+      await guest.ctx.close().catch(() => undefined);
+    }
+  });
+
+  test('a second tab of the waiting seat takes its premoves over when the premoving tab closes', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const host = await openSeat(browser, 'host');
+    const guest = await openSeat(browser, 'guest');
+
+    try {
+      await dealRoom(host.page, guest.page);
+      const [mover, waiter] = await roles(host, guest);
+
+      // The same browser and seat cookie: a second tab of the waiting seat.
+      const tab2 = await waiter.ctx.newPage();
+      tab2.on('pageerror', (e: Error) => console.log(`[tab2 pageerror] ${String(e)}`));
+      await tab2.goto(waiter.page.url());
+      await expect(tab2.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+
+      const toggle1 = waiter.page.getByTestId('premove-toggle');
+      await expect(toggle1).toBeEnabled({ timeout: 20_000 });
+      await toggle1.click();
+      const card = copperOrAny(waiter.page);
+      await expect(card).toBeVisible({ timeout: 20_000 });
+      await card.click();
+      await expect(waiter.page.getByTestId('premove-bar')).toHaveAttribute('data-count', '1');
+
+      // One tab per seat premoves. The other shows the queue and cannot touch it.
+      const toggle2 = tab2.getByTestId('premove-toggle');
+      await expect(toggle2).toHaveAttribute('data-count', '1', { timeout: 20_000 });
+      await expect(toggle2).toBeDisabled();
+
+      // The premoving tab closes: the other takes the queue over...
+      await waiter.page.close();
+      await expect(toggle2).toBeEnabled({ timeout: 20_000 });
+      await expect(toggle2).toHaveAttribute('data-count', '1');
+
+      // ...and sends it when the seat's turn starts.
+      await clearPrompt(mover.page);
+      await mover.page.getByTestId('end-turn').click();
+      await expect(tab2.getByTestId('turn-owner')).toHaveAttribute('data-your-turn', 'true', { timeout: 30_000 });
+      await expect
+        .poll(async () => Number(await mover.page.getByTestId('opponent').first().getAttribute('data-play-count')), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThanOrEqual(1);
+      await expect(tab2.getByTestId('in-play').getByTestId('card')).not.toHaveCount(0);
     } finally {
       await host.ctx.close().catch(() => undefined);
       await guest.ctx.close().catch(() => undefined);

@@ -54,15 +54,93 @@
  * The tracker survives a reload (`serializeTracker`, SB-68 persistence): the
  * seat comes back from its cookie, so the debt has to come back too.
  *
+ * Other players' hidden cards (review round 4). While it is not yet your turn,
+ * every fold runs on a copy of the match in which each card another player holds
+ * in hand or library is a plain Copper (`disguiseHidden`). The branch ends their
+ * turns, which discards those hands into the open and fires their discard
+ * triggers; on the real state that would show what they hold now, on the copy
+ * there is nothing to show. The table then shows your next turn from the branch
+ * and the other seats as they are now (`premoveViewFor`). A premove whose visible
+ * outcome changes when those cards are something else (`readsHidden`, a Discover
+ * over a hand) is refused like any other that reaches another player. On your own
+ * turn nothing is disguised: the last fold meets the real state, as the batch will.
+ *
+ * Answering a prompt while committed premoves are queued drops them and owes
+ * their reroll, whatever the answer (`answeredSince`), so no answer can choose
+ * between keeping a draw you have seen and reshuffling it away.
+ *
  * No React here, and nothing but the engine and lockstep's refusal check.
  */
 
 import { reduce as engineReduce } from '@engine/index';
 import { costOf } from '@engine/shop/cost';
-import type { AuraId, CardDefId, GameAction, GameState, InstanceId, PileId, PlayerId } from '@engine/types';
+import { viewFor } from '@engine/view';
+import type {
+  AuraId,
+  CardDefId,
+  CardInstance,
+  GameAction,
+  GameState,
+  GameView,
+  InstanceId,
+  PileId,
+  PlayerId,
+} from '@engine/types';
 import { isRejected, MAX_BATCH } from './lockstep';
 
 type ReduceFn = (state: GameState, action: GameAction) => GameState;
+
+/** What every card another player keeps hidden becomes on a premove branch. */
+export const DISGUISE_AS: CardDefId = 'copper';
+
+/**
+ * A second stand-in that differs from the first in types, price, stats and VP.
+ * A premove whose visible outcome differs between the two read the hidden cards.
+ */
+export const DISGUISE_CHECK: CardDefId = 'warhero_token';
+
+/** Every instance another player keeps hidden from `me`: their hands and libraries. */
+export function hiddenFrom(state: GameState, me: PlayerId): Set<InstanceId> {
+  const out = new Set<InstanceId>();
+  for (const pid of state.playerOrder) {
+    if (pid === me) continue;
+    const p = state.players[pid];
+    if (!p) continue;
+    for (const iid of p.hand) out.add(iid);
+    for (const iid of p.library) out.add(iid);
+  }
+  return out;
+}
+
+/**
+ * `state` with every card another player keeps hidden from `me` replaced by a
+ * plain `as` card with the same instance id, owner and zone and nothing else.
+ * Positions and counts are unchanged, so draws and shuffles read the same; only
+ * what the cards are is gone. `state` itself when nothing is hidden.
+ */
+export function disguiseHidden(state: GameState, me: PlayerId, as: CardDefId): GameState {
+  const hidden = hiddenFrom(state, me);
+  if (hidden.size === 0) return state;
+  const instances: Record<InstanceId, CardInstance> = { ...state.instances };
+  for (const iid of hidden) {
+    const inst = state.instances[iid];
+    if (!inst) continue;
+    instances[iid] = {
+      iid,
+      defId: as,
+      owner: inst.owner,
+      zone: inst.zone,
+      addedKeywords: [],
+      removedKeywords: [],
+      counters: {},
+      statDelta: {},
+      extraEffects: [],
+      playedOnTurn: null,
+    };
+  }
+  const defsInMatch = state.defsInMatch.includes(as) ? state.defsInMatch : [...state.defsInMatch, as];
+  return { ...state, instances, defsInMatch };
+}
 
 /** The actions a player may premove. Never resolve, endTurn, concede, start or a draft pick. */
 export type PremoveAction = Extract<GameAction, { type: 'play' | 'buy' | 'activateAura' | 'reorderHand' }>;
@@ -308,16 +386,39 @@ function namesAny(value: unknown, ids: ReadonlySet<string>, depth: number): bool
   return false;
 }
 
+/** Whether a card in `ids` joined or left a zone between `before` and `after`. */
+function movedAny(
+  before: readonly string[] | undefined,
+  after: readonly string[] | undefined,
+  ids: ReadonlySet<string>,
+): boolean {
+  if (sameIds(before, after)) return false;
+  const was = new Set(before ?? []);
+  const is = new Set(after ?? []);
+  for (const iid of was) if (!is.has(iid) && ids.has(iid)) return true;
+  for (const iid of is) if (!was.has(iid) && ids.has(iid)) return true;
+  return false;
+}
+
 /**
  * The opponent rule (SB-68, PS-M1): whether a step from `before` to `after`
  * reached a card another player keeps hidden. It did when it changed another
- * player's hand or library, or when a log entry it appended or a prompt it
+ * player's hand or library; when a card in `hiddenNow` joined or left another
+ * player's graveyard or play area; or when a log entry it appended or a prompt it
  * opened names a card that was in another player's hand or library at the start
- * of the branch (`start`). Hands count because the branch dealt every player
- * between the active one and `me` their next hand.
+ * of the branch (`start`), or is in `hiddenNow`. Hands at the start count because
+ * the branch dealt every player between the active one and `me` their next hand.
+ * `hiddenNow` is what those players hold on the authoritative state
+ * (`hiddenFrom`), which the branch discarded into their graveyards.
  */
-export function reachesOpponent(start: GameState, before: GameState, after: GameState, me: PlayerId): boolean {
-  const hidden = new Set<InstanceId>();
+export function reachesOpponent(
+  start: GameState,
+  before: GameState,
+  after: GameState,
+  me: PlayerId,
+  hiddenNow: ReadonlySet<InstanceId> = new Set<InstanceId>(),
+): boolean {
+  const hidden = new Set<InstanceId>(hiddenNow);
   for (const pid of start.playerOrder) {
     if (pid === me) continue;
     const b = before.players[pid];
@@ -327,6 +428,12 @@ export function reachesOpponent(start: GameState, before: GameState, after: Game
     for (const iid of start.players[pid]?.library ?? []) hidden.add(iid);
   }
   if (hidden.size === 0) return false;
+  for (const pid of start.playerOrder) {
+    if (pid === me) continue;
+    const b = before.players[pid];
+    const a = after.players[pid];
+    if (movedAny(b?.gy, a?.gy, hidden) || movedAny(b?.play, a?.play, hidden)) return true;
+  }
   for (let i = after.log.length - 1; i >= 0; i--) {
     const e = after.log[i]!;
     if (e.seq <= before.logSeq) break;
@@ -406,6 +513,38 @@ function drifted(
   return false;
 }
 
+/**
+ * What `me` sees of `state`, for `readsHidden`: the other seats' scores (which
+ * count their hidden cards) and the log up to `sinceSeq` left out.
+ */
+function outcomeKey(state: GameState, me: PlayerId, sinceSeq: number): string {
+  const v = viewFor(state, me);
+  return JSON.stringify({
+    ...v,
+    others: v.others.map((o) => ({ ...o, vp: 0 })),
+    log: v.log.filter((e) => e.seq > sinceSeq),
+  });
+}
+
+/**
+ * Whether the step `action` from `before` to `after` read the cards other
+ * players keep hidden: replayed with each of those cards as a different stand-in
+ * (`DISGUISE_CHECK`), what `me` sees afterwards is not the same. On a disguised
+ * branch both stand-ins are public, so the answer depends on the card and the
+ * table, never on what the hidden cards really are.
+ */
+export function readsHidden(
+  before: GameState,
+  after: GameState,
+  action: GameAction,
+  me: PlayerId,
+  reduce: ReduceFn = engineReduce,
+): boolean {
+  const alt = disguiseHidden(before, me, DISGUISE_CHECK);
+  if (alt === before) return false;
+  return outcomeKey(after, me, before.logSeq) !== outcomeKey(reduce(alt, action), me, before.logSeq);
+}
+
 export interface FoldOptions {
   /** What the last fold that applied the whole queue showed, for the drift rule. */
   previous?: PremoveFold | PremoveSeen | null;
@@ -416,6 +555,10 @@ export interface FoldOptions {
  * Fold the queue onto the branch at the start of `me`'s next turn. Stops at the
  * first invalid action entry; a reroll entry always applies. Null when the
  * branch cannot be built at all (see `advanceToTurnOf`).
+ *
+ * While it is not yet `me`'s turn the branch starts from `disguiseHidden`, so
+ * nothing on it depends on what the other players hold. On `me`'s own turn (the
+ * submission fold) it starts from the real state.
  */
 export function foldPremoves(
   authoritative: GameState,
@@ -424,7 +567,9 @@ export function foldPremoves(
   opts: FoldOptions = {},
 ): PremoveFold | null {
   const reduce = opts.reduce ?? engineReduce;
-  const start = advanceToTurnOf(authoritative, me, reduce);
+  const disguise = authoritative.activePlayer !== me;
+  const hiddenNow = disguise ? hiddenFrom(authoritative, me) : new Set<InstanceId>();
+  const start = advanceToTurnOf(disguise ? disguiseHidden(authoritative, me, DISGUISE_AS) : authoritative, me, reduce);
   if (!start) return null;
   const seen = asSeen(opts.previous);
   const states: GameState[] = [start];
@@ -456,7 +601,10 @@ export function foldPremoves(
       reason = 'refused';
       break;
     }
-    if (reachesOpponent(start, s, next, me)) {
+    if (
+      reachesOpponent(start, s, next, me, hiddenNow) ||
+      (disguise && readsHidden(s, next, entryAction(entry, me), me, reduce))
+    ) {
       invalidAt = i;
       reason = 'opponent';
       break;
@@ -504,9 +652,35 @@ export interface PremoveTracker {
   readonly last: PremoveFold | null;
   /** What that fold showed, for the drift rule. Persisted with the queue. */
   readonly seen: PremoveSeen | null;
+  /**
+   * The predicted log position up to which this tracker has looked for prompts
+   * `me` answered (`answeredSince`), or null before its first sync. Persisted.
+   */
+  readonly checkedSeq: number | null;
 }
 
-export const EMPTY_TRACKER: PremoveTracker = { queue: [], exposure: [], last: null, seen: null };
+export const EMPTY_TRACKER: PremoveTracker = { queue: [], exposure: [], last: null, seen: null, checkedSeq: null };
+
+/** Whether `me` answered a prompt in a log entry after `sinceSeq` (a resolve, or a prompt chain cut off at its budget). */
+export function answeredSince(state: GameState, me: PlayerId, sinceSeq: number): boolean {
+  for (let i = state.log.length - 1; i >= 0; i--) {
+    const e = state.log[i]!;
+    if (e.seq <= sinceSeq) break;
+    if (e.player === me && (e.kind === 'resolve' || e.kind === 'promptFizzle')) return true;
+  }
+  return false;
+}
+
+/** Drop the whole queue, leaving one reroll that covers everything it revealed. */
+function dropAll(tracker: PremoveTracker): PremoveTracker {
+  let owed: PremoveRerollEntry | null = null;
+  for (let i = 0; i < tracker.queue.length; i++) {
+    const entry = tracker.queue[i]!;
+    owed = mergeRerolls(owed, tracker.exposure[i] ?? null);
+    if (entry.kind === 'reroll') owed = mergeRerolls(owed, entry);
+  }
+  return { ...tracker, queue: owed ? [owed] : [], exposure: owed ? [owed] : [] };
+}
 
 export function premoveCount(tracker: PremoveTracker): number {
   let n = 0;
@@ -542,7 +716,7 @@ export function rollbackAt(tracker: PremoveTracker, k: number): PremoveTracker {
       exposure.push(reroll);
     }
   }
-  return { queue, exposure, last: tracker.last, seen: tracker.seen };
+  return { queue, exposure, last: tracker.last, seen: tracker.seen, checkedSeq: tracker.checkedSeq };
 }
 
 export interface SyncResult {
@@ -552,22 +726,44 @@ export interface SyncResult {
   rolledBack: boolean;
 }
 
-/** Refold on a new authoritative state, rolling back whatever it invalidated. */
+/**
+ * Refold on a new authoritative state, rolling back whatever it invalidated.
+ *
+ * First, a prompt `me` answered since the last check (`checkedSeq`) drops the
+ * whole queue, owing its reroll, if any of it is committed. Whatever the answer
+ * was: otherwise the answer could choose between keeping a premoved draw `me`
+ * has seen and having it rolled back and reshuffled (SB-68). The log is read, not
+ * the prompt's own state, so an answer counts even if that state was never synced.
+ */
 export function syncPremoves(
   tracker: PremoveTracker,
   authoritative: GameState,
   me: PlayerId,
   reduce?: ReduceFn,
 ): SyncResult {
-  let t = tracker;
+  let t: PremoveTracker = { ...tracker, checkedSeq: authoritative.logSeq };
   let rolledBack = false;
+  if (
+    tracker.checkedSeq !== null &&
+    committedCount(tracker) > 0 &&
+    answeredSince(authoritative, me, tracker.checkedSeq)
+  ) {
+    t = dropAll(t);
+    rolledBack = true;
+  }
   // Each pass drops at least one action entry, so this ends; the bound is a backstop.
   for (let pass = 0; pass <= MAX_PREMOVES + 1; pass++) {
     const fold = foldPremoves(authoritative, me, t.queue, { previous: t.seen, reduce });
     if (!fold) return { tracker: t, fold: null, rolledBack };
     if (fold.invalidAt === null) {
       return {
-        tracker: { queue: t.queue, exposure: observe(t.queue, t.exposure, fold), last: fold, seen: seenOf(fold) },
+        tracker: {
+          queue: t.queue,
+          exposure: observe(t.queue, t.exposure, fold),
+          last: fold,
+          seen: seenOf(fold),
+          checkedSeq: t.checkedSeq,
+        },
         fold,
         rolledBack,
       };
@@ -617,7 +813,7 @@ export function addPremove(
   }
   const exposure = observe(queue, [...synced.tracker.exposure, null], fold);
   return {
-    tracker: { queue, exposure, last: fold, seen: seenOf(fold) },
+    tracker: { queue, exposure, last: fold, seen: seenOf(fold), checkedSeq: synced.tracker.checkedSeq },
     fold,
     rolledBack: synced.rolledBack,
     added: true,
@@ -660,6 +856,7 @@ export function clearPremoves(tracker: PremoveTracker): PremoveTracker {
     exposure: tracker.exposure.slice(0, keep),
     last: null,
     seen: tracker.seen,
+    checkedSeq: tracker.checkedSeq,
   };
 }
 
@@ -693,7 +890,26 @@ export function submitPremoves(
 /** Premoving is offered: a networked seat, someone else's turn, and a branch to show. */
 export function premoveAvailable(networked: boolean, state: GameState | null, me: PlayerId | null): boolean {
   if (!networked || !state || !me || state.ended || state.activePlayer === me) return false;
-  return advanceToTurnOf(state, me) !== null;
+  // The branch premoves fold on, which never runs the other players' hidden cards.
+  return advanceToTurnOf(disguiseHidden(state, me, DISGUISE_AS), me) !== null;
+}
+
+/**
+ * What the table shows in premove mode: `me`'s next turn from the fold's branch,
+ * with the other seats, and the log up to the branch, from the live `state`. On
+ * the branch those seats show what ending their turns did to them: the hands they
+ * hold now in the open, as Coppers, under the real instance ids. The log keeps the
+ * lines the premoves themselves added.
+ */
+export function premoveViewFor(state: GameState, fold: PremoveFold, me: PlayerId): GameView {
+  const branch = viewFor(fold.branch, me);
+  const live = viewFor(state, me);
+  const since = (fold.states[0] ?? fold.branch).logSeq;
+  return {
+    ...branch,
+    others: live.others,
+    log: [...live.log, ...branch.log.filter((e) => e.seq > since)],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -726,12 +942,15 @@ interface StoredPremoves {
   queue: readonly PremoveEntry[];
   exposure: readonly (PremoveRerollEntry | null)[];
   seen: PremoveSeen | null;
+  /** Absent in text stored before review round 4, which reads back as null. */
+  checkedSeq?: number | null;
 }
 
 /**
  * The tracker as stored under `key`: queue, exposure (which also marks the
- * committed entries) and what the last fold showed. Null when there is nothing
- * to keep, so the caller removes the key.
+ * committed entries), what the last fold showed, and how far the log was checked
+ * for prompt answers. Null when there is nothing to keep, so the caller removes
+ * the key.
  */
 export function serializeTracker(tracker: PremoveTracker, key: string): string | null {
   if (tracker.queue.length === 0) return null;
@@ -741,6 +960,7 @@ export function serializeTracker(tracker: PremoveTracker, key: string): string |
     queue: tracker.queue,
     exposure: tracker.exposure,
     seen: tracker.seen,
+    checkedSeq: tracker.checkedSeq,
   };
   return JSON.stringify(stored);
 }
@@ -801,10 +1021,12 @@ export function deserializeTracker(raw: string | null | undefined, key: string):
   if (!Array.isArray(exposure) || exposure.length !== queue.length) return EMPTY_TRACKER;
   if (!exposure.every((e) => e === null || isRerollEntry(e))) return EMPTY_TRACKER;
   if (seen !== null && !isSeen(seen)) return EMPTY_TRACKER;
+  const checked = data['checkedSeq'];
   return {
     queue: queue as PremoveEntry[],
     exposure: exposure as (PremoveRerollEntry | null)[],
     last: null,
     seen: (seen as PremoveSeen | null) ?? null,
+    checkedSeq: typeof checked === 'number' && Number.isInteger(checked) && checked >= 0 ? checked : null,
   };
 }

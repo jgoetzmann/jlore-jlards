@@ -174,6 +174,63 @@ export function discardPremoveStores(prefix: string, keep: string): void {
   }
 }
 
+/** As much of a Web LockManager (`navigator.locks`) as `holdPremoveLock` uses. */
+export interface PremoveLocks {
+  request(name: string, options: { signal?: AbortSignal }, callback: (lock: unknown) => unknown): Promise<unknown>;
+}
+
+function browserLocks(): PremoveLocks | null {
+  try {
+    const nav = (globalThis as { navigator?: { locks?: PremoveLocks } }).navigator;
+    return nav?.locks && typeof nav.locks.request === 'function' ? nav.locks : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One tab per seat premoves (SB-68). Asks for an exclusive Web Lock named after
+ * the premove store `key` (room, seat and match). `onHeld` runs once this tab
+ * holds it: at once, unless another tab of the same seat holds it, and then when
+ * that tab closes (the browser releases a closed tab's locks). The returned
+ * function lets go, or withdraws the request if it is still waiting. With no
+ * lock manager (a page that is not a secure context) `onHeld` runs at once.
+ */
+export function holdPremoveLock(
+  key: string,
+  onHeld: () => void,
+  locks: PremoveLocks | null = browserLocks(),
+): () => void {
+  let done = false;
+  let letGo: (() => void) | null = null;
+  if (!locks) {
+    onHeld();
+    return () => {
+      done = true;
+    };
+  }
+  const abort = typeof AbortController === 'function' ? new AbortController() : null;
+  try {
+    locks
+      .request(`jlore_premove_lock:${key}`, abort ? { signal: abort.signal } : {}, () => {
+        if (done) return undefined;
+        onHeld();
+        return new Promise<void>((resolve) => {
+          letGo = resolve;
+        });
+      })
+      .catch(() => undefined);
+  } catch {
+    if (!done) onHeld();
+  }
+  return () => {
+    done = true;
+    abort?.abort();
+    const release = letGo as (() => void) | null;
+    if (release) release();
+  };
+}
+
 /**
  * The codex lives in memory once read. It used to be parsed out of
  * localStorage twice for every view that arrived (STORE-1); now a seen card is

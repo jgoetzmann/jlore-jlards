@@ -11,11 +11,18 @@
  * when this seat's match is known (PM-1). The seat comes back from its cookie
  * after a reload, so the queue and the reroll it owes come back with it.
  *
+ * One tab per seat premoves (`holdPremoveLock`, a Web Lock per room, seat and
+ * match). Another tab of the same seat follows the stored queue and cannot
+ * change or send it; when the premoving tab closes, that tab takes the queue
+ * over, reroll debt included, and sends it when the turn starts.
+ *
+ * In premove mode the table shows `premoveViewFor`: your next turn from the
+ * branch, and the other seats as they are now, never as the branch left them.
+ *
  * Networked only. Hotseat always shows the seat to move, so nobody is waiting.
  */
 
 import React from 'react';
-import { viewFor } from '@engine/view';
 import type { GameAction, GameState, GameView, PlayerId } from '@engine/types';
 import {
   EMPTY_TRACKER,
@@ -26,6 +33,7 @@ import {
   premoveCount,
   premoveStoreKey,
   premoveStorePrefix,
+  premoveViewFor,
   serializeTracker,
   submitPremoves,
   syncPremoves,
@@ -34,7 +42,7 @@ import {
   type PremoveTracker,
   type SyncResult,
 } from '@net/premove';
-import { discardPremoveStores, readPremoveStore, writePremoveStore } from '@net/storage';
+import { discardPremoveStores, holdPremoveLock, readPremoveStore, writePremoveStore } from '@net/storage';
 
 export interface PremoveSession {
   /** A room, someone else's turn, the game running, and a branch that builds. */
@@ -94,6 +102,12 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
     writtenRef.current = raw;
   }
 
+  // One premoving tab per seat. With no store (no match known) this tab is alone.
+  const [heldKey, setHeldKey] = React.useState<string | null>(null);
+  const owner = storeKey === null || heldKey === storeKey;
+  const ownerRef = React.useRef(owner);
+  ownerRef.current = owner;
+
   /** Every tracker change goes through here, so storage always holds the latest. */
   const setTracker = React.useCallback((t: PremoveTracker) => {
     trackerRef.current = t;
@@ -105,17 +119,45 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
     writePremoveStore(key, text);
   }, []);
 
+  /** Take what storage holds for `key` as the tracker, if it differs from what this tab last saw. */
+  const adoptStored = React.useCallback((key: string, raw: string | null): void => {
+    if (keyRef.current !== key || raw === writtenRef.current) return;
+    trackerRef.current = deserializeTracker(raw, key);
+    writtenRef.current = raw;
+    setQueueVersion((v) => v + 1);
+  }, []);
+
   React.useEffect(() => {
     // A different match in this room and seat (a rematch) left stale premoves.
     if (storeKey && storePrefix) discardPremoveStores(storePrefix, storeKey);
   }, [storeKey, storePrefix]);
 
+  React.useEffect(() => {
+    if (!storeKey) return undefined;
+    return holdPremoveLock(storeKey, () => {
+      // The tab that held the lock may have changed the queue since this one read it.
+      adoptStored(storeKey, readPremoveStore(storeKey));
+      setHeldKey(storeKey);
+    });
+  }, [storeKey, adoptStored]);
+
+  React.useEffect(() => {
+    // A tab that does not hold the lock follows what the premoving tab stores.
+    if (!storeKey || owner || typeof window === 'undefined') return undefined;
+    adoptStored(storeKey, readPremoveStore(storeKey));
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key === storeKey) adoptStored(storeKey, e.newValue);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [storeKey, owner, adoptStored]);
+
   const running = networked && state !== null && me !== null && !state.ended;
   const theirTurn = running && state!.activePlayer !== me;
   const queued = trackerRef.current.queue.length > 0;
   // Folding costs an endTurn reduce per intervening seat, so skip it while
-  // premoving is off and nothing is queued.
-  const wantFold = theirTurn && (activeState || queued);
+  // premoving is off and nothing is queued, and in a tab that is not premoving.
+  const wantFold = owner && theirTurn && (activeState || queued);
 
   const synced = React.useMemo<{ base: PremoveTracker; result: SyncResult } | null>(() => {
     if (!wantFold || !state || !me) return null;
@@ -126,7 +168,7 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
   }, [wantFold, state, me, queueVersion, storeKey]);
 
   React.useEffect(() => {
-    if (!synced) return;
+    if (!synced || !ownerRef.current) return;
     // Only if nothing replaced the tracker since this fold was computed.
     if (trackerRef.current !== synced.base) return;
     setTracker(synced.result.tracker);
@@ -138,7 +180,7 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
 
   // Your turn: send the queue as one batch, once there is no prompt in the way.
   React.useEffect(() => {
-    if (!networked || !state || !me) return;
+    if (!networked || !state || !me || !owner) return;
     if (state.ended) {
       if (trackerRef.current.queue.length > 0) {
         setTracker(EMPTY_TRACKER);
@@ -156,12 +198,12 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
     setQueueVersion((v) => v + 1);
     if (out.rolledBack) setRolledBack((n) => n + 1);
     if (out.actions.length > 0) submitRef.current(out.actions);
-  }, [networked, state, me, storeKey, setTracker]);
+  }, [networked, state, me, storeKey, setTracker, owner]);
 
   const fold = synced ? synced.result.fold : null;
   const view = React.useMemo(
-    () => (activeState && fold && me ? viewFor(fold.branch, me) : null),
-    [activeState, fold, me],
+    () => (activeState && fold && me && state ? premoveViewFor(state, fold, me) : null),
+    [activeState, fold, me, state],
   );
 
   const setActive = React.useCallback((on: boolean) => setActiveState(on), []);
@@ -169,7 +211,7 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
   const addAll = React.useCallback((actions: GameAction[]) => {
     const st = stateRef.current;
     const pid = meRef.current;
-    if (!networked || !st || !pid || st.ended || st.activePlayer === pid) return;
+    if (!networked || !ownerRef.current || !st || !pid || st.ended || st.activePlayer === pid) return;
     let t = trackerRef.current;
     let rolled = false;
     let refusal: PremoveInvalid | null = null;
@@ -193,6 +235,7 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
   const add = React.useCallback((action: GameAction) => addAll([action]), [addAll]);
 
   const clear = React.useCallback(() => {
+    if (!ownerRef.current) return;
     const next = clearPremoves(trackerRef.current);
     if (next === trackerRef.current) return;
     setTracker(next);
@@ -200,7 +243,7 @@ export function usePremove({ networked, state, me, submit, store = null }: UsePr
   }, [setTracker]);
 
   const available =
-    theirTurn && state!.pending === null && state!.draft == null && (synced === null || fold !== null);
+    owner && theirTurn && state!.pending === null && state!.draft == null && (synced === null || fold !== null);
 
   return {
     available,

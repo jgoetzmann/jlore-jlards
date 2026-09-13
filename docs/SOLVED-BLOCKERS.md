@@ -1364,8 +1364,16 @@ shared state.
 2. *The branch.* `advanceToTurnOf(state, me)` ends every intervening turn on a copy
    of the predicted state. It gives up (no branch, no premoving) when the game is
    over, a prompt or a draft is open, or a step is refused or stops at a prompt.
-   The queue is folded onto that branch (`foldPremoves`), and the table shows
-   `viewFor(branch, me)`, so the view boundary is unchanged.
+   The queue is folded onto that branch (`foldPremoves`). While it is not yet your
+   turn, the branch is built from a copy of the predicted state in which every card
+   another player holds in hand or library is a plain Copper with the same
+   instance id, owner and zone (`disguiseHidden`), so ending their turns (which
+   discards those hands and fires their discard triggers) runs nothing of what
+   they really hold. The table shows `premoveViewFor(state, fold, me)`: your next
+   turn from `viewFor(branch, me)`, with the other seats and the log up to the
+   branch taken from `viewFor(state, me)`, plus the log lines your premoves
+   added. On your own turn nothing is disguised, so the submission fold meets the
+   real state, as the batch will.
 3. *Queue entries* are `{kind:'action', action, expect}` or
    `{kind:'reroll', libraries, skipTo}`. Only `play`, `buy`, `activateAura` and
    `reorderHand` are premovable. `expect` records what the premove referred to:
@@ -1390,9 +1398,17 @@ shared state.
      library, or names or moves a card in another player's hand
      (`reachesOpponent`). "Names" means a log entry the step appended, or a prompt
      it opened, mentions a card that was in that player's hand or library at the
-     start of the branch. "Moves" means that player's hand or library array
-     changed. A new premove that breaks this rule is refused, not queued, and the
-     bar says "Can't premove that — it would show another player's cards".
+     start of the branch, or that they hold on the predicted state (the branch
+     discarded those into their graveyard). "Moves" means that player's hand or
+     library array changed, or a card they hold now joined or left their
+     graveyard or play area. The rule also covers a step that *reads* those cards
+     without naming them (`readsHidden`): the step is replayed with every hidden
+     card as a different stand-in (a Warhero Token instead of a Copper), and it is
+     refused if what you would see differs. Bribe's and Firing Squad's Discover
+     over a hand is the case in point: it offers cards by name, not by instance.
+     Both stand-ins are public, so a refusal says nothing about the real cards. A
+     new premove that breaks this rule is refused, not queued, and the bar says
+     "Can't premove that — it would show another player's cards".
 
    The first invalid entry and everything after it are dropped.
 5. *Rollback.* With k the first dropped entry, the queue becomes `queue.slice(0, k)`
@@ -1414,6 +1430,14 @@ shared state.
    active player's turn invalidating them) drops them and owes the reroll. The bar
    says "N committed — they showed you cards, so they can't be cleared", and Clear
    is disabled when nothing is clearable.
+   *Answering a prompt* while committed entries are queued (an attack that has
+   you pick a card from your hand, a "may" choice) drops the whole queue and owes
+   its reroll, whichever answer you give. `syncPremoves` finds your answers as
+   `resolve` log entries with your player id after `checkedSeq`, the predicted
+   log position the tracker last checked (stored with it), so an answer counts
+   even when the premoving tab never rendered that prompt's state. Without this
+   your own answer chose between keeping a premoved draw you had seen (pick
+   another card) and having it reshuffled away (pick the premoved card).
 7. *The `reroll` action* is `{type:'reroll', player, libraries, skipTo}`
    (`src/engine/core/reroll.ts`). It checks that the ids are known players, that
    each one is the actor (`otherLibrary` otherwise: a reroll reshuffles your own
@@ -1435,6 +1459,16 @@ shared state.
    End turn and prompt answers do nothing there, and End turn is drawn as a
    disabled button (not the live turn's green). After a forced rollback it shows
    "A premove was undone — the turn changed it", which never names a card.
+   *One tab per seat.* A second tab of the same seat (same cookie) used to keep
+   its own copy of the queue, read once: closing the premoving tab left the
+   stored queue and its reroll unsent, and the second tab played on with what the
+   first had scouted. The hook now takes an exclusive Web Lock named after the
+   store key (`holdPremoveLock`). Only the tab holding it folds, adds, clears,
+   writes and sends. Any other tab of that seat follows the stored queue through
+   `storage` events and shows it with the toggle disabled. When the premoving
+   tab closes, the browser releases its lock, and the next tab re-reads storage,
+   takes the queue over and sends it when the turn starts. A page with no lock
+   manager (not a secure context) keeps the old behaviour of one tab alone.
 10. *Persistence.* The tracker is written to localStorage on every change: queue
    entries, rerolls, `exposure` (which also marks the committed entries) and
    `seen`. The key is `jlore_premove:<room>:<seat>:<seed>:<start checksum>`
@@ -1444,7 +1478,8 @@ shared state.
    another key, or text that does not parse, gives an empty tracker. Keys for
    another match in the same room and seat are removed. Every storage access is
    in try/catch, and the key is removed when the queue empties (sent, or the game
-   ended).
+   ended). `checkedSeq` is stored too, so a prompt answered while the premoving
+   tab was closed still drops committed premoves when it comes back.
 
 **Why the reroll removes the scouting leak.** The cursor moves past every position
 any preview of the dropped premoves consumed, and every library they revealed is
@@ -1479,6 +1514,21 @@ before they exist, and no reroll could take that back. Refusing these premoves
 up front keeps every reroll to the premover's own library, and keeps other
 players' next hands off your screen.
 
+**Why the branch is built from Coppers.** Review round 4 found that entering
+premove mode, with nothing queued, showed the hands the other players hold now.
+The branch ends their turns, cleanup discards those hands into their public
+graveyards, and the table showed `viewFor(branch, me)`: all 5 cards in a
+2-player game, and both other hands for the far seat in a 3-player game. Ending a
+turn also fires those cards' discard triggers (a Bullseye Nerfs cards in your
+hand) and reads the rng for them, so scrubbing the view would still have left
+their effects on the branch. Building the branch from a copy in which the hidden
+cards are Coppers removes them at the source: nothing on it depends on what
+anyone else holds. The other seats and the log up to the branch come from the
+live view, because on the branch they would show Coppers that are not there, and
+the instance ids of the real hands. Replaying each step with a second stand-in
+catches premoves that read hidden cards by name rather than by instance, which
+the instance-id scans cannot see.
+
 **Why the reroll log line says nothing.** It used to carry the libraries and the
 cursor numbers, which told every opponent what the undone premove had revealed
 and roughly how much randomness it read. It now names only the actor.
@@ -1510,10 +1560,24 @@ path, not devtools. Three more things are accepted:
   the preview. That is not a leak, because the cursor only moves forward.
 - Hypothetical turns of the seats between the active player and you are played as
   "end turn at once".
-- A forced rollback still re-rolls what the dropped premoves revealed. The active
-  player's turn decides when that happens, not the premover, so it is not a
-  mulligan on demand, but a premover can still see a draw and then have that
-  library reshuffled.
+- A forced rollback still re-rolls what the dropped premoves revealed, so a
+  premover can see a draw and then have that library reshuffled. The premover
+  never picks whether that happens: the active player's turn invalidates the
+  entry, or the premover answers a prompt, and an answer drops every committed
+  premove whatever it was (rule 6). Before that rule an answer did pick. With a
+  premoved +2 Cards committed, Mother Witch had the premover choose a card from
+  their hand: choosing the premoved card rolled it back and reshuffled, and
+  choosing another kept the draw exactly as previewed (30 of 30 seeds in review
+  round 4). That was a mulligan on demand.
+- The preview treats every card another player keeps hidden as a Copper. A kept
+  premove whose outcome depends on those cards in a way the two public stand-ins
+  cannot tell apart previews as if they were Coppers and resolves on the real
+  cards on your turn. If that makes a later premove invalid, the submission fold
+  drops it there like any rollback, owing its reroll.
+- Premove mode shows the other seats as they are now, so a premove that puts a
+  card into another player's graveyard (a Curse) shows it only in your log lines.
+- A second tab of the seat on a page with no lock manager (not a secure context)
+  still keeps its own copy of the queue, as before.
 - Deleting the stored key by hand (devtools) erases the debt. That is outside the
   honest-UI model, like reading the full state in devtools (SB-65).
 - The stored queue is removed when the turn-start batch is handed to the relay. A
@@ -1528,7 +1592,7 @@ only to your own library, when the dropped premoves revealed it.
 
 Code: `src/net/premove.ts` (fold, tracker, rollback, submission, persistence),
 `src/engine/core/reroll.ts`, `src/ui/usePremove.ts`, `src/ui/PremoveBar.tsx`, the
-premove store in `src/net/storage.ts`, and the marked `---- premove ----` and
+premove store and `holdPremoveLock` in `src/net/storage.ts`, and the marked `---- premove ----` and
 `---- fix:premove ----` blocks in `src/engine/types.ts`, `src/engine/index.ts`,
 `src/net/lockstep.ts`, `src/ui/useGame.ts`, `src/ui/App.tsx` and
 `src/ui/logtext.ts`. Tests: `test/premove.test.ts`,

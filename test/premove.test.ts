@@ -42,6 +42,7 @@ import {
   premoveAvailable,
   premoveCount,
   premoveStoreKey,
+  premoveViewFor,
   rerollFor,
   serializeTracker,
   submitPremoves,
@@ -52,7 +53,7 @@ import {
   type PremoveStoreId,
   type PremoveTracker,
 } from '@net/premove';
-import { readPremoveStore, writePremoveStore } from '@net/storage';
+import { holdPremoveLock, readPremoveStore, writePremoveStore, type PremoveLocks } from '@net/storage';
 import { usePremove } from '@ui/usePremove';
 import { PremoveBar } from '@ui/PremoveBar';
 
@@ -314,8 +315,17 @@ describe('SB-68: the batch sent at turn start goes through lockstep like any int
       prem.s.sendMany(prem.seat, sub.actions);
       await flush();
 
-      expect(stateChecksum(prem.s.core.confirmedState()!)).toBe(stateChecksum(preview));
-      expect(stateChecksum(active.s.core.confirmedState()!)).toBe(stateChecksum(preview));
+      // Both browsers agree, and the premover sees exactly what the preview showed.
+      // (The preview's other seats hold Copper stand-ins for their hidden cards, so
+      // the comparison is what `me` sees, not the whole state.)
+      const confirmed = prem.s.core.confirmedState()!;
+      expect(stateChecksum(active.s.core.confirmedState()!)).toBe(stateChecksum(confirmed));
+      const seenBy = (s: GameState) => {
+        const v = viewFor(s, me);
+        return { you: v.you, shop: v.shop, turn: v.turn, activePlayer: v.activePlayer, cursor: s.rngCursor };
+      };
+      expect(seenBy(confirmed)).toEqual(seenBy(preview));
+      expect(premoveViewFor(auth, t.last!, me).you).toEqual(viewFor(confirmed, me).you);
     } finally {
       host.stop();
       guest.stop();
@@ -928,6 +938,12 @@ describe("SB-68 PM-2 / PS-M1: a premove may not reach another player's hidden ca
     const nextHandCard = peekAt((s) => s.players[A]!.hand[0]!);
     expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper), libraryTop).refusal).toBe('opponent');
     expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper), nextHandCard).refusal).toBe('opponent');
+    // A card A holds now (round 4): the branch discarded it into A's graveyard,
+    // in the open, so naming it would say what A holds.
+    const heldNow = auth.players[A]!.hand[0]!;
+    expect(start.players[A]!.gy).toContain(heldNow);
+    const currentHandCard = peekAt(() => heldNow);
+    expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper), currentHandCard).refusal).toBe('opponent');
     // The same Copper without the peek is queued.
     expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper)).added).toBe(true);
   });
@@ -974,5 +990,191 @@ describe('SB-68 MERGE-6: no premoves during a draft', () => {
     expect(s.draft).toBeNull();
     expect(premoveAvailable(true, s, other(s))).toBe(true);
     expect(probe(s, other(s))).toContain('data-available="true"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Review round 4: what premove mode shows, prompt answers, one tab per seat
+// ---------------------------------------------------------------------------
+
+/** Every instance another player keeps hidden from `me` in `state`: their hands and libraries. */
+function hiddenNow(state: GameState, me: PlayerId): InstanceId[] {
+  return state.playerOrder
+    .filter((p) => p !== me)
+    .flatMap((p) => [...state.players[p]!.hand, ...state.players[p]!.library]);
+}
+
+describe("SB-68 round 4: premove mode shows nothing of other players' hidden cards", () => {
+  test('entering premove mode shows none of the cards other players hold now (2 and 3 players)', () => {
+    let rawLeaks = 0;
+    for (const players of [2, 3]) {
+      for (const seed of [4801, 4802, 4803]) {
+        const auth = deal(seed, players);
+        for (const me of auth.playerOrder) {
+          if (me === auth.activePlayer) continue;
+          const fold = foldPremoves(auth, me, [])!;
+          expect(fold).not.toBeNull();
+          const secret = hiddenNow(auth, me);
+          const raw = JSON.stringify(viewFor(fold.branch, me));
+          rawLeaks += secret.filter((iid) => raw.includes(`"${iid}"`)).length;
+          const view = premoveViewFor(auth, fold, me);
+          expect(view.activePlayer).toBe(me);
+          const shown = JSON.stringify(view);
+          for (const iid of secret) expect(shown, `${players}p seed ${seed} seat ${me}`).not.toContain(`"${iid}"`);
+        }
+      }
+    }
+    // The control: the branch's own view does show them, because ending the
+    // turns before yours discarded those hands into the open.
+    expect(rawLeaks).toBeGreaterThan(0);
+  });
+
+  test('the premove view keeps your premoves and shows the other seats as they are now', () => {
+    const auth = clone(deal(4101));
+    const B = other(auth);
+    const [card] = inject(auth, B, ['big_spenda']);
+    const r = added(EMPTY_TRACKER, auth, B, play(B, card!));
+    const view = premoveViewFor(auth, r.fold!, B);
+    expect(view.you.play.map((c) => c.iid)).toEqual([card]);
+    expect(view.log.some((e) => e.seq > r.fold!.states[0]!.logSeq && e.player === B)).toBe(true);
+    expect(view.others).toEqual(viewFor(auth, B).others);
+  });
+
+  test("the hypothetical turn ends never run another player's hidden cards (a Bullseye in the hand)", () => {
+    const auth = clone(deal(4101));
+    const A = auth.activePlayer;
+    const B = other(auth);
+    const armed = clone(auth);
+    inject(armed, A, ['bullseye']);
+    // Control: really ending A's turn, the discarded Bullseye Nerfs cards in B's hand.
+    const handAfter = (s: GameState): string => JSON.stringify(viewFor(advanceToTurnOf(s, B)!, B).you.hand);
+    expect(handAfter(armed)).not.toBe(handAfter(auth));
+    // The premove branch is the same whatever A holds.
+    const shownTo = (s: GameState): string => {
+      const fold = foldPremoves(s, B, [])!;
+      const v = premoveViewFor(s, fold, B);
+      return JSON.stringify({ you: v.you, shop: v.shop, pending: v.pending, turn: v.turn, cursor: fold.branch.rngCursor });
+    };
+    expect(shownTo(armed)).toBe(shownTo(auth));
+  });
+
+  test("a premove whose outcome reads another player's hidden cards is refused: Bribe and Firing Squad", () => {
+    for (const defId of ['bribe', 'firing_squad']) {
+      for (const seed of [4821, 4822, 4823]) {
+        const auth = clone(deal(seed));
+        const B = other(auth);
+        const [card, plain] = inject(auth, B, [defId, 'copper']);
+        const r = addPremove(EMPTY_TRACKER, auth, B, play(B, card!));
+        expect([defId, seed, r.added, r.refusal]).toEqual([defId, seed, false, 'opponent']);
+        expect(r.tracker.queue).toHaveLength(0);
+        // The same seat can still premove a Copper.
+        expect(addPremove(EMPTY_TRACKER, auth, B, play(B, plain!)).added).toBe(true);
+      }
+    }
+  });
+});
+
+describe('SB-68 round 4: answering a prompt drops committed premoves, whatever the answer', () => {
+  test('Mother Witch has B pick a card: the premoved one or another, the premoved draw is dropped alike', () => {
+    const auth = clone(deal(4101));
+    const A = auth.activePlayer;
+    const B = other(auth);
+    const [spenda, copper] = inject(auth, B, ['big_spenda', 'copper']);
+    const [witch] = inject(auth, A, ['mother_witch']);
+    const r = added(EMPTY_TRACKER, auth, B, play(B, spenda!));
+    expect(committedCount(r.tracker)).toBe(1);
+    const key = premoveStoreKey({ room: 'R', seat: 's', seed: auth.seed, checksum: 'c' });
+    const reloaded = deserializeTracker(serializeTracker(r.tracker, key), key);
+
+    const attacked = reduce(auth, play(A, witch!));
+    const prompt = attacked.pending!;
+    expect(prompt.player).toBe(B);
+    const pickSpenda = prompt.options.find((o) => o.iid === spenda)!;
+    const pickOther = prompt.options.find((o) => o.iid !== undefined && o.iid !== spenda)!;
+    expect(pickSpenda).toBeDefined();
+    expect(pickOther).toBeDefined();
+
+    const outcome = (tracker: PremoveTracker, key: string) => {
+      const answered = reduce(attacked, { type: 'resolve', player: B, promptId: prompt.id, keys: [key] });
+      expect(answered.pending).toBeNull();
+      // Synced straight from before the attack: this seat never saw the prompt's own state.
+      const synced = syncPremoves(tracker, answered, B);
+      const turn = advanceToTurnOf(answered, B)!;
+      return {
+        rolledBack: synced.rolledBack,
+        queue: synced.tracker.queue.map((e) => e.kind),
+        submitted: submitPremoves(synced.tracker, turn, B)!.actions.map((a) => a.type),
+      };
+    };
+    const dropped = { rolledBack: true, queue: ['reroll'], submitted: ['reroll'] };
+    expect(outcome(r.tracker, pickSpenda.key)).toEqual(dropped);
+    expect(outcome(r.tracker, pickOther.key)).toEqual(dropped);
+    // After a reload too.
+    expect(outcome(reloaded, pickOther.key)).toEqual(dropped);
+
+    // A premove that revealed nothing is not committed, and stays.
+    const plain = added(EMPTY_TRACKER, auth, B, play(B, copper!));
+    expect(committedCount(plain.tracker)).toBe(0);
+    const notCopper = prompt.options.find((o) => o.iid !== undefined && o.iid !== copper)!;
+    expect(outcome(plain.tracker, notCopper.key)).toEqual({ rolledBack: false, queue: ['action'], submitted: ['play'] });
+  });
+});
+
+describe('SB-68 round 4: one tab per seat holds the premoves', () => {
+  /** A LockManager in miniature: exclusive locks, granted in request order, abortable while queued. */
+  function fakeLocks(): PremoveLocks {
+    const waiting = new Map<string, Array<() => void>>();
+    const held = new Set<string>();
+    const release = (name: string): void => {
+      const next = waiting.get(name)?.shift();
+      if (next) next();
+      else held.delete(name);
+    };
+    return {
+      request(name, options, callback) {
+        return new Promise((resolve) => {
+          const grant = (): void => {
+            held.add(name);
+            void Promise.resolve(callback({ name })).then((value) => {
+              resolve(value);
+              release(name);
+            });
+          };
+          options.signal?.addEventListener('abort', () => {
+            const queue = waiting.get(name) ?? [];
+            const at = queue.indexOf(grant);
+            if (at >= 0) queue.splice(at, 1);
+            resolve(undefined);
+          });
+          if (held.has(name)) waiting.set(name, [...(waiting.get(name) ?? []), grant]);
+          else grant();
+        });
+      },
+    };
+  }
+
+  test('a second tab waits, and takes over only when the first lets go', async () => {
+    const locks = fakeLocks();
+    const got: string[] = [];
+    const seat = 'jlore_premove:R:seat-b:1:c';
+    const releaseOne = holdPremoveLock(seat, () => got.push('one'), locks);
+    const releaseTwo = holdPremoveLock(seat, () => got.push('two'), locks);
+    const releaseOther = holdPremoveLock('jlore_premove:R:seat-c:1:c', () => got.push('other seat'), locks);
+    await flush();
+    expect(got).toEqual(['one', 'other seat']);
+    releaseOne();
+    await flush();
+    expect(got).toEqual(['one', 'other seat', 'two']);
+    // A tab that closes while it waits never takes over.
+    const releaseThree = holdPremoveLock(seat, () => got.push('three'), locks);
+    releaseThree();
+    releaseTwo();
+    await flush();
+    expect(got).toEqual(['one', 'other seat', 'two']);
+    releaseOther();
+    // No lock manager (an insecure page): the tab holds it at once, as before.
+    const alone: string[] = [];
+    holdPremoveLock(seat, () => alone.push('held'), null)();
+    expect(alone).toEqual(['held']);
   });
 });
