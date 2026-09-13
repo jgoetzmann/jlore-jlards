@@ -24,6 +24,7 @@ import { AnomalyChip, StatCluster, TurnClock } from './TurnBar';
 import { PromptOverlay } from './PromptOverlay';
 import { Card, CardArt } from './Card';
 import { CardPreview } from './CardPreview';
+import { LinkedSpan } from './Card'; // ---- fix:mobile ----
 import { Opponents, hueOf } from './Opponents';
 import { ownPrompt, promptBounds, promptPlacement, promptReady, togglePick, waitingOnOther } from './prompt';
 import { KEY_HELP, type KeyIntent } from './keys';
@@ -975,9 +976,10 @@ export function TableLayout({
                 {topGy ? (
                   // Keyed and registered by the top card, so a card that lands
                   // on the discard flies here from wherever it was.
-                  <span className="dock-discard-top" key={topGy.iid} ref={registry.register(topGy.iid)}>
+                  // ---- fix:mobile ---- MOB-6: LinkedSpan adds the linked outline.
+                  <LinkedSpan className="dock-discard-top" key={topGy.iid} defId={topGy.defId} spanRef={registry.register(topGy.iid)}>
                     <CardArt artKey={topGy.art?.key} name={topGy.name} />
-                  </span>
+                  </LinkedSpan>
                 ) : (
                   <span className="dock-discard-empty" aria-hidden="true" />
                 )}

@@ -248,6 +248,11 @@ function LinksFixture(): JSX.Element {
     const inst = s.instances[iid]!;
     inst.zone = 'play';
     inst.defId = 'silver_stash';
+    // ---- fix:mobile ---- MOB-6: a Silver on top of the discard, so the dock lights too.
+    const gyIid = p.hand.shift()!;
+    p.gy.push(gyIid);
+    s.instances[gyIid]!.zone = 'gy';
+    s.instances[gyIid]!.defId = 'silver';
     return s;
   }, []);
   return <StaticTable state={state} />;

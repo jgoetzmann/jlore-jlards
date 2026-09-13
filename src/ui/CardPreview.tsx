@@ -14,6 +14,7 @@ import type { CardView } from '@engine/types';
 import { Card } from './Card';
 import { closePreviewSheet, getPreview, getServerPreview, subscribePreview } from './preview';
 import { TapTip } from './TapTip';
+import { followMention } from './touch';
 
 /**
  * The whole card as a dismissable dialog. Pure, so the unit suite can render
@@ -48,7 +49,7 @@ export function PreviewSheet({ card, onClose }: { card: CardView; onClose: () =>
       }}
     >
       <div className="card-preview-sheet-body">
-        <Card card={card} variant="preview" testId="card-preview" />
+        <Card card={card} variant="preview" testId="card-preview" onMention={(defId) => followMention(card, defId)} />
         <button
           type="button"
           ref={closeRef}

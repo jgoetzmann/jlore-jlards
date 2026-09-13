@@ -1,7 +1,7 @@
 /**
  * Linked-card highlighting.
  *
- * When a card is hovered (or tapped / long-pressed on touch), every card face
+ * When a card is hovered (or tapped on touch, see touch.ts), every card face
  * on the table that it *references* lights up too: Silver Stash lights the
  * Silver pile, Astrologist lights any Lunar Fragment.
  *
@@ -121,7 +121,6 @@ export function setLinkSource(defId: CardDefId, owner: string): void {
   const prev = source ? source.set : EMPTY;
   const set = linkedDefIds(defId);
   source = { defId, owner, set };
-  installTapAway();
   if (set !== prev) emit();
 }
 
@@ -134,33 +133,15 @@ export function clearLinkSource(owner?: string): void {
   if (had !== EMPTY) emit();
 }
 
-/** True while `defId` is referenced by the hovered or tapped card. */
-export function useLinked(defId: CardDefId): boolean {
-  return React.useSyncExternalStore(
-    subscribeLinks,
-    () => isLinked(defId),
-    () => false,
-  );
-}
-
 /**
- * Touch has no pointer-leave worth trusting (it fires on every lift), so a
- * tapped card's highlight holds until a tap lands somewhere that is not a card
- * face. A mouse clears on leave instead and is ignored here.
+ * True while `defId` is referenced by the hovered or tapped card. The server
+ * snapshot reads the same store (there is no SSR to hydrate), so a static
+ * render in the unit suite shows the highlight too.
+ *
+ * On touch, what lights and puts out a highlight (tap, tap-away, the preview
+ * sheet's Mentions chips) lives in touch.ts.
  */
-let tapAwayInstalled = false;
-
-function installTapAway(): void {
-  if (tapAwayInstalled || typeof document === 'undefined') return;
-  tapAwayInstalled = true;
-  document.addEventListener(
-    'pointerdown',
-    (e) => {
-      if (e.pointerType === 'mouse') return;
-      const t = e.target;
-      if (t instanceof Element && t.closest('[data-card-id]')) return;
-      clearLinkSource();
-    },
-    true,
-  );
+export function useLinked(defId: CardDefId): boolean {
+  const read = (): boolean => isLinked(defId);
+  return React.useSyncExternalStore(subscribeLinks, read, read);
 }
