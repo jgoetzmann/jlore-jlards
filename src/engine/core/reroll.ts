@@ -9,14 +9,21 @@
  * player could scout their deck by premoving a draw and getting rolled back.
  *
  * A reroll closes that. It moves the rng cursor past every position the
- * dropped preview consumed and reshuffles every library the preview revealed.
- * What the player saw then predicts nothing. It is an ordinary active-player
- * action carried in an ordinary intent, so every browser applies the identical
- * shuffle (SB-65) and replay reproduces it (B119).
+ * dropped preview consumed and reshuffles the actor's library if the preview
+ * revealed it. What the player saw then predicts nothing. It is an ordinary
+ * active-player action carried in an ordinary intent, so every browser applies
+ * the identical shuffle (SB-65) and replay reproduces it (B119).
+ *
+ * Only the actor's own library: a premove that would reveal anyone else's is
+ * refused before it is ever shown, so a reroll never needs to touch another
+ * player's library, and must not (it would undo their deliberate placements).
+ *
+ * The log line carries no detail: which library was shuffled and how far the
+ * cursor jumped would tell every opponent what the undone premove revealed.
  *
  * The cost: a reshuffle discards any deliberate top-of-library placement. That
- * only happens after a rollback, and only to the libraries the dropped preview
- * actually revealed.
+ * only happens after a rollback, and only to the actor's library, when the
+ * dropped preview actually revealed it.
  */
 
 import type { GameAction, GameState, PlayerId } from '@engine/types';
@@ -29,13 +36,7 @@ export const REROLL_MAX_SKIP = 1_000_000;
 type RerollAction = Extract<GameAction, { type: 'reroll' }>;
 
 function rejectReroll(s: GameState, action: RerollAction, why: string): GameState {
-  const libs = (action as { libraries?: unknown }).libraries;
-  const skipTo = (action as { skipTo?: unknown }).skipTo;
-  return logReject(s, 'illegalReroll', action.player, {
-    why,
-    libraries: Array.isArray(libs) ? libs.length : null,
-    skipTo: typeof skipTo === 'number' && Number.isFinite(skipTo) ? skipTo : null,
-  });
+  return logReject(s, 'illegalReroll', action.player, { why });
 }
 
 /**
@@ -53,6 +54,8 @@ export function applyReroll(s: GameState, action: RerollAction): GameState {
   const libraries: PlayerId[] = [];
   for (const pid of libs) {
     if (typeof pid !== 'string' || !s.players[pid]) return rejectReroll(s, action, 'unknownPlayer');
+    // SB-68: a reroll reshuffles the actor's own library and nobody else's.
+    if (pid !== action.player) return rejectReroll(s, action, 'otherLibrary');
     if (!libraries.includes(pid)) libraries.push(pid);
   }
   if (
@@ -64,7 +67,6 @@ export function applyReroll(s: GameState, action: RerollAction): GameState {
     return rejectReroll(s, action, 'skipTo');
   }
 
-  const from = s.rngCursor;
   if (skipTo > s.rngCursor) s.rngCursor = skipTo;
   for (const pid of libraries) {
     const p = s.players[pid];
@@ -73,5 +75,5 @@ export function applyReroll(s: GameState, action: RerollAction): GameState {
     p.library = rng.shuffle(p.library);
     s.rngCursor = rng.cursor();
   }
-  return appendLog(s, 'reroll', action.player, { libraries, skipTo, from, cursor: s.rngCursor });
+  return appendLog(s, 'reroll', action.player, {});
 }

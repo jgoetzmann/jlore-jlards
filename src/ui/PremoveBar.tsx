@@ -4,11 +4,15 @@
  *   off, available   [Premove]                       premove-toggle
  *   on               Premoving your next turn · N queued  [Watch live] [Clear]
  *                                                    premove-bar, premove-live, premove-clear
+ *   committed        "N committed — they showed you cards, so they can't be cleared"
+ *                                                    premove-committed (Clear only drops the rest)
  *   after a rollback "A premove was undone — the turn changed it"   premove-rolled-back
+ *   after a refusal  "Can't premove that — it would show another player's cards"
+ *                                                    premove-refused
  *
  * It sits in the strip's own row, which scrolls sideways, so it never adds
- * height to the dock (SB-63). The notice says only that something was undone:
- * never which card, and never what the undone preview showed.
+ * height to the dock (SB-63). The notices never name a card, and never say what
+ * an undone preview showed.
  */
 
 import React from 'react';
@@ -22,9 +26,27 @@ export interface PremoveBarProps {
   /** The table is showing the premove branch (not paused on a prompt or the like). */
   showing: boolean;
   count: number;
+  /** Of `count`, the premoves Clear cannot remove (their previews showed hidden information). */
+  committed?: number;
   rolledBack: number;
+  /** Bumps when a premove was refused because it would show another player's hidden cards. */
+  refused?: number;
   onActive: (on: boolean) => void;
   onClear: () => void;
+}
+
+/** True for PREMOVE_NOTICE_MS after `counter` changes. */
+function useNotice(counter: number): boolean {
+  const [on, setOn] = React.useState(false);
+  const seen = React.useRef(counter);
+  React.useEffect(() => {
+    if (seen.current === counter) return;
+    seen.current = counter;
+    setOn(true);
+    const t = setTimeout(() => setOn(false), PREMOVE_NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [counter]);
+  return on;
 }
 
 export function PremoveBar({
@@ -32,27 +54,32 @@ export function PremoveBar({
   active,
   showing,
   count,
+  committed = 0,
   rolledBack,
+  refused = 0,
   onActive,
   onClear,
 }: PremoveBarProps): JSX.Element | null {
-  const [notice, setNotice] = React.useState(false);
-  const seen = React.useRef(rolledBack);
-  React.useEffect(() => {
-    if (seen.current === rolledBack) return;
-    seen.current = rolledBack;
-    setNotice(true);
-    const t = setTimeout(() => setNotice(false), PREMOVE_NOTICE_MS);
-    return () => clearTimeout(t);
-  }, [rolledBack]);
+  const undoneOn = useNotice(rolledBack);
+  const refusedOn = useNotice(refused);
 
-  const undone = notice ? (
-    <span className="premove-undone" data-testid="premove-rolled-back" role="status">
-      A premove was undone — the turn changed it
-    </span>
-  ) : null;
+  const notices = (
+    <>
+      {refusedOn && (
+        <span className="premove-undone" data-testid="premove-refused" role="status">
+          Can't premove that — it would show another player's cards
+        </span>
+      )}
+      {undoneOn && (
+        <span className="premove-undone" data-testid="premove-rolled-back" role="status">
+          A premove was undone — the turn changed it
+        </span>
+      )}
+    </>
+  );
 
   if (active) {
+    const kept = Math.min(Math.max(0, committed), count);
     return (
       <div
         className="premove-bar"
@@ -66,6 +93,11 @@ export function PremoveBar({
         <span className="premove-count">
           <b>{count}</b> queued
         </span>
+        {kept > 0 && (
+          <span className="premove-committed" data-testid="premove-committed" data-committed={kept}>
+            {kept} committed — they showed you cards, so they can't be cleared
+          </span>
+        )}
         <button type="button" className="premove-btn" data-testid="premove-live" onClick={() => onActive(false)}>
           Watch live
         </button>
@@ -73,17 +105,17 @@ export function PremoveBar({
           type="button"
           className="premove-btn"
           data-testid="premove-clear"
-          disabled={count === 0}
+          disabled={count - kept === 0}
           onClick={onClear}
         >
           Clear
         </button>
-        {undone}
+        {notices}
       </div>
     );
   }
 
-  if (!available && count === 0) return undone;
+  if (!available && count === 0) return notices;
 
   return (
     <>
@@ -98,7 +130,7 @@ export function PremoveBar({
       >
         Premove{count > 0 ? ` · ${count} queued` : ''}
       </button>
-      {undone}
+      {notices}
     </>
   );
 }
