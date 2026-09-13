@@ -23,6 +23,7 @@ import { applyAnomalySetup, rollAnomaly } from '@engine/meta';
 import { appendLog } from './log.js';
 import { createInstance, shuffleLibrary, drawCards } from './zones.js';
 import { startTurn } from './turn.js';
+import { dealDraft } from './draft.js'; // ---- draft ----
 
 export const STARTING_COPPER = 7;
 export const STARTING_TIX = 3;
@@ -79,6 +80,8 @@ function normalizeConfig(config: MatchConfig, playerCount: number): MatchConfig 
       config?.seedCodexWithCommons === undefined
         ? base.seedCodexWithCommons
         : config.seedCodexWithCommons,
+    // ---- draft ---- only present when on, so a normal match's config is unchanged
+    ...(config?.draftMode === true ? { draftMode: true } : {}),
   };
 }
 
@@ -170,6 +173,7 @@ export function createMatch(
     doomsdayCounter: 0,
     hardEndTurn: null,
     defsInMatch: [],
+    draft: null, // ---- draft ----
   };
 
   const seededCodex = cfg.seedCodexWithCommons ? seededCodexIds() : [];
@@ -233,6 +237,17 @@ export function createMatch(
     s.rngCursor = rng.cursor();
     appendLog(s, 'anomaly', null, { anomalyId });
   }
+
+  // ---- draft ----
+  // The Draft deals after the anomaly setup, so its candidate pools already
+  // carry the SB-28 exclusions and its piles the anomaly's pile scale. A small
+  // pool shrinks the sets rather than failing (core/draft.ts).
+  if (cfg.draftMode === true) {
+    const rng = makeRng(s.seed, s.rngCursor);
+    s = dealDraft(s, rng);
+    s.rngCursor = rng.cursor();
+  }
+  // ---- /draft ----
 
   // Shuffle and deal opening hands (B1).
   for (const entry of roster) {

@@ -37,6 +37,7 @@ import { canBuyPile, priceFor } from './core/buy.js';
 import { effectiveKeywords, effectiveStats } from '@engine/systems';
 import { safeDef, topOfPile } from './core/zones.js';
 import { getAura, hasAura } from './registry.js';
+import { draftViewFor } from './core/draft.js'; // ---- draft ----
 
 const MAX_LOG_ENTRIES = 250;
 const INTERNAL_COUNTER_PREFIXES = ['trg:', 'podChain'];
@@ -468,5 +469,7 @@ export function viewFor(state: GameState, playerId: PlayerId): GameView {
     log: scrubLog(state, playerId, hidden),
     doomsdayCounter: state.doomsdayCounter,
     hardEndTurn: state.hardEndTurn,
+    // ---- draft ---- your slots only, as printed faces; no instance ids (B111)
+    draft: draftViewFor(state, playerId, (defId, key) => ({ ...cardView(state, defId, playerId), iid: key })),
   };
 }

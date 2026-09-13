@@ -781,6 +781,14 @@ export interface MatchConfig {
   turnSeconds: number;
   /** When true, cards the players have never seen still appear in Known Universe pools. */
   seedCodexWithCommons: boolean;
+  // ---- draft ----
+  /**
+   * The Draft: the Draft and Prophet shops are filled by the players' picks
+   * before turn play starts, instead of being sampled. Optional so existing
+   * configs keep compiling; absent means false.
+   */
+  draftMode?: boolean;
+  // ---- /draft ----
 }
 
 // ---------------------------------------------------------------------------
@@ -828,7 +836,41 @@ export interface GameState {
   hardEndTurn: number | null;
   /** Ids of definitions present in this match, for CNcias-style queries. */
   defsInMatch: CardDefId[];
+  // ---- draft ----
+  /** The Draft in progress (`config.draftMode`), or null once it is done or when there is none. */
+  draft: DraftState | null;
+  // ---- /draft ----
 }
+
+// ---- draft ----
+/** One choice a player makes during the Draft: pick one of `options` for one shop slot. */
+export interface DraftSlot {
+  index: number;
+  kind: 'draft' | 'prophet';
+  player: PlayerId;
+  options: CardDefId[];
+  pick: CardDefId | null;
+}
+
+export interface DraftState {
+  slots: DraftSlot[];
+}
+
+/** A player's own Draft slots, as they are allowed to see them. */
+export interface DraftSlotView {
+  index: number;
+  kind: 'draft' | 'prophet';
+  options: CardView[];
+  pick: CardDefId | null;
+}
+
+export interface DraftView {
+  /** Only the viewer's slots. */
+  slots: DraftSlotView[];
+  /** Unpicked slots per player, for everyone. */
+  remaining: Record<PlayerId, number>;
+}
+// ---- /draft ----
 
 export interface QueuedEffect {
   node: EffectNode;
@@ -854,7 +896,9 @@ export type GameAction =
   | { type: 'reorderHand'; player: PlayerId; hand: InstanceId[] }
   | { type: 'endTurn'; player: PlayerId }
   | { type: 'resolve'; player: PlayerId; promptId: string; keys: string[] }
-  | { type: 'concede'; player: PlayerId };
+  | { type: 'concede'; player: PlayerId }
+  // ---- draft ----
+  | { type: 'draftPick'; player: PlayerId; slot: number; defId: CardDefId };
 
 // ---------------------------------------------------------------------------
 // Views (what a client is allowed to know)
@@ -937,6 +981,10 @@ export interface GameView {
   log: LogEntry[];
   doomsdayCounter: number;
   hardEndTurn: number | null;
+  // ---- draft ----
+  /** Your Draft slots while the Draft runs. Optional so hand-built views keep compiling. */
+  draft?: DraftView | null;
+  // ---- /draft ----
 }
 
 // ---------------------------------------------------------------------------

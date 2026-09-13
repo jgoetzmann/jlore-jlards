@@ -239,11 +239,18 @@ function scalePiles(state: GameState, scale: number): GameState {
   return next;
 }
 
-function scaleShopCosts(state: GameState, factor: number, round: 'up' | 'down'): GameState {
+function scaleShopCosts(
+  state: GameState,
+  factor: number,
+  round: 'up' | 'down',
+  /** ---- draft ---- only these piles (the drafted ones); absent means every pile. */
+  onlyPiles?: readonly string[],
+): GameState {
   const next = cloneState(state);
   const buyer = next.playerOrder[0];
-  for (const pileId of Object.keys(next.shop.piles)) {
+  for (const pileId of onlyPiles ?? Object.keys(next.shop.piles)) {
     const pile = next.shop.piles[pileId];
+    if (!pile) continue;
     let base: number;
     try {
       base = costOf(next, pileId, buyer);
@@ -383,6 +390,37 @@ export function applyAnomalySetup(state: GameState, anomalyId: AnomalyId, rng: R
 
   return next;
 }
+
+// ---- draft ----
+/**
+ * The Draft builds the Draft and Prophet piles after `applyAnomalySetup` has
+ * run, so the setup patches that act on pile contents have to reach those
+ * piles here instead. The rest need nothing: Accelerated / Prolonged already
+ * set `config.pileSizeScale`, which the drafted piles are sized with, and the
+ * SB-28 exclusion is applied to the candidates before the deal.
+ *
+ * Only the named piles are touched, so the Resource and Points piles do not get
+ * a patch twice.
+ */
+export function applyAnomalyToDraftedPiles(state: GameState, pileIds: readonly string[]): GameState {
+  const id = state.anomaly;
+  if (id === null || pileIds.length === 0) return state;
+  let next = state;
+  if (id === 'dynamic_pricing') next = scaleShopCosts(next, 2, 'up', pileIds);
+  if (id === 'fading_blossom') {
+    next = scaleShopCosts(next, 0.5, 'down', pileIds);
+    next = cloneState(next);
+    for (const pid of pileIds) {
+      for (const iid of next.shop.piles[pid]?.cards ?? []) {
+        const inst = next.instances[iid];
+        if (inst && !inst.addedKeywords.includes('Flimsy')) inst.addedKeywords.push('Flimsy');
+      }
+    }
+  }
+  if (id === MEOW_ANOMALY_ID) next = applyMeowText(next);
+  return next;
+}
+// ---- /draft ----
 
 function withPlayerCounters(state: GameState, key: string, value: number): GameState {
   let next = state;
