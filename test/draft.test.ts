@@ -309,7 +309,7 @@ describe('draftPick: validation, and nothing else while drafting', () => {
       { type: 'buy', player: 'p1', pileId: s.shop.order.resource[0]! },
       { type: 'endTurn', player: 'p1' },
       { type: 'reorderHand', player: 'p1', hand: [...p1.hand].reverse() },
-      { type: 'concede', player: 'p2' },
+      // concede is exempt (SB-69): test/draft-followups.test.ts
       { type: 'resolve', player: 'p1', promptId: 'x', keys: [] },
     ];
     for (const action of refused) {

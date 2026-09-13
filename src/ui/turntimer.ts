@@ -17,7 +17,8 @@
  * at setup (SB-36) — and 0 means the match plays without a timer.
  */
 
-import type { GameAction, GameState, PlayerId } from '@engine/types';
+import type { DraftSlot, GameAction, GameState, PlayerId } from '@engine/types';
+import { isOpenSlot } from '@engine/core/draft';
 
 /** Seconds a turn lasts, or 0 for no timer. Anything unusable reads as "no timer". */
 export function timerLimitSeconds(turnSeconds: number | null | undefined): number {
@@ -65,4 +66,54 @@ export function timeoutMove(
   const key = `end:${turnKey(state)}`;
   if (!controls(state.activePlayer) || done.has(key)) return null;
   return { key, player: state.activePlayer, action: { type: 'endTurn', player: state.activePlayer } };
+}
+
+// ---------------------------------------------------------------------------
+// The Draft's idle deadline (SB-69)
+// ---------------------------------------------------------------------------
+//
+// The clock is off while the Draft runs, but a timed match still must not wait
+// forever on a seat that stopped picking. Each browser keeps one idle deadline
+// for the seats it controls, `turnSeconds` long, restarted whenever one of those
+// seats' next open slot changes. When it passes, the first such seat (seating
+// order) has that slot picked with `options[0]`: an ordinary `draftPick`, sent
+// once per slot, after which the deadline restarts for the next open slot.
+
+type DraftClockState = Pick<GameState, 'draft' | 'ended' | 'playerOrder'>;
+
+function nextOpenSlotOf(state: DraftClockState, player: PlayerId): DraftSlot | null {
+  return state.draft?.slots.find((slot) => slot.player === player && isOpenSlot(slot)) ?? null;
+}
+
+/**
+ * What the idle deadline is waiting on: each controlled seat's next open slot,
+ * or null when none of them has anything left to pick (no deadline then).
+ */
+export function draftIdleKey(state: DraftClockState, controls: (player: PlayerId) => boolean): string | null {
+  if (state.ended || !state.draft) return null;
+  const parts: string[] = [];
+  for (const pid of state.playerOrder) {
+    if (!controls(pid)) continue;
+    const slot = nextOpenSlotOf(state, pid);
+    if (slot) parts.push(`${pid}:${slot.index}`);
+  }
+  return parts.length > 0 ? parts.join(',') : null;
+}
+
+/** The pick this browser sends when the Draft's idle deadline passes, or null. */
+export function draftTimeoutMove(
+  state: DraftClockState,
+  controls: (player: PlayerId) => boolean,
+  done: ReadonlySet<string> = new Set(),
+): TimeoutMove | null {
+  if (state.ended || !state.draft) return null;
+  for (const pid of state.playerOrder) {
+    if (!controls(pid)) continue;
+    const slot = nextOpenSlotOf(state, pid);
+    if (!slot) continue;
+    const key = `draft:${slot.index}`;
+    if (done.has(key)) continue;
+    return { key, player: pid, action: { type: 'draftPick', player: pid, slot: slot.index, defId: slot.options[0]! } };
+  }
+  return null;
 }

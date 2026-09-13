@@ -43,6 +43,7 @@ import { makeStart, startSession, type LockstepSession } from '@net/lockstep';
 import { ensureRegistry } from '@net/bootstrap';
 import { getCodex, getSettings, noteSeenCards, saveSnapshot, setRoomCode } from '@net/storage';
 import { timeoutMove, timerLimitSeconds, turnKey } from './turntimer';
+import { draftIdleKey, draftTimeoutMove } from './turntimer'; // ---- fix:draft ----
 // ---- premove ----
 import { usePremove, type PremoveSession } from './usePremove';
 
@@ -88,6 +89,16 @@ export interface LobbyInfo {
   draft?: boolean;
   // ---- /draft ----
 }
+
+// ---- fix:draft ----
+/**
+ * When the host's resume snapshot is replaced: once per turn, and once more when
+ * the Draft completes, which keeps the turn number (MERGE-5).
+ */
+export function snapshotKey(state: Pick<GameState, 'turn' | 'draft'>): string {
+  return `${state.turn}:${state.draft ? 1 : 0}`;
+}
+// ---- /fix:draft ----
 
 export interface GameSession {
   /** The view being rendered: the seat that must act in hotseat, yours otherwise. */
@@ -315,7 +326,7 @@ export function useGame(opts: UseGameOptions): GameSession {
   const seedRef = React.useRef<number>(seed ?? Math.floor(Math.random() * 2 ** 31));
   const myName = React.useMemo(() => getSettings().playerName, []);
 
-  const savedTurnRef = React.useRef(-1);
+  const savedTurnRef = React.useRef(''); // ---- fix:draft ---- a snapshotKey, not a bare turn
   const onChange = React.useCallback(() => {
     setVersion((v) => v + 1);
     // A per-turn local save for the start screen's resume, off the click path
@@ -323,8 +334,8 @@ export function useGame(opts: UseGameOptions): GameSession {
     const s = sessionRef.current;
     if (!s || mode === 'hotseat') return;
     const conf = s.core.confirmedState();
-    if (!conf || conf.turn === savedTurnRef.current) return;
-    savedTurnRef.current = conf.turn;
+    if (!conf || snapshotKey(conf) === savedTurnRef.current) return;
+    savedTurnRef.current = snapshotKey(conf);
     const code = roomCode ?? '';
     whenIdle(() => {
       try {
@@ -346,7 +357,7 @@ export function useGame(opts: UseGameOptions): GameSession {
     setRoster(null);
     setManual(null);
     setLobbyOpen(mode === 'host' && wantsLobby);
-    savedTurnRef.current = -1;
+    savedTurnRef.current = ''; // ---- fix:draft ----
     sessionRef.current = null;
 
     let relay: Relay;
@@ -603,6 +614,43 @@ export function useGame(opts: UseGameOptions): GameSession {
 
   const turnEndsAt =
     deadline !== null && deadline.turn === currentTurn && timerLimit > 0 ? deadline.endsAt : null;
+
+  // ---- fix:draft ---- the Draft's idle deadline (SB-69, turntimer.ts)
+  // A timed match gives the seats this browser controls `turnSeconds` without a
+  // pick; then their next open slot is picked with its first option, once per
+  // slot, and the deadline restarts. The clock readout stays hidden meanwhile.
+  const draftLimit = state && !state.ended && state.draft ? timerLimitSeconds(state.config.turnSeconds) : 0;
+  const draftControls = (pid: PlayerId): boolean => {
+    const seat = core ? core.seatOf(pid) : null;
+    return Boolean(seat) && (mode === 'hotseat' || seat === seatId);
+  };
+  const draftKey = state && draftLimit > 0 ? draftIdleKey(state, draftControls) : null;
+  const [draftExpired, setDraftExpired] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (draftKey === null) return;
+    const t = setTimeout(() => setDraftExpired(draftKey), draftLimit * 1000);
+    return () => clearTimeout(t);
+  }, [draftKey, draftLimit]);
+  const draftTimedOutRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (draftExpired === null || draftExpired !== draftKey) return;
+    const s = sessionRef.current;
+    const st = stateRef.current;
+    if (!s || !st) return;
+    const move = draftTimeoutMove(
+      st,
+      (pid) => {
+        const seat = s.core.seatOf(pid);
+        return Boolean(seat) && (mode === 'hotseat' || seat === seatId);
+      },
+      draftTimedOutRef.current,
+    );
+    if (!move) return;
+    draftTimedOutRef.current.add(move.key);
+    const seat = s.core.seatOf(move.player);
+    if (seat) s.send(seat, move.action);
+  }, [draftExpired, draftKey, mode, seatId]);
+  // ---- /fix:draft ----
 
   const started = core ? core.started() : false;
   const bound = mode === 'hotseat' ? started : myPid !== null;

@@ -53,6 +53,8 @@ import {
 import { applyAnomalyToDraftedPiles } from '@engine/meta';
 import { getCard } from '@engine/registry';
 import { appendLog, logReject } from './log.js';
+import { advanceTurn, startTurn } from './turn.js'; // ---- fix:draft ----
+import { finishGame } from './endgame.js'; // ---- fix:draft ----
 
 /** Cards offered per Draft Shop slot. */
 export const DRAFT_OPTIONS_PER_SLOT = 4;
@@ -223,6 +225,46 @@ export function applyDraftPick(
   if (draft.slots.some(isOpenSlot)) return s;
   return finishDraft(s);
 }
+
+// ---- fix:draft ---- nobody stalls a draft forever (SB-69)
+/**
+ * Pick `options[0]` for every open slot whose player `who` accepts, in slot
+ * order, each logged as an automatic `draftPick`. Builds the shops when that
+ * leaves nothing to choose. Deterministic, so every browser folds the same.
+ */
+export function autoPickDraftSlots(s: GameState, who: (player: PlayerId) => boolean): GameState {
+  const draft = s.draft;
+  if (!draft) return s;
+  for (const slot of draft.slots) {
+    if (!who(slot.player) || !isOpenSlot(slot)) continue;
+    slot.pick = slot.options[0]!;
+    appendLog(s, 'draftPick', slot.player, { slot: slot.index, kind: slot.kind, auto: true });
+  }
+  if (draft.slots.some(isOpenSlot)) return s;
+  return finishDraft(s);
+}
+
+/**
+ * `reduce`'s concede while a draft runs. Concede is exempt from the drafting
+ * gate, from any player (everyone drafts at once): the conceder is eliminated
+ * and their open slots are auto-picked. A concession that ends the game closes
+ * the draft for everyone, so the finished table has its shops; otherwise a
+ * conceding active player passes the turn, exactly as a concession in turn
+ * play does. Every path logs (B118).
+ */
+export function applyDraftConcede(s: GameState, player: PlayerId): GameState {
+  const p = s.players[player];
+  if (!p) return logReject(s, 'unknownPlayer', player, {});
+  if (p.eliminated) return logReject(s, 'eliminated', player, { action: 'concede' });
+  p.eliminated = true;
+  appendLog(s, 'concede', player, {});
+  const alive = s.playerOrder.filter((id) => !s.players[id]?.eliminated);
+  if (alive.length <= 1) return finishGame(autoPickDraftSlots(s, () => true), 'concession');
+  let next = autoPickDraftSlots(s, (pid) => pid === player);
+  if (next.activePlayer === player) next = startTurn(advanceTurn(next));
+  return next;
+}
+// ---- /fix:draft ----
 
 function picksOf(draft: DraftState, kind: DraftSlot['kind']): CardDefinition[] {
   const out: CardDefinition[] = [];
