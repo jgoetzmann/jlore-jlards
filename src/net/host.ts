@@ -328,6 +328,10 @@ export interface LobbyHostOptions {
   seatCap?: number;
   /** Deal the match with a turn timer (SB-67). Default on. */
   timerOn?: boolean;
+  // ---- draft ----
+  /** Deal the match as The Draft. Default off. */
+  draft?: boolean;
+  // ---- /draft ----
   /** Called with every roster the host publishes, including the first. */
   onRoster?: (roster: LobbyPayload) => void;
   /** Injectable clock, for tests. */
@@ -350,6 +354,10 @@ export interface LobbyHandoff {
   since: number;
   /** The host's timer choice at the moment it pressed Start (SB-67). */
   timerOn: boolean;
+  // ---- draft ----
+  /** The host's Draft choice at the moment it pressed Start. */
+  draft: boolean;
+  // ---- /draft ----
 }
 
 export interface LobbyHostHandle {
@@ -357,6 +365,10 @@ export interface LobbyHostHandle {
   setSeatCap(cap: number): void;
   /** Deal with a turn timer, or without one. Republishes, so guests see it. */
   setTimerOn(on: boolean): void;
+  // ---- draft ----
+  /** Deal as The Draft, or not. Republishes, so guests see it. */
+  setDraft(on: boolean): void;
+  // ---- /draft ----
   roster(): LobbyPayload;
   /**
    * Freeze the roster, tell the room, and stop listening. Everything the match
@@ -415,6 +427,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
   let rev = 0;
   let seatCap = clampSeatCap(options.seatCap);
   let timerOn = options.timerOn !== false;
+  let draft = options.draft === true; // ---- draft ----
   let frozenSeats: string[] = [];
 
   const members: LobbyMemberRecord[] = [
@@ -440,6 +453,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       seats: frozenSeats.slice(),
       knocking: turnedAway.size,
       timerOn,
+      draft, // ---- draft ----
       rev,
     };
   }
@@ -552,6 +566,15 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       publish();
     },
 
+    // ---- draft ----
+    setDraft(on: boolean) {
+      if (stopped || started) return;
+      if (on === draft) return;
+      draft = on;
+      publish();
+    },
+    // ---- /draft ----
+
     roster,
 
     start(): LobbyHandoff {
@@ -568,7 +591,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       clearTimers();
       loop.stop();
       stopped = true;
-      return { seats: frozenSeats.slice(), names, codexes, since, timerOn };
+      return { seats: frozenSeats.slice(), names, codexes, since, timerOn, draft };
     },
   };
 }

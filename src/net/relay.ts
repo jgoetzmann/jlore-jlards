@@ -861,6 +861,10 @@ export interface LobbyPayload {
   /** Whether the match will be dealt with a turn timer (SB-67). Optional: an
    *  older host sends none, and that reads as "on". */
   timerOn?: boolean;
+  // ---- draft ----
+  /** Whether the match will be dealt as The Draft. Optional: absent reads as off. */
+  draft?: boolean;
+  // ---- /draft ----
   rev: number;
 }
 

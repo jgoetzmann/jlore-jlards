@@ -13,6 +13,7 @@ import React from 'react';
 import type { LobbyInfo, LobbyMemberInfo } from './useGame';
 import { DEFAULT_TURN_SECONDS } from './useGame';
 import './lobby.css';
+import './draft.css'; // ---- draft ----
 
 /** Stable per-seat hue, so the same person keeps the same colour all session. */
 function hueOf(seat: string): number {
@@ -87,6 +88,7 @@ export function Lobby({
   onStart,
   onSeatCap,
   onTimer,
+  onDraft,
   onLeave,
 }: {
   info: LobbyInfo;
@@ -94,6 +96,10 @@ export function Lobby({
   onSeatCap: (cap: number) => void;
   /** Host only: deal with a turn timer, or without one (SB-67). */
   onTimer?: (on: boolean) => void;
+  // ---- draft ----
+  /** Host only: deal the match as The Draft, or not. */
+  onDraft?: (on: boolean) => void;
+  // ---- /draft ----
   onLeave: () => void;
 }): JSX.Element {
   const [copied, setCopied] = React.useState(false);
@@ -114,6 +120,7 @@ export function Lobby({
   const here = info.members.length;
   const open = Math.max(0, info.seatCap - here);
   const timerOn = info.timerOn !== false;
+  const draftOn = info.draft === true; // ---- draft ----
 
   function copyLink(): void {
     try {
@@ -234,6 +241,25 @@ export function Lobby({
               {timerOn ? `On · ${DEFAULT_TURN_SECONDS}s a turn` : 'Off: no time limit'}
             </span>
           )}
+          {/* ---- draft ---- */}
+          <span className="lobby-caps-label lobby-draft-label">The Draft</span>
+          {info.youAreHost && onDraft ? (
+            <label className="lobby-draft">
+              <input
+                type="checkbox"
+                data-testid="lobby-draft"
+                data-on={draftOn ? 'true' : 'false'}
+                checked={draftOn}
+                onChange={(e) => onDraft(e.target.checked)}
+              />
+              <span>Players pick the Draft and Prophet shops</span>
+            </label>
+          ) : (
+            <span className="lobby-timer-state" data-testid="lobby-draft-state">
+              {draftOn ? 'On: players pick the shops before play' : 'Off: the shops are dealt'}
+            </span>
+          )}
+          {/* ---- /draft ---- */}
         </div>
 
         <ul className="lobby-seats">

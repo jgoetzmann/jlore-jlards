@@ -81,6 +81,10 @@ export interface LobbyInfo {
   knocking: number;
   /** Whether the match will be dealt with a turn timer. Absent means yes. */
   timerOn?: boolean;
+  // ---- draft ----
+  /** Whether the match will be dealt as The Draft. Absent means no. */
+  draft?: boolean;
+  // ---- /draft ----
 }
 
 export interface GameSession {
@@ -111,6 +115,10 @@ export interface GameSession {
   setSeatCap: (cap: number) => void;
   /** Host only: deal the match with a turn timer, or without one. */
   setTimerOn: (on: boolean) => void;
+  // ---- draft ----
+  /** Host only: deal the match as The Draft, or not. */
+  setDraft: (on: boolean) => void;
+  // ---- /draft ----
   /**
    * When the current turn runs out (epoch ms), or null when there is no timer.
    * At that moment this browser answers its own open prompt with the prompt's
@@ -444,6 +452,7 @@ export function useGame(opts: UseGameOptions): GameSession {
         config: defaultConfig(n, {
           ...(configRef.current ?? {}),
           ...(handoff.timerOn === false ? { turnSeconds: 0 } : {}),
+          ...(handoff.draft === true ? { draftMode: true } : {}), // ---- draft ----
         }),
         seed: seedRef.current,
         players: makePlayers(n, getCodex(), myName, names, handoff.codexes),
@@ -469,6 +478,12 @@ export function useGame(opts: UseGameOptions): GameSession {
   const setTimerOn = React.useCallback((on: boolean) => {
     if (lobbyHostRef.current) lobbyHostRef.current.setTimerOn(on);
   }, []);
+
+  // ---- draft ----
+  const setDraft = React.useCallback((on: boolean) => {
+    if (lobbyHostRef.current) lobbyHostRef.current.setDraft(on);
+  }, []);
+  // ---- /draft ----
 
   // ---- derive everything from the session's predicted state ----
   const session = sessionRef.current;
@@ -545,7 +560,8 @@ export function useGame(opts: UseGameOptions): GameSession {
   // the open prompt's default first, then End turn from the active seat — so a
   // player who has stepped away no longer holds up the whole table. Only the
   // browser that controls a seat acts for it; the engine refuses anyone else.
-  const timerLimit = state && !state.ended ? timerLimitSeconds(state.config.turnSeconds) : 0;
+  // ---- draft ---- no clock while the Draft runs; it starts when turn play does
+  const timerLimit = state && !state.ended && !state.draft ? timerLimitSeconds(state.config.turnSeconds) : 0;
   const currentTurn = state ? turnKey(state) : null;
   const [deadline, setDeadline] = React.useState<{ turn: string; endsAt: number } | null>(null);
   const [expired, setExpired] = React.useState<string | null>(null);
@@ -605,6 +621,7 @@ export function useGame(opts: UseGameOptions): GameSession {
         missed: missedByDeal,
         knocking: 0,
         timerOn: true,
+        draft: false, // ---- draft ----
       };
     }
     const display = disambiguate(roster.members.map((m) => m.name));
@@ -625,6 +642,7 @@ export function useGame(opts: UseGameOptions): GameSession {
       missed: (roster.started && !roster.seats.includes(seatId)) || missedByDeal,
       knocking: typeof roster.knocking === 'number' ? roster.knocking : 0,
       timerOn: roster.timerOn !== false,
+      draft: roster.draft === true, // ---- draft ----
     };
   }, [phase, roster, mode, seatId, roomCode, playerCount, myName, missedByDeal]);
 
@@ -648,6 +666,7 @@ export function useGame(opts: UseGameOptions): GameSession {
     startMatch,
     setSeatCap,
     setTimerOn,
+    setDraft, // ---- draft ----
     turnEndsAt,
     seatToMove,
     desynced: core ? core.desynced() : false,

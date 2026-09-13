@@ -1,0 +1,71 @@
+/* The Draft: the pick panel (DraftPanel.tsx) and the lobby checkbox.
+   The panel itself rides the prompt panel's classes; only what is new is here. */
+
+.draft-eyebrow {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.draft-progress {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.draft-waiting {
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.lobby-draft-label {
+  margin-left: 12px;
+}
+
+.lobby-draft {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.lobby-draft input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+@media (max-width: 700px) {
+  /* Two faces a row on a phone rather than one tall column of four. */
+  .prompt-draft .prompt-card {
+    padding: 12px 10px;
+  }
+
+  .prompt-draft .prompt-options {
+    gap: 8px;
+  }
+
+  .prompt-draft .prompt-option-card .card {
+    width: min(156px, calc((100vw - 76px) / 2));
+  }
+
+  .lobby-draft-label {
+    margin-left: 0;
+  }
+
+  .lobby-draft {
+    min-height: 44px;
+  }
+
+  .lobby-draft input {
+    width: 22px;
+    height: 22px;
+  }
+}

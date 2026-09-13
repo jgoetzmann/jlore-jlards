@@ -46,6 +46,7 @@ import {
 import { endReasonText } from './logtext';
 import { stabilizeView } from './viewcache';
 import { preloadArt } from './art';
+import { DraftPanel } from './DraftPanel'; // ---- draft ----
 
 /**
  * Dev-only fixture tables. The condition is a build-time constant, so a
@@ -493,7 +494,9 @@ export function TableLayout({
   }, [namesKey]);
 
   const me = view.you.id;
-  const yourTurn = view.activePlayer === me && !view.ended;
+  // ---- draft ---- while the Draft runs nothing on the table is actionable
+  const drafting = Boolean(view.draft);
+  const yourTurn = view.activePlayer === me && !view.ended && !drafting;
   const revision = viewRevision(view);
 
   // --- motion ---------------------------------------------------------------
@@ -536,7 +539,7 @@ export function TableLayout({
   }, []);
 
   // --- your prompt ------------------------------------------------------------
-  const prompt = ownPrompt(view.pending, me);
+  const prompt = drafting ? null : ownPrompt(view.pending, me); // ---- draft ----
   const placement = prompt ? promptPlacement(prompt, view) : null;
   const promptId = prompt ? prompt.id : null;
   const [pick, setPick] = React.useState<{ id: string | null; keys: string[] }>({ id: null, keys: [] });
@@ -593,7 +596,8 @@ export function TableLayout({
 
   // --- whose turn --------------------------------------------------------------
   const ownerName = names[view.activePlayer] ?? view.activePlayer;
-  const ownerLabel = view.ended ? 'Game over' : yourTurn ? 'Your turn' : `${ownerName}’s turn`;
+  // ---- draft ---- `drafting` reads "Drafting"
+  const ownerLabel = view.ended ? 'Game over' : drafting ? 'Drafting' : yourTurn ? 'Your turn' : `${ownerName}’s turn`;
 
   // --- buying (TURN-8) ----------------------------------------------------------
   // A buy is in flight until a newer view lands (then the pile's own state says
@@ -818,7 +822,7 @@ export function TableLayout({
             >
               {ownerLabel}
             </span>
-            <TurnClock view={view} turnSeconds={turnSeconds} endsAt={turnEndsAt} />
+            <TurnClock view={view} turnSeconds={drafting ? 0 : turnSeconds} endsAt={turnEndsAt} />
             {waitingOn !== null && (
               <PromptOverlay pending={view.pending} playerId={me} names={names} onAction={send} onPass={onPass} />
             )}
@@ -877,6 +881,10 @@ export function TableLayout({
               />
             </div>
           )}
+
+          {/* ---- draft ---- */}
+          {view.draft && <DraftPanel draft={view.draft} playerId={me} names={names} onAction={send} />}
+          {/* ---- /draft ---- */}
 
           {helpOpen && <KeyHelp onClose={() => setHelpOpen(false)} />}
           {anomalyOpen && view.anomaly && (
@@ -1104,6 +1112,7 @@ function Table({
         onStart={session.startMatch}
         onSeatCap={session.setSeatCap}
         onTimer={session.setTimerOn}
+        onDraft={session.setDraft} // ---- draft ----
         onLeave={() => {
           window.location.hash = '';
         }}
