@@ -1382,7 +1382,17 @@ shared state.
    - *drift*: it revealed a library whose order, at the start of the branch, is no
      longer what it was when the previous fold showed it. Without this, an
      opponent putting a card on top of your library would quietly slide your
-     premoved draw one card down, and you would have seen both cards.
+     premoved draw one card down, and you would have seen both cards. The
+     comparison reads `seen` (`PremoveSeen`: each applied entry by content, the
+     libraries its own step revealed, and every library's order at the start of
+     the branch), which is plain JSON so it survives a reload;
+   - *opponent*: its step reveals, moves or reorders a card in another player's
+     library, or names or moves a card in another player's hand
+     (`reachesOpponent`). "Names" means a log entry the step appended, or a prompt
+     it opened, mentions a card that was in that player's hand or library at the
+     start of the branch. "Moves" means that player's hand or library array
+     changed. A new premove that breaks this rule is refused, not queued, and the
+     bar says "Can't premove that — it would show another player's cards".
 
    The first invalid entry and everything after it are dropped.
 5. *Rollback.* With k the first dropped entry, the queue becomes `queue.slice(0, k)`
@@ -1394,25 +1404,47 @@ shared state.
    `rerollFor(before, after)`: the libraries whose array changed, plus any library
    whose cards (as of `before`) a new log entry names or a newly opened prompt
    offers (a reveal or a "look at your library" choice that moves nothing).
-   `skipTo` is the cursor after the step. Clear does the same with k = 0.
-6. *The `reroll` action* is `{type:'reroll', player, libraries, skipTo}`
-   (`src/engine/core/reroll.ts`). It checks that the ids are known players and that
-   `skipTo` is an integer in `0..rngCursor + 1,000,000`, sets
-   `rngCursor = max(rngCursor, skipTo)`, shuffles each named library with
-   `makeRng(seed, rngCursor)` (writing the cursor back), and logs `reroll`. It is an
-   ordinary active-player action, sent only on the premover's own turn and never
-   offered as a premove.
-7. *Submission.* When the predicted state reaches your turn with no prompt, the
+   `skipTo` is the cursor after the step.
+6. *Clear, and committed premoves.* An entry is *committed* once its own preview,
+   or the preview of an entry queued after it (which was built on it), revealed
+   hidden information: a library's cards or order, or rng positions (`exposure[i]`
+   is set), or the entry is a reroll. Clear (`clearPremoves`) drops only the
+   uncommitted tail, which revealed nothing, so it never owes a reroll. Committed
+   entries stay queued until they run on your turn or a forced rollback (the
+   active player's turn invalidating them) drops them and owes the reroll. The bar
+   says "N committed — they showed you cards, so they can't be cleared", and Clear
+   is disabled when nothing is clearable.
+7. *The `reroll` action* is `{type:'reroll', player, libraries, skipTo}`
+   (`src/engine/core/reroll.ts`). It checks that the ids are known players, that
+   each one is the actor (`otherLibrary` otherwise: a reroll reshuffles your own
+   library and nobody else's), and that `skipTo` is an integer in
+   `0..rngCursor + 1,000,000`. It sets `rngCursor = max(rngCursor, skipTo)`,
+   shuffles your library if named with `makeRng(seed, rngCursor)` (writing the
+   cursor back), and logs `reroll` with an empty detail. It is an ordinary
+   active-player action, sent only on the premover's own turn and never offered as
+   a premove.
+8. *Submission.* When the predicted state reaches your turn with no prompt, the
    queue is folded once more on that state, with no advance, and sent as one
    `sendMany` batch: kept premoves in order, rerolls as `reroll` actions, and a
    reroll for anything that last fold dropped after the kept entries. The queue
    clears and premove mode turns off.
-8. *The UI.* `session.premove` (`src/ui/usePremove.ts`) feeds a bar in the dock
+9. *The UI.* `session.premove` (`src/ui/usePremove.ts`) feeds a bar in the dock
    strip (`src/ui/PremoveBar.tsx`). When premoving is available the bar shows a
    Premove toggle. In premove mode it shows "Premoving your next turn · N queued ·
    Watch live · Clear", the table shows the branch, and presses queue premoves.
-   End turn and prompt answers do nothing there. After a forced rollback it shows
+   End turn and prompt answers do nothing there, and End turn is drawn as a
+   disabled button (not the live turn's green). After a forced rollback it shows
    "A premove was undone — the turn changed it", which never names a card.
+10. *Persistence.* The tracker is written to localStorage on every change: queue
+   entries, rerolls, `exposure` (which also marks the committed entries) and
+   `seen`. The key is `jlore_premove:<room>:<seat>:<seed>:<start checksum>`
+   (`premoveStoreKey`, the checksum from the lockstep start payload). The hook
+   reads it back as soon as that seat's match is known, during render, so the
+   first fold and the turn-start submission already see it. Stored text under
+   another key, or text that does not parse, gives an empty tracker. Keys for
+   another match in the same room and seat are removed. Every storage access is
+   in try/catch, and the key is removed when the queue empties (sent, or the game
+   ended).
 
 **Why the reroll removes the scouting leak.** The cursor moves past every position
 any preview of the dropped premoves consumed, and every library they revealed is
@@ -1422,6 +1454,34 @@ browser applies the identical shuffle, and a replay reproduces it (B119).
 `test/premove.test.ts` pins both sides: with the reroll, the same premoved draw (and
 the same Discover) shows different cards; without the reroll entry, it shows
 exactly the cards the dropped preview showed.
+
+**Why the debt is stored, and why localStorage is enough.** The owed reroll is a
+queue entry in this browser, and nothing shared holds it until your turn. Kept
+only in memory, a reload erased it: the seat comes back from the `jlore_seat`
+cookie, so the owner's attack worked through the honest UI (premove a draw, get
+rolled back or clear it, reload, draw again). The debt only has to live as long
+as the seat, and every honest-UI way of losing localStorage (a private window
+closed, site data cleared, another device) also loses the seat cookie.
+
+**Why Clear cannot drop a committed premove.** When Clear discarded a revealing
+premove and owed a reroll, it was a mulligan chosen after looking: see the
+premoved draw, and reshuffle the library only when the draw is bad. The review
+measured it raising what a +2 Cards drew. Committed entries mean what you were
+shown is what you get, unless the active player's turn forces a rollback.
+
+**Why only your own library, and never another player's hand.** A reroll that
+reshuffled another player's library would undo their deliberate top-of-library
+placements because of a premove they never saw, and a premove that revealed
+another player's library could not be re-rolled without doing that. The branch
+also deals every player between the active one and you their next hand, so a
+premove that trashes, discards, steals or looks at hands would show those hands
+before they exist, and no reroll could take that back. Refusing these premoves
+up front keeps every reroll to the premover's own library, and keeps other
+players' next hands off your screen.
+
+**Why the reroll log line says nothing.** It used to carry the libraries and the
+cursor numbers, which told every opponent what the undone premove had revealed
+and roughly how much randomness it read. It now names only the actor.
 
 **Randomized paths checked.**
 - Draws and reshuffles (`core/zones.ts` `drawOne`, `reshuffleGyIntoLibrary`,
@@ -1450,14 +1510,26 @@ path, not devtools. Three more things are accepted:
   the preview. That is not a leak, because the cursor only moves forward.
 - Hypothetical turns of the seats between the active player and you are played as
   "end turn at once".
+- A forced rollback still re-rolls what the dropped premoves revealed. The active
+  player's turn decides when that happens, not the premover, so it is not a
+  mulligan on demand, but a premover can still see a draw and then have that
+  library reshuffled.
+- Deleting the stored key by hand (devtools) erases the debt. That is outside the
+  honest-UI model, like reading the full state in devtools (SB-65).
+- The stored queue is removed when the turn-start batch is handed to the relay. A
+  tab closed in the moment before the relay accepts that post loses the batch and
+  its reroll.
+- Premoves that reach another player's library or hand are refused outright, so
+  attacks and "each player" effects that touch hidden cards cannot be premoved.
 
 **The trade-off.** A reshuffle discards any deliberate top-of-library placement
 (a card you put on top, a sorted library). That happens only after a rollback, and
-only to the libraries the dropped premoves revealed.
+only to your own library, when the dropped premoves revealed it.
 
-Code: `src/net/premove.ts` (fold, tracker, rollback, submission),
-`src/engine/core/reroll.ts`, `src/ui/usePremove.ts`, `src/ui/PremoveBar.tsx`, and the
-marked `---- premove ----` blocks in `src/engine/types.ts`, `src/engine/index.ts`,
+Code: `src/net/premove.ts` (fold, tracker, rollback, submission, persistence),
+`src/engine/core/reroll.ts`, `src/ui/usePremove.ts`, `src/ui/PremoveBar.tsx`, the
+premove store in `src/net/storage.ts`, and the marked `---- premove ----` and
+`---- fix:premove ----` blocks in `src/engine/types.ts`, `src/engine/index.ts`,
 `src/net/lockstep.ts`, `src/ui/useGame.ts`, `src/ui/App.tsx` and
 `src/ui/logtext.ts`. Tests: `test/premove.test.ts`,
 `test/ui-testid-contract.test.ts`, `e2e/premove.spec.ts`.

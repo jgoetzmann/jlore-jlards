@@ -72,6 +72,14 @@ async function clearPrompt(page: Page): Promise<void> {
   }
 }
 
+/** How the End turn button is painted: enough to tell the live turn's green from a disabled button. */
+async function endTurnLook(page: Page): Promise<{ bg: string; color: string; border: string; events: string }> {
+  return page.getByTestId('end-turn').evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, color: cs.color, border: cs.borderTopColor, events: cs.pointerEvents };
+  });
+}
+
 /** A Copper in the hand on screen, or any playable card when the deal gave none. */
 function copperOrAny(page: Page) {
   return page
@@ -100,10 +108,19 @@ test.describe('premoves over the relay (SB-68)', () => {
         await waiter.page.screenshot({ path: `${shots}/premove-toggle-1366x768.png` });
       }
       const waiterHandSeenBefore = await handCountSeenBy(mover.page);
+      // The waiting seat's End turn, disabled because it is not its turn.
+      const liveLook = await endTurnLook(waiter.page);
       await toggle.click();
       await expect(waiter.page.getByTestId('premove-bar')).toBeVisible();
       await expect(waiter.page.getByTestId('table')).toHaveAttribute('data-premove', 'true');
       await expect(waiter.page.getByTestId('premove-bar')).toHaveAttribute('data-count', '0');
+
+      // In premove mode the branch is "your turn", but End turn does nothing
+      // there: it must look like the disabled button, not the live turn's green.
+      expect((await endTurnLook(mover.page)).bg, 'the live turn paints End turn').not.toBe(liveLook.bg);
+      await expect
+        .poll(async () => endTurnLook(waiter.page), { timeout: 5_000 })
+        .toEqual({ ...liveLook, events: 'none' });
 
       const card = copperOrAny(waiter.page);
       await expect(card).toBeVisible({ timeout: 20_000 });
@@ -130,6 +147,14 @@ test.describe('premoves over the relay (SB-68)', () => {
         await waiter.page.screenshot({ path: `${shots}/premove-bar-390x844-full.png`, fullPage: true });
         await waiter.page.setViewportSize({ width: 1280, height: 720 });
       }
+
+      // PM-1: a reload keeps the queue. The seat comes back from its cookie and
+      // the premoves from localStorage; they still go out when the turn starts.
+      await waiter.page.reload();
+      await expect(waiter.page.getByTestId('table')).toBeVisible({ timeout: 30_000 });
+      await expect(waiter.page.getByTestId('premove-toggle')).toHaveAttribute('data-count', '2', {
+        timeout: 30_000,
+      });
 
       // Nothing was sent: the active browser still sees the full hand.
       await mover.page.waitForTimeout(1500);

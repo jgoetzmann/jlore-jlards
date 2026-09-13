@@ -21,24 +21,38 @@
  * premoving a draw, getting rolled back, and drawing again. So a rollback leaves
  * a `reroll` entry where the dropped premoves were. On your turn it goes out as
  * an ordinary `reroll` action: the rng cursor jumps past every position any
- * preview of the dropped entries consumed, and every library they revealed is
- * reshuffled, so what the player saw predicts nothing.
+ * preview of the dropped entries consumed, and your library is reshuffled if
+ * they revealed it, so what the player saw predicts nothing.
  *
- * Two rules go beyond "refused or `expect` changed", both to close scouting
- * paths a plain refusal check would miss:
+ * Three rules go beyond "refused or `expect` changed", each to close a scouting
+ * path a plain refusal check would miss:
  *
- *   drift   A premove that revealed a library is invalid once that library's
- *           order changed under it (an opponent put a card on top of it, or
- *           milled it). Otherwise the preview would quietly start showing the
- *           next card down, and the player would have seen both.
- *   prompt  A premove that opens a prompt is the last one (premoves end at a
- *           prompt, which is answered live). One that newly opens a prompt with
- *           more premoves queued behind it is invalid, so a reroll can never sit
- *           behind a prompt, where a batch would never reach it.
+ *   drift     A premove that revealed a library is invalid once that library's
+ *             order changed under it (an opponent put a card on top of it, or
+ *             milled it). Otherwise the preview would quietly start showing the
+ *             next card down, and the player would have seen both.
+ *   prompt    A premove that opens a prompt is the last one (premoves end at a
+ *             prompt, which is answered live). One that newly opens a prompt with
+ *             more premoves queued behind it is invalid, so a reroll can never sit
+ *             behind a prompt, where a batch would never reach it.
+ *   opponent  A premove that reveals, moves or reorders a card in another
+ *             player's library, or names or moves a card in another player's hand,
+ *             is invalid: refused when queued, rolled back if a later fold hits it.
+ *             The branch dealt the players before you their next hands, and a
+ *             reroll may only reshuffle the premover's own library, so nothing a
+ *             premove shows may come from anyone else's hidden cards.
  *
  * And `exposure` is kept across folds rather than read off the last one: the
  * preview is refolded on every change, and each fold may have consumed a
  * different stretch of the rng. The reroll covers all of them.
+ *
+ * Committed entries: once an entry's preview (or a later entry's, which built on
+ * it) revealed hidden information, Clear cannot remove it. It runs on your turn
+ * or a forced rollback drops it (owing a reroll). Otherwise Clear would be a
+ * mulligan: look at the draw, clear it if it is bad.
+ *
+ * The tracker survives a reload (`serializeTracker`, SB-68 persistence): the
+ * seat comes back from its cookie, so the debt has to come back too.
  *
  * No React here, and nothing but the engine and lockstep's refusal check.
  */
@@ -86,7 +100,7 @@ export interface PremoveRerollEntry {
 
 export type PremoveEntry = PremoveActionEntry | PremoveRerollEntry;
 
-export type PremoveInvalid = 'expect' | 'refused' | 'prompt' | 'drift';
+export type PremoveInvalid = 'expect' | 'refused' | 'prompt' | 'drift' | 'opponent';
 
 export interface PremoveFold {
   queue: readonly PremoveEntry[];
@@ -105,6 +119,17 @@ export interface PremoveFold {
   promptOpen: boolean;
 }
 
+/**
+ * What a complete fold showed, in plain JSON so it survives a reload. The drift
+ * rule reads it: each applied entry (by content), the libraries its own step
+ * revealed, and every library's order at the start of that branch.
+ */
+export interface PremoveSeen {
+  entries: string[];
+  revealed: PlayerId[][];
+  start: Record<PlayerId, InstanceId[]>;
+}
+
 /** Room left in one intent (MAX_BATCH) for rerolls between the actions. */
 export const MAX_PREMOVES = Math.floor((MAX_BATCH - 1) / 2);
 
@@ -115,9 +140,10 @@ export function isPremovable(action: GameAction | null | undefined): action is P
 }
 
 function drafting(state: GameState): boolean {
-  // Another track adds `GameState.draft`; a draft in progress has no turns to premove.
-  const d = (state as unknown as { draft?: unknown }).draft;
-  return d !== undefined && d !== null;
+  // A draft in progress has no turns to premove. `!= null` rather than `!== null`:
+  // a snapshot saved before The Draft existed has no field, and reduce's own gate
+  // (`if (s.draft)`) reads that as no draft too.
+  return state.draft != null;
 }
 
 /**
@@ -200,7 +226,11 @@ function expectHolds(branch: GameState, me: PlayerId, entry: PremoveActionEntry)
 }
 
 export function rerollAction(entry: PremoveRerollEntry, me: PlayerId): GameAction {
-  return { type: 'reroll', player: me, libraries: entry.libraries.slice(), skipTo: entry.skipTo };
+  // The engine refuses a reroll that names any library but the actor's own
+  // (SB-68). The opponent rule keeps other players' libraries out of every
+  // exposure, so this filter is only a backstop: a stray id must not get the
+  // whole reroll, cursor skip included, refused.
+  return { type: 'reroll', player: me, libraries: entry.libraries.filter((pid) => pid === me), skipTo: entry.skipTo };
 }
 
 export function entryAction(entry: PremoveEntry, me: PlayerId): GameAction {
@@ -265,6 +295,49 @@ export function revealedLibraries(before: GameState, after: GameState): PlayerId
   return before.playerOrder.filter((pid) => out.has(pid));
 }
 
+function namesAny(value: unknown, ids: ReadonlySet<string>, depth: number): boolean {
+  if (depth > 10) return false;
+  if (typeof value === 'string') return ids.has(value);
+  if (Array.isArray(value)) {
+    for (const v of value) if (namesAny(v, ids, depth + 1)) return true;
+    return false;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const v of Object.values(value as Record<string, unknown>)) if (namesAny(v, ids, depth + 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * The opponent rule (SB-68, PS-M1): whether a step from `before` to `after`
+ * reached a card another player keeps hidden. It did when it changed another
+ * player's hand or library, or when a log entry it appended or a prompt it
+ * opened names a card that was in another player's hand or library at the start
+ * of the branch (`start`). Hands count because the branch dealt every player
+ * between the active one and `me` their next hand.
+ */
+export function reachesOpponent(start: GameState, before: GameState, after: GameState, me: PlayerId): boolean {
+  const hidden = new Set<InstanceId>();
+  for (const pid of start.playerOrder) {
+    if (pid === me) continue;
+    const b = before.players[pid];
+    const a = after.players[pid];
+    if (!sameIds(b?.hand, a?.hand) || !sameIds(b?.library, a?.library)) return true;
+    for (const iid of start.players[pid]?.hand ?? []) hidden.add(iid);
+    for (const iid of start.players[pid]?.library ?? []) hidden.add(iid);
+  }
+  if (hidden.size === 0) return false;
+  for (let i = after.log.length - 1; i >= 0; i--) {
+    const e = after.log[i]!;
+    if (e.seq <= before.logSeq) break;
+    if (namesAny(e.detail, hidden, 0)) return true;
+  }
+  if (after.pending && (!before.pending || before.pending.id !== after.pending.id)) {
+    if (namesAny(after.pending, hidden, 0)) return true;
+  }
+  return false;
+}
+
 /**
  * The randomness a preview from `before` to `after` revealed: the libraries it
  * revealed and the cursor it reached. Null when it revealed nothing.
@@ -288,6 +361,29 @@ export function mergeRerolls(
   return { kind: 'reroll', libraries, skipTo: Math.max(a.skipTo, b.skipTo) };
 }
 
+function entryKey(entry: PremoveEntry): string {
+  return JSON.stringify(entry);
+}
+
+/** What a complete fold showed, for the drift rule (see `PremoveSeen`). */
+export function seenOf(fold: PremoveFold): PremoveSeen {
+  const entries: string[] = [];
+  const revealed: PlayerId[][] = [];
+  for (let i = 0; i < fold.applied; i++) {
+    entries.push(entryKey(fold.queue[i]!));
+    revealed.push(revealedLibraries(fold.states[i]!, fold.states[i + 1]!));
+  }
+  const s0 = fold.states[0]!;
+  const start: Record<PlayerId, InstanceId[]> = {};
+  for (const pid of s0.playerOrder) start[pid] = (s0.players[pid]?.library ?? []).slice();
+  return { entries, revealed, start };
+}
+
+function asSeen(previous: PremoveFold | PremoveSeen | null | undefined): PremoveSeen | null {
+  if (!previous) return null;
+  return 'states' in previous ? seenOf(previous) : previous;
+}
+
 /**
  * Drift: entry `i` revealed a library, and that library is not in the order it
  * was in when the previous fold showed entry `i`. Compared at the start of the
@@ -295,28 +391,24 @@ export function mergeRerolls(
  * different cursor (fresh randomness nobody has seen) is not drift.
  */
 function drifted(
-  previous: PremoveFold | null | undefined,
+  seen: PremoveSeen | null,
   i: number,
   entry: PremoveEntry,
   start: GameState,
   before: GameState,
   after: GameState,
 ): boolean {
-  if (!previous || previous.queue[i] !== entry || previous.states.length < i + 2) return false;
-  const prevStart = previous.states[0]!;
-  const libs = new Set<PlayerId>([
-    ...revealedLibraries(previous.states[i]!, previous.states[i + 1]!),
-    ...revealedLibraries(before, after),
-  ]);
+  if (!seen || i >= seen.entries.length || seen.entries[i] !== entryKey(entry)) return false;
+  const libs = new Set<PlayerId>([...(seen.revealed[i] ?? []), ...revealedLibraries(before, after)]);
   for (const pid of libs) {
-    if (!sameIds(prevStart.players[pid]?.library, start.players[pid]?.library)) return true;
+    if (!sameIds(seen.start[pid], start.players[pid]?.library)) return true;
   }
   return false;
 }
 
 export interface FoldOptions {
-  /** The last fold that applied the whole queue, for the drift rule. */
-  previous?: PremoveFold | null;
+  /** What the last fold that applied the whole queue showed, for the drift rule. */
+  previous?: PremoveFold | PremoveSeen | null;
   reduce?: ReduceFn;
 }
 
@@ -334,6 +426,7 @@ export function foldPremoves(
   const reduce = opts.reduce ?? engineReduce;
   const start = advanceToTurnOf(authoritative, me, reduce);
   if (!start) return null;
+  const seen = asSeen(opts.previous);
   const states: GameState[] = [start];
   let s = start;
   let actions = 0;
@@ -363,12 +456,17 @@ export function foldPremoves(
       reason = 'refused';
       break;
     }
+    if (reachesOpponent(start, s, next, me)) {
+      invalidAt = i;
+      reason = 'opponent';
+      break;
+    }
     if (next.pending !== null && i < queue.length - 1) {
       invalidAt = i;
       reason = 'prompt';
       break;
     }
-    if (drifted(opts.previous, i, entry, start, s, next)) {
+    if (drifted(seen, i, entry, start, s, next)) {
       invalidAt = i;
       reason = 'drift';
       break;
@@ -399,13 +497,16 @@ export interface PremoveTracker {
   /**
    * exposure[i]: everything entries i.. of the queue revealed, merged over every
    * fold that showed them. Rolling back at k leaves exposure[k] as the reroll.
+   * Non-null also means entry i is committed (see `committedLength`).
    */
   readonly exposure: readonly (PremoveRerollEntry | null)[];
-  /** The last fold that applied the whole queue. */
+  /** The last fold that applied the whole queue. Never persisted. */
   readonly last: PremoveFold | null;
+  /** What that fold showed, for the drift rule. Persisted with the queue. */
+  readonly seen: PremoveSeen | null;
 }
 
-export const EMPTY_TRACKER: PremoveTracker = { queue: [], exposure: [], last: null };
+export const EMPTY_TRACKER: PremoveTracker = { queue: [], exposure: [], last: null, seen: null };
 
 export function premoveCount(tracker: PremoveTracker): number {
   let n = 0;
@@ -441,7 +542,7 @@ export function rollbackAt(tracker: PremoveTracker, k: number): PremoveTracker {
       exposure.push(reroll);
     }
   }
-  return { queue, exposure, last: tracker.last };
+  return { queue, exposure, last: tracker.last, seen: tracker.seen };
 }
 
 export interface SyncResult {
@@ -462,11 +563,11 @@ export function syncPremoves(
   let rolledBack = false;
   // Each pass drops at least one action entry, so this ends; the bound is a backstop.
   for (let pass = 0; pass <= MAX_PREMOVES + 1; pass++) {
-    const fold = foldPremoves(authoritative, me, t.queue, { previous: t.last, reduce });
+    const fold = foldPremoves(authoritative, me, t.queue, { previous: t.seen, reduce });
     if (!fold) return { tracker: t, fold: null, rolledBack };
     if (fold.invalidAt === null) {
       return {
-        tracker: { queue: t.queue, exposure: observe(t.queue, t.exposure, fold), last: fold },
+        tracker: { queue: t.queue, exposure: observe(t.queue, t.exposure, fold), last: fold, seen: seenOf(fold) },
         fold,
         rolledBack,
       };
@@ -479,6 +580,12 @@ export function syncPremoves(
 
 export interface AddResult extends SyncResult {
   added: boolean;
+  /**
+   * Why the branch refused the new premove, when it did (`opponent`: it would
+   * have shown another player's hidden cards). Null when it was queued, or was
+   * turned away before it was tried (your own turn, no branch, a full queue).
+   */
+  refusal: PremoveInvalid | null;
 }
 
 /**
@@ -493,25 +600,67 @@ export function addPremove(
   action: GameAction,
   reduce?: ReduceFn,
 ): AddResult {
-  if (authoritative.activePlayer === me) return { tracker, fold: null, rolledBack: false, added: false };
+  if (authoritative.activePlayer === me) {
+    return { tracker, fold: null, rolledBack: false, added: false, refusal: null };
+  }
   const synced = syncPremoves(tracker, authoritative, me, reduce);
   const base = synced.fold;
   if (!isPremovable(action) || !base || base.promptOpen || premoveCount(synced.tracker) >= MAX_PREMOVES) {
-    return { ...synced, added: false };
+    return { ...synced, added: false, refusal: null };
   }
   const bound = { ...action, player: me } as PremoveAction;
   const entry: PremoveActionEntry = { kind: 'action', action: bound, expect: expectFor(base.branch, me, bound) };
   const queue = [...synced.tracker.queue, entry];
-  const fold = foldPremoves(authoritative, me, queue, { previous: synced.tracker.last, reduce });
-  if (!fold || fold.invalidAt !== null) return { ...synced, added: false };
+  const fold = foldPremoves(authoritative, me, queue, { previous: synced.tracker.seen, reduce });
+  if (!fold || fold.invalidAt !== null) {
+    return { ...synced, added: false, refusal: fold ? fold.reason : null };
+  }
   const exposure = observe(queue, [...synced.tracker.exposure, null], fold);
-  return { tracker: { queue, exposure, last: fold }, fold, rolledBack: synced.rolledBack, added: true };
+  return {
+    tracker: { queue, exposure, last: fold, seen: seenOf(fold) },
+    fold,
+    rolledBack: synced.rolledBack,
+    added: true,
+    refusal: null,
+  };
 }
 
-/** Discard every premove; what their previews revealed stays owed as a reroll. */
+/**
+ * How many queue entries are committed: everything up to and including the last
+ * entry whose preview revealed hidden information (a library's cards or order,
+ * or rng positions), or the last reroll. Entries before a revealing one are
+ * committed with it, because its preview was built on them.
+ */
+export function committedLength(tracker: PremoveTracker): number {
+  for (let i = tracker.queue.length - 1; i >= 0; i--) {
+    if (tracker.queue[i]!.kind === 'reroll' || tracker.exposure[i]) return i + 1;
+  }
+  return 0;
+}
+
+/** Premoves (action entries) Clear cannot remove. */
+export function committedCount(tracker: PremoveTracker): number {
+  const n = committedLength(tracker);
+  let count = 0;
+  for (let i = 0; i < n; i++) if (tracker.queue[i]!.kind === 'action') count += 1;
+  return count;
+}
+
+/**
+ * Clear: discard the premoves that revealed nothing. Committed entries stay
+ * queued until they run on your turn or a forced rollback drops them, so Clear
+ * is never a mulligan and never owes a reroll. Returns the same tracker when
+ * there is nothing to clear.
+ */
 export function clearPremoves(tracker: PremoveTracker): PremoveTracker {
-  const t = rollbackAt(tracker, 0);
-  return { queue: t.queue, exposure: t.exposure, last: null };
+  const keep = committedLength(tracker);
+  if (keep === tracker.queue.length) return tracker;
+  return {
+    queue: tracker.queue.slice(0, keep),
+    exposure: tracker.exposure.slice(0, keep),
+    last: null,
+    seen: tracker.seen,
+  };
 }
 
 export interface Submission {
@@ -545,4 +694,117 @@ export function submitPremoves(
 export function premoveAvailable(networked: boolean, state: GameState | null, me: PlayerId | null): boolean {
   if (!networked || !state || !me || state.ended || state.activePlayer === me) return false;
   return advanceToTurnOf(state, me) !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence (SB-68, PM-1): the debt lives as long as the seat
+// ---------------------------------------------------------------------------
+
+/** Which seat's premoves, in which match. */
+export interface PremoveStoreId {
+  room: string;
+  seat: string;
+  seed: number;
+  /** The lockstep start payload's checksum: tells a rematch in the same room apart. */
+  checksum: string;
+}
+
+export const PREMOVE_STORE_PREFIX = 'jlore_premove:';
+
+/** Every key this room and seat may have written, whatever the match. */
+export function premoveStorePrefix(id: Pick<PremoveStoreId, 'room' | 'seat'>): string {
+  return `${PREMOVE_STORE_PREFIX}${encodeURIComponent(id.room)}:${encodeURIComponent(id.seat)}:`;
+}
+
+export function premoveStoreKey(id: PremoveStoreId): string {
+  return `${premoveStorePrefix(id)}${id.seed}:${encodeURIComponent(id.checksum)}`;
+}
+
+interface StoredPremoves {
+  v: 1;
+  key: string;
+  queue: readonly PremoveEntry[];
+  exposure: readonly (PremoveRerollEntry | null)[];
+  seen: PremoveSeen | null;
+}
+
+/**
+ * The tracker as stored under `key`: queue, exposure (which also marks the
+ * committed entries) and what the last fold showed. Null when there is nothing
+ * to keep, so the caller removes the key.
+ */
+export function serializeTracker(tracker: PremoveTracker, key: string): string | null {
+  if (tracker.queue.length === 0) return null;
+  const stored: StoredPremoves = {
+    v: 1,
+    key,
+    queue: tracker.queue,
+    exposure: tracker.exposure,
+    seen: tracker.seen,
+  };
+  return JSON.stringify(stored);
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+function isRerollEntry(v: unknown): v is PremoveRerollEntry {
+  return (
+    isObj(v) &&
+    v['kind'] === 'reroll' &&
+    isStrings(v['libraries']) &&
+    typeof v['skipTo'] === 'number' &&
+    Number.isInteger(v['skipTo']) &&
+    v['skipTo'] >= 0
+  );
+}
+
+function isActionEntry(v: unknown): v is PremoveActionEntry {
+  if (!isObj(v) || v['kind'] !== 'action' || !isObj(v['expect'])) return false;
+  const a = v['action'];
+  if (!isObj(a) || typeof a['player'] !== 'string') return false;
+  switch (a['type']) {
+    case 'play':
+      return typeof a['iid'] === 'string';
+    case 'buy':
+      return typeof a['pileId'] === 'string';
+    case 'activateAura':
+      return typeof a['auraId'] === 'string';
+    case 'reorderHand':
+      return isStrings(a['hand']);
+    default:
+      return false;
+  }
+}
+
+function isSeen(v: unknown): v is PremoveSeen {
+  if (!isObj(v) || !isStrings(v['entries']) || !Array.isArray(v['revealed']) || !isObj(v['start'])) return false;
+  if (v['revealed'].length !== v['entries'].length || !v['revealed'].every(isStrings)) return false;
+  return Object.values(v['start']).every(isStrings);
+}
+
+/**
+ * Read back what `serializeTracker` wrote. Anything malformed, or written under
+ * a different key (another room, seat or match), gives the empty tracker.
+ */
+export function deserializeTracker(raw: string | null | undefined, key: string): PremoveTracker {
+  if (typeof raw !== 'string') return EMPTY_TRACKER;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return EMPTY_TRACKER;
+  }
+  if (!isObj(data) || data['v'] !== 1 || data['key'] !== key) return EMPTY_TRACKER;
+  const { queue, exposure, seen } = data;
+  if (!Array.isArray(queue) || !queue.every((e) => isRerollEntry(e) || isActionEntry(e))) return EMPTY_TRACKER;
+  if (!Array.isArray(exposure) || exposure.length !== queue.length) return EMPTY_TRACKER;
+  if (!exposure.every((e) => e === null || isRerollEntry(e))) return EMPTY_TRACKER;
+  if (seen !== null && !isSeen(seen)) return EMPTY_TRACKER;
+  return {
+    queue: queue as PremoveEntry[],
+    exposure: exposure as (PremoveRerollEntry | null)[],
+    last: null,
+    seen: (seen as PremoveSeen | null) ?? null,
+  };
 }

@@ -132,6 +132,49 @@ function writeJson(key: string, value: unknown): void {
 }
 
 /**
+ * Premoves (SB-68): this seat's queue and the reroll it owes, stored as the text
+ * `serializeTracker` (src/net/premove.ts) wrote, under `premoveStoreKey`. Raw
+ * strings here so this file imports nothing from the net layer.
+ */
+export function readPremoveStore(key: string): string | null {
+  const ls = store();
+  if (!ls) return null;
+  try {
+    return ls.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Write the stored premoves, or remove them when `value` is null. */
+export function writePremoveStore(key: string, value: string | null): void {
+  const ls = store();
+  if (!ls) return;
+  try {
+    if (value === null) ls.removeItem(key);
+    else ls.setItem(key, value);
+  } catch {
+    /* quota or private mode: the premoves stay in memory for this tab */
+  }
+}
+
+/** Remove every stored premove key under `prefix` but `keep` (another match in the same room and seat). */
+export function discardPremoveStores(prefix: string, keep: string): void {
+  const ls = store();
+  if (!ls) return;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k !== null && k.startsWith(prefix) && k !== keep) stale.push(k);
+    }
+    for (const k of stale) ls.removeItem(k);
+  } catch {
+    /* storage is a convenience */
+  }
+}
+
+/**
  * The codex lives in memory once read. It used to be parsed out of
  * localStorage twice for every view that arrived (STORE-1); now a seen card is
  * a Set insert, and the write-back is debounced and happens off the click path.

@@ -659,7 +659,18 @@ export function useGame(opts: UseGameOptions): GameSession {
     },
     [seatId],
   );
-  const premove = usePremove({ networked: mode !== 'hotseat', state, me: myPid, submit: submitPremoves });
+  // ---- fix:premove ---- PM-1: the queue and the reroll it owes persist per room, seat and match.
+  const premoveSum = mode !== 'hotseat' && core ? core.startPayload()?.checksum ?? null : null;
+  const premoveStore =
+    premoveSum && roomCode && state ? { room: roomCode, seat: seatId, seed: state.seed, checksum: premoveSum } : null;
+  const premove = usePremove({
+    networked: mode !== 'hotseat',
+    state,
+    me: myPid,
+    submit: submitPremoves,
+    store: premoveStore,
+  });
+  // ---- /fix:premove ----
   // ---- end premove ----
 
   const status: GameSession['status'] = error ? 'error' : currentView ? 'playing' : 'connecting';

@@ -12,10 +12,15 @@
  *  4. Invalidation: a transformed or removed card, a pile whose top or price
  *     moved, a refusal, and a library reordered under a premoved draw (drift).
  *  5. A premove that opens a prompt is the last one.
- *  6. Premoving is unavailable in hotseat and on your own turn.
- *  7. The `reroll` action: validation, B118 logging, B119 replay.
+ *  6. Premoving is unavailable in hotseat, on your own turn, and during a draft
+ *     until the last pick (MERGE-6).
+ *  7. The `reroll` action: validation, own library only, a log line that says
+ *     nothing (PS-M2), B118 logging, B119 replay.
+ *  8. The debt survives a reload (PM-1); Clear keeps committed premoves (PM-2);
+ *     premoves that reach another player's library or hand are refused (PM-2,
+ *     PS-M1).
  */
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createMatch, reduce } from '@engine/index';
@@ -30,18 +35,26 @@ import {
   addPremove,
   advanceToTurnOf,
   clearPremoves,
+  committedCount,
+  deserializeTracker,
   foldPremoves,
   mergeRerolls,
   premoveAvailable,
+  premoveCount,
+  premoveStoreKey,
   rerollFor,
+  serializeTracker,
   submitPremoves,
   syncPremoves,
   type PremoveActionEntry,
   type PremoveEntry,
   type PremoveRerollEntry,
+  type PremoveStoreId,
   type PremoveTracker,
 } from '@net/premove';
+import { readPremoveStore, writePremoveStore } from '@net/storage';
 import { usePremove } from '@ui/usePremove';
+import { PremoveBar } from '@ui/PremoveBar';
 
 const CFG = (playerCount: number, over: Partial<MatchConfig> = {}): MatchConfig => ({
   playerCount,
@@ -162,19 +175,22 @@ describe('SB-68: a rolled-back premove re-rolls its randomness instead of replay
     expect(sub.actions.map((a) => a.type)).toEqual(['reroll', 'play']);
   });
 
-  test('pressing Clear owes the same reroll', () => {
+  test('PM-2: pressing Clear is not a mulligan: a draw whose preview showed cards stays queued', () => {
     const auth = clone(deal(4101));
     const B = other(auth);
     const [card] = inject(auth, B, ['big_spenda']);
     const r1 = added(EMPTY_TRACKER, auth, B, play(B, card!));
+    const seen = drawn(r1.fold!.states[0]!, r1.fold!.states[1]!, B);
     const cleared = clearPremoves(r1.tracker);
-    expect(cleared.queue).toHaveLength(1);
-    const reroll = cleared.queue[0] as PremoveRerollEntry;
-    expect(reroll.kind).toBe('reroll');
-    expect(reroll.libraries).toContain(B);
-    const again = added(cleared, auth, B, play(B, card!));
-    const redrawn = drawn(again.fold!.states[1]!, again.fold!.states[2]!, B);
-    expect(redrawn).not.toEqual(drawn(r1.fold!.states[0]!, r1.fold!.states[1]!, B));
+    // Nothing clearable: the same tracker comes back, the draw is still queued, no reroll.
+    expect(cleared).toBe(r1.tracker);
+    expect(cleared.queue.map((e) => e.kind)).toEqual(['action']);
+    // And on B's turn it draws exactly what B was shown.
+    const turn = advanceToTurnOf(auth, B)!;
+    const sub = submitPremoves(cleared, turn, B)!;
+    expect(sub.actions.map((a) => a.type)).toEqual(['play']);
+    const after = reduce(turn, sub.actions[0]!);
+    expect(drawn(turn, after, B)).toEqual(seen);
   });
 });
 
@@ -619,6 +635,8 @@ describe('SB-68: the reroll action', () => {
       [{ type: 'reroll', player: A, libraries: [A], skipTo: s.rngCursor + 1_000_001 }, 'illegalReroll'],
       [{ type: 'reroll', player: A, libraries: 'p1' as unknown as PlayerId[], skipTo: 0 }, 'illegalReroll'],
       [{ type: 'reroll', player: B, libraries: [B], skipTo: 0 }, 'notActivePlayer'],
+      [{ type: 'reroll', player: A, libraries: [B], skipTo: 0 }, 'illegalReroll'],
+      [{ type: 'reroll', player: A, libraries: [A, B], skipTo: 0 }, 'illegalReroll'],
     ];
     for (const [action, reason] of bad) {
       const next = reduce(s, action);
@@ -629,20 +647,43 @@ describe('SB-68: the reroll action', () => {
     }
   });
 
-  test('moves the cursor to skipTo, reshuffles each named library, and logs it', () => {
+  test("PM-2: a reroll refuses every library but the actor's own", () => {
+    const s = deal(4504);
+    const A = s.activePlayer;
+    const B = other(s);
+    for (const libraries of [[B], [A, B], [B, A]]) {
+      const next = reduce(s, { type: 'reroll', player: A, libraries, skipTo: s.rngCursor + 5 });
+      expect(lastLog(next).kind).toBe('reject');
+      expect(lastLog(next).detail['why']).toBe('otherLibrary');
+      expect(next.players[B]!.library).toEqual(s.players[B]!.library);
+      expect(next.rngCursor).toBe(s.rngCursor);
+    }
+  });
+
+  test('PS-M2: the reroll log line names the actor and nothing it re-rolled', () => {
+    const s = deal(4505);
+    const A = s.activePlayer;
+    const B = other(s);
+    const next = reduce(s, { type: 'reroll', player: A, libraries: [A], skipTo: s.rngCursor + 40 });
+    const entry = lastLog(next);
+    expect([entry.kind, entry.player]).toEqual(['reroll', A]);
+    expect(entry.detail).toEqual({});
+    const seenByB = JSON.stringify(viewFor(next, B).log[viewFor(next, B).log.length - 1]);
+    for (const word of ['libraries', 'skipTo', 'cursor', 'from']) expect(seenByB).not.toContain(word);
+  });
+
+  test('moves the cursor to skipTo, reshuffles your own library, and logs it', () => {
     const s = deal(4502);
     const A = s.activePlayer;
     const B = other(s);
     const skipTo = s.rngCursor + 40;
-    const next = reduce(s, { type: 'reroll', player: A, libraries: [B, A, B], skipTo });
+    const next = reduce(s, { type: 'reroll', player: A, libraries: [A, A], skipTo });
     expect(lastLog(next).kind).toBe('reroll');
-    expect(lastLog(next).detail['libraries']).toEqual([B, A]);
     expect(next.rngCursor).toBeGreaterThan(skipTo);
-    for (const pid of [A, B]) {
-      expect([...next.players[pid]!.library].sort()).toEqual([...s.players[pid]!.library].sort());
-    }
-    expect(next.players[B]!.library).not.toEqual(s.players[B]!.library);
+    expect([...next.players[A]!.library].sort()).toEqual([...s.players[A]!.library].sort());
+    expect(next.players[A]!.library).not.toEqual(s.players[A]!.library);
     // Hands, piles and everyone else untouched.
+    expect(next.players[B]!.library).toEqual(s.players[B]!.library);
     expect(next.players[A]!.hand).toEqual(s.players[A]!.hand);
     expect(next.shop).toEqual(s.shop);
 
@@ -659,7 +700,7 @@ describe('SB-68: the reroll action', () => {
     for (let turn = 0; turn < 6; turn++) {
       const me = s.activePlayer;
       const steps: GameAction[] = [
-        { type: 'reroll', player: me, libraries: s.playerOrder.slice(), skipTo: s.rngCursor + 3 + turn },
+        { type: 'reroll', player: me, libraries: [me], skipTo: s.rngCursor + 3 + turn },
         ...s.players[me]!.hand
           .filter((iid) => s.instances[iid]!.defId === 'copper')
           .map((iid) => play(me, iid)),
@@ -676,5 +717,262 @@ describe('SB-68: the reroll action', () => {
     const r2 = replay();
     expect(r1).toEqual(s);
     expect(stateChecksum(r2)).toBe(stateChecksum(s));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. The debt survives a reload; Clear is not a mulligan; other players'
+//    hidden cards are out of reach (review round 3)
+// ---------------------------------------------------------------------------
+
+/** A Storage that lives in the test. */
+function memoryStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
+    key: (i: number) => [...data.keys()][i] ?? null,
+    removeItem: (k: string) => {
+      data.delete(k);
+    },
+    setItem: (k: string, v: string) => {
+      data.set(k, String(v));
+    },
+  };
+}
+
+describe('SB-68 PM-1: the premove tracker, and the reroll it owes, survive a reload', () => {
+  const g = globalThis as unknown as { localStorage?: Storage };
+  afterEach(() => {
+    delete g.localStorage;
+  });
+
+  test('round-trips through storage, and after a reload the owed reroll still goes out at turn start', () => {
+    g.localStorage = memoryStorage();
+    const auth = clone(deal(4101));
+    const B = other(auth);
+    const [first, second] = inject(auth, B, ['big_spenda', 'big_spenda']);
+    const r1 = added(EMPTY_TRACKER, auth, B, play(B, first!));
+    const seen = drawn(r1.fold!.states[0]!, r1.fold!.states[1]!, B);
+    const auth2 = transformed(auth, first!);
+    const debt = syncPremoves(r1.tracker, auth2, B).tracker;
+    expect(debt.queue.map((e) => e.kind)).toEqual(['reroll']);
+
+    const id: PremoveStoreId = { room: 'ROOM42', seat: 'seat:b', seed: auth.seed, checksum: stateChecksum(auth) };
+    const key = premoveStoreKey(id);
+    writePremoveStore(key, serializeTracker(debt, key));
+
+    // The reload: nothing in memory, a tracker read back from storage.
+    const restored = deserializeTracker(readPremoveStore(key), key);
+    expect(restored.queue).toEqual(debt.queue);
+    expect(restored.exposure).toEqual(debt.exposure);
+    expect(restored.seen).toEqual(debt.seen);
+    expect(restored.last).toBeNull();
+
+    // B's turn: the reroll goes out, and it is the one owed.
+    const turn = advanceToTurnOf(auth2, B)!;
+    const reroll = debt.queue[0] as PremoveRerollEntry;
+    expect(submitPremoves(restored, turn, B)!.actions).toEqual([
+      { type: 'reroll', player: B, libraries: [B], skipTo: reroll.skipTo },
+    ]);
+    // So the scouting attack fails across the reload: the same draw premoved
+    // again does not show the cards the dropped preview showed.
+    const again = added(restored, auth2, B, play(B, second!));
+    expect(drawn(again.fold!.states[1]!, again.fold!.states[2]!, B)).not.toEqual(seen);
+
+    // Any other room, seat or match, or text that is not a tracker, is an empty one.
+    for (const otherId of [
+      { ...id, room: 'ROOM43' },
+      { ...id, seat: 'seat:a' },
+      { ...id, seed: id.seed + 1 },
+      { ...id, checksum: 'another deal' },
+    ]) {
+      expect(deserializeTracker(readPremoveStore(key), premoveStoreKey(otherId)).queue).toHaveLength(0);
+    }
+    expect(deserializeTracker('{', key).queue).toHaveLength(0);
+    const bad = { v: 1, key, queue: [{ kind: 'reroll', libraries: [B], skipTo: -1 }], exposure: [null], seen: null };
+    expect(deserializeTracker(JSON.stringify(bad), key).queue).toHaveLength(0);
+    // An empty queue stores nothing (the key is removed).
+    expect(serializeTracker(EMPTY_TRACKER, key)).toBeNull();
+  });
+
+  test('usePremove reads the stored queue for this room, seat and match on its first render', () => {
+    g.localStorage = memoryStorage();
+    const auth = clone(deal(4101));
+    const B = other(auth);
+    const [card] = inject(auth, B, ['big_spenda']);
+    const t = added(EMPTY_TRACKER, auth, B, play(B, card!)).tracker;
+    const id: PremoveStoreId = { room: 'ROOM42', seat: 'seat-b', seed: auth.seed, checksum: stateChecksum(auth) };
+    const key = premoveStoreKey(id);
+    writePremoveStore(key, serializeTracker(t, key));
+
+    function Probe(props: { store: PremoveStoreId | null }): React.ReactElement {
+      const pm = usePremove({ networked: true, state: auth, me: B, submit: () => {}, store: props.store });
+      return React.createElement('i', { 'data-count': pm.count, 'data-committed': pm.committed });
+    }
+    const probe = (store: PremoveStoreId | null): string => renderToStaticMarkup(React.createElement(Probe, { store }));
+    expect(probe(id)).toContain('data-count="1" data-committed="1"');
+    expect(probe({ ...id, checksum: 'another deal' })).toContain('data-count="0"');
+    expect(probe(null)).toContain('data-count="0"');
+  });
+
+  test('the drift rule still holds after a reload', () => {
+    const auth = clone(deal(4205));
+    const B = other(auth);
+    const [card] = inject(auth, B, ['big_spenda']);
+    const r = added(EMPTY_TRACKER, auth, B, play(B, card!));
+    const key = premoveStoreKey({ room: 'R', seat: 's', seed: auth.seed, checksum: 'c' });
+    const restored = deserializeTracker(serializeTracker(r.tracker, key), key);
+
+    const shifted = clone(auth);
+    const lib = shifted.players[B]!.library;
+    lib.unshift(lib.pop()!);
+    expect(foldPremoves(shifted, B, restored.queue, { previous: restored.seen })!.reason).toBe('drift');
+    const synced = syncPremoves(restored, shifted, B);
+    expect(synced.rolledBack).toBe(true);
+    expect(synced.tracker.queue.map((e) => e.kind)).toEqual(['reroll']);
+    expect((synced.tracker.queue[0] as PremoveRerollEntry).libraries).toEqual([B]);
+  });
+});
+
+describe('SB-68 PM-2: Clear keeps committed premoves', () => {
+  test('Clear drops the premoves that revealed nothing, and keeps a revealing one and what it built on', () => {
+    const auth = clone(deal(4204));
+    const B = other(auth);
+    const [card] = inject(auth, B, ['big_spenda']);
+    const turn = advanceToTurnOf(auth, B)!;
+    const coppers = turn.players[B]!.hand.filter((iid) => turn.instances[iid]!.defId === 'copper');
+    let t = added(EMPTY_TRACKER, auth, B, play(B, coppers[0]!)).tracker;
+    expect(committedCount(t)).toBe(0);
+    t = added(t, auth, B, play(B, card!)).tracker;
+    t = added(t, auth, B, play(B, coppers[1]!)).tracker;
+    expect([premoveCount(t), committedCount(t)]).toEqual([3, 2]);
+
+    const cleared = clearPremoves(t);
+    expect(cleared.queue).toEqual(t.queue.slice(0, 2));
+    expect(cleared.queue.some((e) => e.kind === 'reroll')).toBe(false);
+    expect(clearPremoves(cleared)).toBe(cleared);
+
+    // Only Coppers: nothing was revealed, so Clear empties the queue and owes nothing.
+    let plain = added(EMPTY_TRACKER, auth, B, play(B, coppers[0]!)).tracker;
+    plain = added(plain, auth, B, play(B, coppers[1]!)).tracker;
+    expect(committedCount(plain)).toBe(0);
+    expect(clearPremoves(plain).queue).toEqual([]);
+  });
+
+  test("the bar says why committed premoves stay, and Clear is disabled when nothing is clearable", () => {
+    const bar = (count: number, committed: number): string =>
+      renderToStaticMarkup(
+        React.createElement(PremoveBar, {
+          available: true,
+          active: true,
+          showing: true,
+          count,
+          committed,
+          rolledBack: 0,
+          refused: 0,
+          onActive: () => {},
+          onClear: () => {},
+        }),
+      );
+    const all = bar(2, 2);
+    expect(all).toContain('data-testid="premove-committed"');
+    expect(all).toMatch(/2 committed — they showed you cards, so they can.{1,6}t be cleared/);
+    expect(all).toContain('data-testid="premove-clear" disabled=""');
+    const some = bar(3, 2);
+    expect(some).not.toContain('data-testid="premove-clear" disabled=""');
+    const none = bar(1, 0);
+    expect(none).not.toContain('premove-committed');
+    expect(none).not.toContain('data-testid="premove-clear" disabled=""');
+  });
+});
+
+describe("SB-68 PM-2 / PS-M1: a premove may not reach another player's hidden cards", () => {
+  test("one that moves or reorders another player's library is refused, not queued", () => {
+    const auth = clone(deal(4601));
+    const A = auth.activePlayer;
+    const B = other(auth);
+    const [weasel] = inject(auth, B, ['weasel_turner']);
+    const start = advanceToTurnOf(auth, B)!;
+    // Control: on the branch the card really does change A's library.
+    const played = reduce(start, play(B, weasel!));
+    expect(played.players[A]!.library).not.toEqual(start.players[A]!.library);
+
+    const r = addPremove(EMPTY_TRACKER, auth, B, play(B, weasel!));
+    expect([r.added, r.refusal]).toEqual([false, 'opponent']);
+    expect(r.tracker.queue).toHaveLength(0);
+  });
+
+  test("one that only names a card in another player's library or hand (moving nothing) is refused", () => {
+    // Three players, so someone's library is still full at the start of B's branch.
+    const auth = clone(deal(4601, 3));
+    const A = auth.activePlayer;
+    const B = other(auth);
+    const start = advanceToTurnOf(auth, B)!;
+    const copper = start.players[B]!.hand.find((iid) => start.instances[iid]!.defId === 'copper')!;
+    const victim = start.playerOrder.find((p) => p !== B && start.players[p]!.library.length > 0)!;
+    expect(victim).toBeDefined();
+    // A stand-in for a peek: the Copper's play also logs one hidden card.
+    const peekAt = (pick: (s: GameState) => InstanceId) => (s: GameState, a: GameAction): GameState => {
+      const next = reduce(s, a);
+      if (a.type !== 'play') return next;
+      const out = clone(next);
+      out.logSeq += 1;
+      out.log.push({ seq: out.logSeq, turn: out.turn, player: B, kind: 'reveal', detail: { iids: [pick(out)] } });
+      return out;
+    };
+    const libraryTop = peekAt((s) => s.players[victim]!.library[0]!);
+    const nextHandCard = peekAt((s) => s.players[A]!.hand[0]!);
+    expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper), libraryTop).refusal).toBe('opponent');
+    expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper), nextHandCard).refusal).toBe('opponent');
+    // The same Copper without the peek is queued.
+    expect(addPremove(EMPTY_TRACKER, auth, B, play(B, copper)).added).toBe(true);
+  });
+
+  test("one that trashes from another player's hand is refused before it shows the hand the branch dealt them", () => {
+    const auth = clone(deal(4602));
+    const A = auth.activePlayer;
+    const B = other(auth);
+    const [gluten] = inject(auth, B, ['distilled_gluten']);
+    const start = advanceToTurnOf(auth, B)!;
+    // A's next hand exists only on the branch: ending A's turn dealt it.
+    const nextHand = start.players[A]!.hand;
+    expect(nextHand.length).toBeGreaterThan(0);
+    // Control: played on the branch, the card takes a card out of that hand.
+    const played = reduce(start, play(B, gluten!));
+    expect(played.players[A]!.hand).not.toEqual(nextHand);
+
+    const r = addPremove(EMPTY_TRACKER, auth, B, play(B, gluten!));
+    expect([r.added, r.refusal]).toEqual([false, 'opponent']);
+    expect(r.tracker.queue).toHaveLength(0);
+  });
+});
+
+describe('SB-68 MERGE-6: no premoves during a draft', () => {
+  function Probe(props: { state: GameState; me: PlayerId }): React.ReactElement {
+    const pm = usePremove({ networked: true, state: props.state, me: props.me, submit: () => {} });
+    return React.createElement('i', { 'data-available': String(pm.available) });
+  }
+  const probe = (state: GameState, me: PlayerId): string =>
+    renderToStaticMarkup(React.createElement(Probe, { state, me }));
+
+  test('unavailable until the last pick, then available', () => {
+    let s = createMatch(CFG(2, { draftMode: true }), PLAYERS(2), 4701, null);
+    expect(s.draft).not.toBeNull();
+    const B = other(s);
+    const picks = s.draft!.slots.filter((slot) => slot.pick === null && slot.options.length > 0);
+    expect(picks.length).toBeGreaterThan(1);
+    for (const slot of picks) {
+      expect(premoveAvailable(true, s, B)).toBe(false);
+      expect(probe(s, B)).toContain('data-available="false"');
+      expect(addPremove(EMPTY_TRACKER, s, B, play(B, s.players[B]!.hand[0]!)).added).toBe(false);
+      s = reduce(s, { type: 'draftPick', player: slot.player, slot: slot.index, defId: slot.options[0]! });
+    }
+    expect(s.draft).toBeNull();
+    expect(premoveAvailable(true, s, other(s))).toBe(true);
+    expect(probe(s, other(s))).toContain('data-available="true"');
   });
 });

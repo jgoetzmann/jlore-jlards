@@ -54,6 +54,12 @@
   white-space: nowrap;
 }
 
+.dock-strip .premove-committed {
+  flex: 0 0 auto;
+  color: var(--ink-dim, #98a1b3);
+  font-size: 12.5px;
+}
+
 /* The table is showing your next turn: say so at the edge, and make the two
    things premove mode ignores (ending the turn, answering a prompt) look it. */
 .table[data-premove="true"] .dock {
@@ -65,6 +71,20 @@
 .table[data-premove="true"] .prompt-option {
   opacity: 0.45;
   pointer-events: none;
+}
+
+/* End turn in premove mode looks like a disabled button, not the live turn's
+   muted green. The doubled `.table` outranks styles.css's
+   `.table[data-your-turn="true"] .end-turn:not(:disabled)`, which loads after
+   this sheet. */
+.table.table[data-premove="true"] .end-turn,
+.table.table[data-premove="true"] .end-turn:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--ink);
+  box-shadow: none;
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 @media (max-width: 700px) {

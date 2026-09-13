@@ -1114,8 +1114,12 @@ function Table({
             rolledBack: pm.rolledBack,
             onActive: onPremoveActive,
             onClear: onPremoveClear,
+            // ---- fix:premove ---- PM-2: committed premoves, and refusals that would reach another player
+            committed: pm.committed,
+            refused: pm.refused,
           },
-    [mode, pm.available, pm.active, premoveShowing, pm.count, pm.rolledBack, onPremoveActive, onPremoveClear],
+    // ---- fix:premove ---- committed, refused
+    [mode, pm.available, pm.active, premoveShowing, pm.count, pm.rolledBack, onPremoveActive, onPremoveClear, pm.committed, pm.refused],
   );
   // ---- end premove ----
 
