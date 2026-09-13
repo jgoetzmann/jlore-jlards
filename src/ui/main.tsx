@@ -6,6 +6,8 @@ import { ensureRegistry } from '@net/bootstrap';
 import { App } from './App';
 import './styles.css';
 import './motion.css';
+// Last, so its phone and touch rules win ties with every sheet above.
+import './mobile.css';
 
 ensureRegistry();
 

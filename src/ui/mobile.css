@@ -1,0 +1,936 @@
+/* Jlore Jlards — linked cards, touch, and phone width.
+ *
+ * Imported LAST by main.tsx (after styles.css and motion.css), so a rule here
+ * wins a specificity tie with every sheet before it, including hand.css,
+ * opponents.css and lobby.css. Three sections:
+ *
+ *   1. Linked cards, every width: the outline a referenced card wears (links.ts)
+ *      and the preview's "Mentions" row.
+ *   2. Touch, `(hover: none)`: the preview sheet and the tap bubble
+ *      (touch.ts, TapTip.tsx), and the hover-only affordances made reachable.
+ *      Nothing in it changes a box size, so a touch screen at 701px and up keeps
+ *      the SB-63 layout.
+ *   3. Phones, `(max-width: 700px)`: the stacked table sized for 375–430px: no
+ *      sideways scroll anywhere, 44px touch targets, text you can read without
+ *      zooming (rules text 12px, body text 13px, badges 11px at the least).
+ *
+ * The ≥ 701px layout is untouched: e2e/layout.spec.ts and fixtures.spec.ts pin it.
+ *
+ * Written generically on purpose. The Draft pick panel reuses the prompt panel
+ * (`.prompt-panel-host`, `.prompt-card`, option card faces) and the premove bar
+ * sits in the dock strip; both land mobile-correct through the rules below
+ * (`.dock-strip > [class*="bar"]`, the prompt panel block, `button` sizes).
+ */
+
+/* ======================================================== 1. linked cards */
+
+.card.card-linked,
+.seat-card.card-linked {
+  outline: 2px solid var(--prophet);
+  outline-offset: -2px;
+  box-shadow:
+    0 0 0 2px rgb(121 192 240 / 35%),
+    0 0 18px rgb(121 192 240 / 55%);
+}
+
+.card-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.card-link-name {
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgb(121 192 240 / 60%);
+  color: var(--prophet);
+  font-weight: 700;
+}
+
+/* ============================================= 2. touch: sheet and bubble */
+
+/* The whole card, opened by a long-press or a tap (touch.ts). The one overlay
+   that takes the pointer, because the player asked for it and closes it. */
+.card-preview-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  background: rgb(8 10 14 / 76%);
+  overscroll-behavior: contain;
+  animation: overlay-in var(--t-quick, 120ms) var(--e-out, ease-out) both;
+}
+
+.card-preview-sheet-body {
+  width: min(340px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-preview-sheet .card {
+  width: 100%;
+  padding: 12px;
+  gap: 6px;
+  background: #1d2331;
+  border-color: #46506a;
+}
+
+.card-preview-sheet .card-name,
+.card-preview-sheet .card-cost {
+  font-size: 17px;
+}
+
+.card-preview-sheet .card-art {
+  height: 150px;
+}
+
+.card-preview-sheet .card-typeline {
+  font-size: 12.5px;
+}
+
+.card-preview-sheet .card-stats {
+  font-size: 14px;
+}
+
+.card-preview-sheet .card-text {
+  font-size: 14px;
+  line-height: 1.45;
+  max-height: none;
+  overflow: visible;
+}
+
+.card-preview-sheet .keyword-chip,
+.card-preview-sheet .counter-chip,
+.card-preview-sheet .card-prophet,
+.card-preview-sheet .card-links {
+  font-size: 12.5px;
+}
+
+.card-preview-close {
+  min-height: 48px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* A `title`, read by tapping (TapTip.tsx). Never takes the pointer. */
+.tap-tip {
+  position: fixed;
+  z-index: 80;
+  max-width: 240px;
+  width: max-content;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: rgb(12 14 18 / 96%);
+  border: 1px solid var(--accent-2);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 55%);
+  transform: translateX(-50%);
+  animation: overlay-in var(--t-quick, 120ms) var(--e-out, ease-out) both;
+}
+
+.tap-tip.tap-tip-above {
+  transform: translate(-50%, -100%);
+}
+
+/* ============================================ 2. touch: hover-only things */
+
+@media (hover: none) {
+  .card,
+  .seat-card {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  /* A long press is a preview, not a drag; touch reorders with the nudges. */
+  .hand-row .card {
+    -webkit-user-drag: none;
+  }
+
+  button,
+  .card,
+  .seat-card,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+
+  /* The reorder nudges wait for a hover a finger never makes, so on touch they
+     are simply there, on your turn (they only render when reordering is legal). */
+  .hand-slot .hand-nudge {
+    opacity: 1;
+  }
+
+  /* iOS keeps :hover after a tap; a lift that sticks reads as a stuck card. */
+  .card-clickable:hover,
+  .hand-row .card-clickable:hover,
+  .dock .hand-row .card-clickable:hover,
+  .prompt-option:hover {
+    transform: none;
+  }
+
+  .hand-row .card-clickable::after {
+    content: none;
+  }
+}
+
+/* Keyboard hints advertise keys a phone does not have. */
+@media (hover: none) and (pointer: coarse) {
+  .card-hint,
+  .prompt-option-key,
+  .cluster-actions kbd {
+    display: none;
+  }
+}
+
+/* ============================================================ 3. phones */
+
+@media (max-width: 700px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* ---------------------------------------------------- touch targets */
+
+  button {
+    min-height: 44px;
+  }
+
+  /* 16px: iOS zooms into any smaller field on focus. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* ------------------------------------------------------- start screen */
+
+  .start {
+    margin: 16px 12px;
+    padding: 20px 16px;
+  }
+
+  .start-title {
+    font-size: 30px;
+  }
+
+  .start-field {
+    flex-wrap: wrap;
+    min-height: 44px;
+  }
+
+  .start-field > span {
+    width: 96px;
+  }
+
+  .start-field > input:not([type="checkbox"]) {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+
+  .start-hint {
+    margin: 0 0 6px;
+    max-width: none;
+    font-size: 13px;
+  }
+
+  .start-actions {
+    flex-wrap: wrap;
+  }
+
+  .start-actions > button {
+    flex: 1 1 140px;
+  }
+
+  .start-join input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .start-note,
+  .start-resume {
+    font-size: 13px;
+  }
+
+  .connecting,
+  .fatal {
+    margin: 18vh 16px;
+  }
+
+  /* -------------------------------------------------------------- lobby */
+
+  .lobby {
+    padding: 16px 12px 32px;
+  }
+
+  .lobby-card {
+    padding: 20px 16px 18px;
+  }
+
+  .lobby-head {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .lobby-code {
+    font-size: 34px;
+    letter-spacing: 0.16em;
+  }
+
+  .lobby-copy {
+    margin-top: 0;
+  }
+
+  .lobby-sub {
+    font-size: 14px;
+  }
+
+  .lobby-roster-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .lobby-cap {
+    min-width: 44px;
+    font-size: 14px;
+  }
+
+  .lobby-seat {
+    flex-wrap: wrap;
+    column-gap: 10px;
+    row-gap: 4px;
+  }
+
+  .lobby-name {
+    flex: 1 1 8ch;
+    min-width: 0;
+  }
+
+  .lobby-pill {
+    font-size: 11px;
+  }
+
+  .lobby-start {
+    flex: 1 1 100%;
+  }
+
+  .lobby-foot-note {
+    flex: 1 1 0;
+    max-width: none;
+    font-size: 13px;
+  }
+
+  .lobby-tip,
+  .lobby-knocking,
+  .lobby-connecting {
+    font-size: 13px;
+  }
+
+  .lobby-knocking {
+    flex-wrap: wrap;
+  }
+
+  .lobby-waiting,
+  .lobby-shut-text {
+    font-size: 14px;
+  }
+
+  /* -------------------------------------------------------------- table */
+
+  .table {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* The result lives in the board region, which otherwise comes last. */
+  .table:has(.game-over) .board-region {
+    order: 2;
+  }
+
+  .game-over {
+    font-size: 14px;
+  }
+
+  .turn-banner-inner {
+    max-width: calc(100vw - 32px);
+    white-space: normal;
+    text-align: center;
+    font-size: 18px;
+    padding: 10px 20px;
+  }
+
+  /* ------------------------------------------------------------- topbar */
+
+  .topbar {
+    gap: 6px 8px;
+    padding: 6px 12px;
+  }
+
+  .seat-switch {
+    flex-wrap: wrap;
+  }
+
+  .turn-label,
+  .round-value,
+  .turn-timer,
+  .hard-end,
+  .anomaly-text {
+    font-size: 13px;
+  }
+
+  .anomaly-more {
+    font-size: 12px;
+  }
+
+  .help-btn {
+    min-width: 44px;
+  }
+
+  .prompt-waiting {
+    white-space: normal;
+    flex-wrap: wrap;
+    border-radius: 14px;
+    padding: 4px 6px 4px 10px;
+  }
+
+  .prompt-pass-btn {
+    font-size: 13px;
+  }
+
+  /* ----------------------------------------------------- opponents strip */
+
+  .opponents {
+    padding: 8px 12px;
+  }
+
+  /* One seat per line: a sideways row cut the second seat off at the edge. */
+  .opponents-row {
+    flex-direction: column;
+    overflow: visible;
+    gap: 6px;
+  }
+
+  .opponent.seat.seat-strip {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 52px;
+    padding: 6px 10px;
+  }
+
+  .opponent.seat.seat-strip .seat-name {
+    font-size: 14px;
+  }
+
+  /* Badges wrap under the name rather than squeezing it to "Pla…". */
+  .seat-strip .seat-line1 {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .seat-strip .seat-last {
+    font-size: 13px;
+  }
+
+  .opponent.seat.seat-strip .seat-score,
+  .seat-strip .seat-counts {
+    font-size: 12px;
+  }
+
+  .seat-score-item b {
+    font-size: 14px;
+  }
+
+  .opponent.seat .opponent-turn.seat-badge,
+  .opponent.seat .seat-turn-self.seat-badge,
+  .seat-badge.seat-badge-out,
+  .seat-badge-deciding,
+  .seat-badge-won,
+  .seat-badge-you {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .seat-detail {
+    gap: 10px 14px;
+  }
+
+  .seat-detail .seat-tableau {
+    flex: 1 1 100%;
+  }
+
+  .seat-detail .seat-beats,
+  .seat-beat,
+  .seat-detail-empty {
+    font-size: 13px;
+  }
+
+  .seat-card,
+  .seat-stack-discard .seat-card {
+    width: 76px;
+  }
+
+  .seat-card-art {
+    height: 52px;
+  }
+
+  .seat-card-name {
+    font-size: 11px;
+    height: 26px;
+  }
+
+  .seat-stack-discard .seat-card-name {
+    height: 13px;
+  }
+
+  .seat-tableau-head,
+  .seat-stack-label,
+  .seat-fan-more,
+  .opponent.seat .seat-aura {
+    font-size: 11px;
+  }
+
+  .seat-stack-label b {
+    font-size: 13px;
+  }
+
+  /* -------------------------------------------------------- card faces */
+
+  .card-name {
+    font-size: 13px;
+  }
+
+  .card-typeline,
+  .keyword-chip,
+  .counter-chip,
+  .card-badge,
+  .card-art-name {
+    font-size: 11px;
+  }
+
+  .card-stats,
+  .card-text,
+  .card-prophet {
+    font-size: 12px;
+  }
+
+  .aura-chip,
+  .aura-text {
+    font-size: 12px;
+  }
+
+  .aura-tier {
+    font-size: 11px;
+  }
+
+  /* ---------------------------------------------------------------- dock */
+
+  .dock {
+    gap: 8px;
+    padding: 8px 12px 12px;
+  }
+
+  /* The strip wraps instead of scrolling: in-play chips, auras and any bar a
+     prompt (or another track) puts here get whole lines of their own. */
+  .dock-strip {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow: visible;
+    row-gap: 6px;
+    min-height: 36px;
+  }
+
+  .strip-label,
+  .dock-strip .hand-status {
+    font-size: 12px;
+  }
+
+  .field.field-strip {
+    order: 1;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .field-strip .aura-chip,
+  .field-strip .aura-activate {
+    font-size: 13px;
+  }
+
+  .strip-cards {
+    order: 2;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .strip-cards:empty {
+    display: none;
+  }
+
+  .card.card-chip {
+    max-width: 100%;
+    height: 36px;
+  }
+
+  .card-chip .card-art {
+    flex-basis: 32px;
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Bars in the strip: the hand/pile prompt bar, and whatever else is a bar. */
+  .dock-strip > [class*="bar"] {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    row-gap: 6px;
+  }
+
+  .prompt-bar .prompt-title {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+    overflow: visible;
+    font-size: 15px;
+  }
+
+  .prompt-bar .prompt-meta {
+    flex: 1 1 100%;
+    font-size: 13px;
+  }
+
+  .prompt-bar .prompt-options {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+    gap: 6px;
+  }
+
+  .prompt-bar .prompt-option {
+    padding: 4px 12px;
+    font-size: 14px;
+  }
+
+  .prompt-bar .prompt-actions {
+    flex: 1 1 100%;
+  }
+
+  .prompt-bar .prompt-actions button {
+    flex: 1 1 0;
+    padding: 6px 12px;
+  }
+
+  .prompt-option-slot {
+    font-size: 12px;
+  }
+
+  /* The hand: three columns that wrap, never a row that runs off the edge.
+     Order reads left to right, top to bottom, like the row it replaces. */
+  .dock .hand-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 6px 0 2px;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .dock .hand-row > .hand-slot {
+    min-width: 0;
+  }
+
+  /* styles.css pins hand cards `flex: 0 0 auto` for the sideways row; in a
+     grid cell the card has to grow to the cell instead. */
+  .dock .hand-row > .hand-slot > .card {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .dock .hand-row .hand-empty {
+    grid-column: 1 / -1;
+    font-size: 13px;
+  }
+
+  .card-dock {
+    height: auto;
+    min-height: 168px;
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .card-dock .card-head {
+    align-items: flex-start;
+  }
+
+  .card-dock .card-cost {
+    font-size: 13px;
+  }
+
+  .card-dock .card-name {
+    font-size: 13px;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .card-dock .card-art {
+    height: 58px;
+  }
+
+  .card-dock .card-stats {
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .card-dock .card-text {
+    font-size: 12px;
+    line-height: 1.3;
+    -webkit-line-clamp: 4;
+  }
+
+  /* In flow, so the nudges never cover the rules text. */
+  .card-dock .card-footer {
+    position: static;
+    margin-top: auto;
+  }
+
+  .hand-nudge .nudge {
+    flex: 1 1 0;
+    padding: 0;
+    font-size: 14px;
+  }
+
+  .hand-nudge .hand-grip {
+    align-self: center;
+  }
+
+  .cluster {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .stat-label,
+  .stat-minor .stat-label,
+  .end-turn-sub {
+    font-size: 11px;
+  }
+
+  .cluster-actions {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .cluster-actions > button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .play-money {
+    height: auto;
+    min-height: 48px;
+    font-size: 14px;
+  }
+
+  .cluster-actions > .end-turn {
+    flex-grow: 1.4;
+    height: auto;
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .dock-deck,
+  .dock-discard {
+    min-height: 44px;
+    padding: 4px 10px;
+    gap: 8px;
+  }
+
+  .dock-pile-label {
+    font-size: 13px;
+  }
+
+  /* --------------------------------------------------------------- board */
+
+  .board-region {
+    padding: 10px 12px 16px;
+  }
+
+  .board {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .shop {
+    padding: 6px 8px 10px;
+  }
+
+  .shop-title {
+    font-size: 12px;
+  }
+
+  .shop-piles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .shop-none {
+    grid-column: 1 / -1;
+    font-size: 13px;
+  }
+
+  .pile {
+    width: auto;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .card-mini .card-art {
+    height: 72px;
+  }
+
+  .card-mini .card-name {
+    font-size: 12px;
+  }
+
+  .pile-cost-chip {
+    padding: 0 7px;
+    font-size: 13px;
+  }
+
+  .pile-count-badge {
+    font-size: 12px;
+  }
+
+  .pile-buy {
+    height: auto;
+    font-size: 14px;
+  }
+
+  .pile-lock,
+  .pile-empty-label {
+    font-size: 12px;
+  }
+
+  .pile-empty-id {
+    font-size: 11px;
+  }
+
+  .pile-slot-empty {
+    height: 112px;
+  }
+
+  /* ------------------------------------------- prompt panels and sheets
+     Discover, choose, order, the Draft pick panel, the key sheet and the
+     anomaly panel all sit in `.prompt-panel-host`. */
+
+  .prompt-panel-host {
+    /* `visible`, so the sticky Confirm row binds to the page, which is what
+       scrolls on a phone. */
+    overflow: visible;
+    padding: 8px 12px;
+  }
+
+  .prompt-panel {
+    width: 100%;
+  }
+
+  .prompt-card,
+  .key-help {
+    width: 100%;
+    max-width: none;
+    margin-top: 0;
+    padding: 14px 12px;
+  }
+
+  .prompt-title {
+    font-size: 17px;
+  }
+
+  .prompt-meta,
+  .anomaly-panel-note,
+  .key-help-list {
+    font-size: 13px;
+  }
+
+  .prompt-card .prompt-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .prompt-card .prompt-option {
+    min-width: 0;
+  }
+
+  .prompt-option-card .card {
+    width: 100%;
+  }
+
+  .prompt-panel .prompt-option-key {
+    top: -6px;
+    right: -4px;
+  }
+
+  /* A one-click prompt has no buttons; an empty sticky row would be a bar
+     drawn across whichever option happens to scroll under it. */
+  .prompt-card .prompt-actions:empty {
+    display: none;
+  }
+
+  .prompt-card .prompt-actions {
+    flex-wrap: wrap;
+    margin: 0 -12px -14px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .prompt-card .prompt-actions button,
+  .key-help .prompt-actions button {
+    flex: 1 1 0;
+  }
+
+  .key-help-list {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  /* -------------------------------------------------------------- drawer */
+
+  .drawer {
+    padding: 12px;
+  }
+
+  .log-list,
+  .library-count,
+  .drawer-empty,
+  .field-count {
+    font-size: 13px;
+  }
+
+  .log-more {
+    font-size: 14px;
+  }
+}

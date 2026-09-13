@@ -22,6 +22,7 @@ import { viewFor } from '@engine/view';
 import { seedMatch } from './useGame';
 import { TableLayout } from './App';
 import { allPiles } from './prompt';
+import { cardNameOf } from './cardview';
 
 declare global {
   interface Window {
@@ -181,10 +182,112 @@ function MotionFixture(): JSX.Element {
   );
 }
 
+// ---- mobile ----
+// Four more states the phone layout has to hold, for e2e/mobile.spec.ts.
+
+/** A fixed state on the real table, seen from the seat to move. */
+function StaticTable({ state }: { state: GameState }): JSX.Element {
+  const me = state.activePlayer;
+  const view = React.useMemo(() => viewFor(state, me), [state, me]);
+  return (
+    <TableLayout
+      view={view}
+      mode="hotseat"
+      code={null}
+      seats={['s1']}
+      views={{ s1: view }}
+      activeSeat="s1"
+      setActiveSeat={noop}
+      send={record}
+      turnSeconds={90}
+    />
+  );
+}
+
+/** A Discover panel with printed card faces. Astrologist names Lunar Fragment. */
+function DiscoverFixture(): JSX.Element {
+  const [state, setState] = React.useState<GameState>(() => {
+    const s = seedMatch(2, SEED);
+    s.pending = craftPrompt(s.activePlayer, {
+      id: 'fx-discover',
+      type: 'discover',
+      prompt: 'Discover a card',
+      options: ['astrologist', 'lunar_fragment', 'silver_stash'].map((defId) => ({
+        key: defId,
+        label: cardNameOf(defId),
+        defId,
+      })),
+    });
+    return s;
+  });
+  const send = useFixtureSend(setState);
+  const me = state.activePlayer;
+  const view = React.useMemo(() => viewFor(state, me), [state, me]);
+  return (
+    <TableLayout
+      view={view}
+      mode="hotseat"
+      code={null}
+      seats={['s1']}
+      views={{ s1: view }}
+      activeSeat="s1"
+      setActiveSeat={noop}
+      send={send}
+      turnSeconds={90}
+    />
+  );
+}
+
+/** Silver Stash in your play area: tapping it lights the Silver pile. */
+function LinksFixture(): JSX.Element {
+  const state = React.useMemo(() => {
+    const s = seedMatch(2, SEED);
+    const p = s.players[s.activePlayer]!;
+    const iid = p.hand.shift()!;
+    p.play.push(iid);
+    const inst = s.instances[iid]!;
+    inst.zone = 'play';
+    inst.defId = 'silver_stash';
+    return s;
+  }, []);
+  return <StaticTable state={state} />;
+}
+
+/** The first seed whose deal rolls an anomaly, so its chip and panel show. */
+function AnomalyFixture(): JSX.Element {
+  const state = React.useMemo(() => {
+    for (let seed = 1; seed < 400; seed += 1) {
+      const s = seedMatch(2, seed);
+      if (s.anomaly !== null) return s;
+    }
+    return seedMatch(2, SEED);
+  }, []);
+  return <StaticTable state={state} />;
+}
+
+/** The match is over: the result panel and a table nobody can act on. */
+function GameOverFixture(): JSX.Element {
+  const state = React.useMemo(() => {
+    const s = seedMatch(2, SEED);
+    s.ended = true;
+    s.endReason = 'jlorePileEmpty';
+    s.winners = [s.activePlayer];
+    return s;
+  }, []);
+  return <StaticTable state={state} />;
+}
+// ---- end mobile ----
+
 export const FIXTURES: Record<string, () => JSX.Element> = {
   'pile-pick': PilePickFixture,
   pass: PassFixture,
   motion: MotionFixture,
+  // ---- mobile ----
+  discover: DiscoverFixture,
+  links: LinksFixture,
+  anomaly: AnomalyFixture,
+  'game-over': GameOverFixture,
+  // ---- end mobile ----
 };
 
 export function Fixture({ name }: { name: string }): JSX.Element {

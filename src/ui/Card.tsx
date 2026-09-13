@@ -24,6 +24,8 @@ import React from 'react';
 import type { CardView, Rarity, StatKey } from '@engine/types';
 import { artPlaceholder, artThumbUrl, artUrl, nameHue } from './art';
 import { hidePreview, showPreview } from './preview';
+import { clearLinkSource, linkedNames, setLinkSource, useLinked } from './links';
+import { useCardPress } from './touch';
 
 export { artUrl, artThumbUrl, nameHue } from './art';
 
@@ -194,10 +196,19 @@ function CardImpl(props: CardProps): JSX.Element {
   const iid = card.iid;
   React.useEffect(
     () => () => {
-      if (previewable) hidePreview(iid);
+      if (previewable) {
+        hidePreview(iid);
+        clearLinkSource(iid);
+      }
     },
     [iid, previewable],
   );
+
+  // Lit while the hovered or tapped card references this one (links.ts). A
+  // boolean snapshot, so only faces whose state flips re-render.
+  const linked = useLinked(card.defId);
+  // Long-press for the preview sheet, tap-to-preview on a card with no action.
+  const press = useCardPress(card, previewable);
 
   // The slop guard exists because a drag that never crossed the browser's own
   // threshold arrives as a click. That only happens on a card you can drag, and
@@ -216,6 +227,7 @@ function CardImpl(props: CardProps): JSX.Element {
   if (props.inert) classes.push('card-inert');
   if (props.cursor) classes.push('card-cursor');
   if (props.committed) classes.push('card-committed');
+  if (linked) classes.push('card-linked');
 
   const showText = !compact && (variant === 'full' || variant === 'dock' || variant === 'preview');
   const art = (
@@ -301,6 +313,7 @@ function CardImpl(props: CardProps): JSX.Element {
             Prophet {card.prophetCost.threshold} · drain {card.prophetCost.drain}
           </div>
         )}
+        {variant === 'preview' && <CardLinks defId={card.defId} />}
       </>
     );
   }
@@ -324,13 +337,41 @@ function CardImpl(props: CardProps): JSX.Element {
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       draggable={props.draggable}
-      onPointerEnter={previewable ? (e) => showPreview(card, e.currentTarget) : undefined}
-      onPointerLeave={previewable ? () => hidePreview(card.iid) : undefined}
+      onPointerEnter={
+        previewable
+          ? (e) => {
+              // A finger "enters" on every tap; touch has its own paths (touch.ts).
+              if (e.pointerType === 'touch') return;
+              showPreview(card, e.currentTarget);
+              setLinkSource(card.defId, card.iid);
+            }
+          : undefined
+      }
+      onPointerLeave={
+        previewable
+          ? (e) => {
+              if (e.pointerType === 'touch') return;
+              hidePreview(card.iid);
+              clearLinkSource(card.iid);
+            }
+          : undefined
+      }
       onPointerDown={(e) => {
         pressedAt.current = { x: e.clientX, y: e.clientY };
         wasDragged.current = false;
+        press.onPointerDown(e);
       }}
+      onPointerMove={press.onPointerMove}
+      onPointerUp={press.onPointerUp}
+      onPointerCancel={press.onPointerCancel}
+      onContextMenu={press.onContextMenu}
       onDragStart={(e) => {
+        // On touch the reorder path is the nudge buttons; a long press is a
+        // preview, never the start of a drag.
+        if (press.isTouch()) {
+          e.preventDefault();
+          return;
+        }
         wasDragged.current = true;
         if (previewable) hidePreview(card.iid);
         props.onDragStart?.(e);
@@ -357,6 +398,7 @@ function CardImpl(props: CardProps): JSX.Element {
             travelledTooFar(pressedAt.current, { x: e.clientX, y: e.clientY }));
         pressedAt.current = null;
         wasDragged.current = false;
+        if (previewable && press.takeClick(e, clickable)) return;
         if (dragged) return;
         if (clickable && onClick) onClick(card);
       }}
@@ -381,6 +423,22 @@ function CardImpl(props: CardProps): JSX.Element {
 
       {badge && <div className="card-badge">{badge}</div>}
       {footer && <div className="card-footer">{footer}</div>}
+    </div>
+  );
+}
+
+/** The preview's list of the cards this one references (links.ts), each lit like its face would be. */
+function CardLinks({ defId }: { defId: string }): JSX.Element | null {
+  const names = linkedNames(defId);
+  if (names.length === 0) return null;
+  return (
+    <div className="card-links" data-testid="card-links">
+      <span className="card-links-label">Mentions</span>
+      {names.map((n) => (
+        <span key={n} className="card-link-name">
+          {n}
+        </span>
+      ))}
     </div>
   );
 }

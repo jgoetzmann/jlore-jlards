@@ -31,6 +31,8 @@
 import React from 'react';
 import type { CardView, GameView, LogEntry, OpponentView } from '@engine/types';
 import { hidePreview, showPreview } from './preview';
+import { clearLinkSource, setLinkSource, useLinked } from './links';
+import { useCardPress } from './touch';
 import { artPlaceholder, artThumbUrl } from './art';
 import { EASE_OUT, MOTION_MS, anchorFan } from './motion';
 import { useOneShot } from './useMotion';
@@ -233,20 +235,45 @@ function SeatCard({ card, latest }: { card: CardView; latest?: boolean }): JSX.E
   const [failed, setFailed] = React.useState(false);
   const key = card.art?.key;
   const iid = card.iid;
-  React.useEffect(() => () => hidePreview(iid), [iid]);
+  React.useEffect(
+    () => () => {
+      hidePreview(iid);
+      clearLinkSource(iid);
+    },
+    [iid],
+  );
   // FLIP registration by instance id, through a ref: nothing in this panel
   // carries a data-iid attribute, so the DOM still shows no card identities.
   const flipRef = useFlipRef(iid);
+  // Linked highlight and the touch paths to the preview (links.ts, touch.ts).
+  const linked = useLinked(card.defId);
+  const press = useCardPress(card, true);
   return (
     <div
       ref={flipRef}
-      className={`seat-card rarity-${card.rarity}${latest ? ' seat-card-top' : ''}`}
+      className={`seat-card rarity-${card.rarity}${latest ? ' seat-card-top' : ''}${linked ? ' card-linked' : ''}`}
       data-testid="seat-card"
       data-card-id={card.defId}
       data-card-name={card.name}
       aria-label={cardTitle(card)}
-      onPointerEnter={(e) => showPreview(card, e.currentTarget)}
-      onPointerLeave={() => hidePreview(card.iid)}
+      onPointerEnter={(e) => {
+        if (e.pointerType === 'touch') return;
+        showPreview(card, e.currentTarget);
+        setLinkSource(card.defId, card.iid);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === 'touch') return;
+        hidePreview(card.iid);
+        clearLinkSource(card.iid);
+      }}
+      onPointerDown={press.onPointerDown}
+      onPointerMove={press.onPointerMove}
+      onPointerUp={press.onPointerUp}
+      onPointerCancel={press.onPointerCancel}
+      onContextMenu={press.onContextMenu}
+      onClick={(e) => {
+        press.takeClick(e, false);
+      }}
     >
       {key && !failed ? (
         <img
