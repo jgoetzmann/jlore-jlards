@@ -251,3 +251,37 @@ describe('the data-testid contract the browser suite reads', () => {
     }
   });
 });
+
+// ---- premove ----
+describe('the premove bar ids e2e/premove.spec.ts reads (SB-68)', () => {
+  test('a room table carries the toggle, then the bar with Watch live and Clear; hotseat carries neither', () => {
+    const s = seedMatch(2, 4242);
+    const me = s.playerOrder.find((p) => p !== s.activePlayer)!;
+    const view = viewFor(s, me);
+    const base = {
+      view,
+      mode: 'join' as const,
+      code: 'ABC123',
+      seats: ['s1'],
+      views: { s1: view },
+      activeSeat: 's1',
+      setActiveSeat: noop,
+      send: noop,
+      turnSeconds: 90,
+    };
+    const bar = { available: true, active: false, showing: false, count: 0, rolledBack: 0, onActive: noop, onClear: noop };
+    const off = testIdsIn(renderToStaticMarkup(React.createElement(TableLayout, { ...base, premove: bar })));
+    expect(off).toContain('premove-toggle');
+    const on = testIdsIn(
+      renderToStaticMarkup(
+        React.createElement(TableLayout, { ...base, premove: { ...bar, active: true, showing: true, count: 2 } }),
+      ),
+    );
+    for (const id of ['premove-bar', 'premove-live', 'premove-clear']) {
+      expect(on, `the premove bar lost data-testid="${id}"`).toContain(id);
+    }
+    const hotseat = testIdsIn(renderTable(view, me));
+    expect(hotseat).not.toContain('premove-toggle');
+    expect(hotseat).not.toContain('premove-bar');
+  });
+});

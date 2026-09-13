@@ -31,6 +31,8 @@ import { drainQueue, resolvePrompt } from './core/resume.js';
 import { finishGame, noteEndCondition, settleEndedGame } from './core/endgame.js';
 import { computeScores } from './core/scoring.js';
 import { applyDraftPick } from './core/draft.js'; // ---- draft ----
+// ---- premove ----
+import { applyReroll } from './core/reroll.js';
 
 export { createMatch } from './core/setup.js';
 export { legalActions } from './core/actions.js';
@@ -190,6 +192,10 @@ function dispatch(s: GameState, action: GameAction): GameState {
       p.hand = [...action.hand];
       return appendLog(s, 'reorderHand', action.player, { hand: action.hand });
     }
+
+    // ---- premove ---- SB-68
+    case 'reroll':
+      return applyReroll(s, action);
 
     case 'endTurn': {
       let next = endTurnImpl(s);

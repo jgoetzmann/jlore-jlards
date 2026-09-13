@@ -1339,3 +1339,125 @@ the config as it stands.
 Code: `src/ui/turntimer.ts`, `src/ui/useGame.ts` (the expiry effect),
 `src/ui/TurnBar.tsx` (`TurnClock`), `src/net/host.ts` (`setTimerOn`),
 `src/ui/Lobby.tsx`. Tests: `test/table-timer.test.ts`, `e2e/timer.spec.ts`.
+
+### SB-68. Premoves, and why a rolled-back draw is re-rolled
+
+**The question.** The owner asked for premoving: "Let a player take their turn
+actions while another player's turn is still resolving. The active player's state
+is always authoritative; premoved actions are speculative. If the active player's
+turn invalidates a premove, roll the premoving player back to a valid state and
+discard the premove. No information leakage on rollback. If a rollback undoes a
+randomized action such as a draw, re-roll the randomness rather than replaying
+it — a player must not be able to scout the deck by premoving a draw, getting
+rolled back, and drawing again."
+
+In lockstep (SB-65) nothing random is random to the engine: every draw reads the
+library order fixed at the last shuffle, and every other roll reads
+`state.seed + state.rngCursor`. A premove previewed and then discarded has already
+shown its outcome, and the same premove made again shows exactly the same one.
+
+**The ruling.** Premoves are local and speculative. Only real intents change the
+shared state.
+
+1. *Scope.* Rooms only (host and join). Hotseat always shows the seat to move, so
+   nobody waits. Any seat that is not the active one may premove.
+2. *The branch.* `advanceToTurnOf(state, me)` ends every intervening turn on a copy
+   of the predicted state. It gives up (no branch, no premoving) when the game is
+   over, a prompt or a draft is open, or a step is refused or stops at a prompt.
+   The queue is folded onto that branch (`foldPremoves`), and the table shows
+   `viewFor(branch, me)`, so the view boundary is unchanged.
+3. *Queue entries* are `{kind:'action', action, expect}` or
+   `{kind:'reroll', libraries, skipTo}`. Only `play`, `buy`, `activateAura` and
+   `reorderHand` are premovable. `expect` records what the premove referred to:
+   play `{iid, defId}`, buy `{pileId, topDefId, cost}`, aura `{auraId}`.
+4. *Invalidation.* The queue is refolded on every change to the predicted state.
+   An action entry is invalid when:
+   - `expect` no longer holds: the card left your hand or was transformed, or the
+     pile's top card or price changed;
+   - `reduce` refuses it, detected exactly as a lockstep batch detects it
+     (`isRejected`);
+   - *prompt*: it opens a prompt with more premoves queued behind it. Premoves end
+     at a prompt, which you answer live on your turn, so a queued reroll can never
+     sit behind a prompt where a batch would never reach it;
+   - *drift*: it revealed a library whose order, at the start of the branch, is no
+     longer what it was when the previous fold showed it. Without this, an
+     opponent putting a card on top of your library would quietly slide your
+     premoved draw one card down, and you would have seen both cards.
+
+   The first invalid entry and everything after it are dropped.
+5. *Rollback.* With k the first dropped entry, the queue becomes `queue.slice(0, k)`
+   plus one reroll entry. The reroll sits where the dropped premoves were, so the
+   kept premoves resolve exactly as previewed. It covers everything any preview
+   of entries k.. revealed, merged over every fold that showed them (`exposure` in
+   `PremoveTracker`), because the preview is refolded on every change and each fold
+   may have read a different stretch of the rng. What a step revealed is
+   `rerollFor(before, after)`: the libraries whose array changed, plus any library
+   whose cards (as of `before`) a new log entry names or a newly opened prompt
+   offers (a reveal or a "look at your library" choice that moves nothing).
+   `skipTo` is the cursor after the step. Clear does the same with k = 0.
+6. *The `reroll` action* is `{type:'reroll', player, libraries, skipTo}`
+   (`src/engine/core/reroll.ts`). It checks that the ids are known players and that
+   `skipTo` is an integer in `0..rngCursor + 1,000,000`, sets
+   `rngCursor = max(rngCursor, skipTo)`, shuffles each named library with
+   `makeRng(seed, rngCursor)` (writing the cursor back), and logs `reroll`. It is an
+   ordinary active-player action, sent only on the premover's own turn and never
+   offered as a premove.
+7. *Submission.* When the predicted state reaches your turn with no prompt, the
+   queue is folded once more on that state, with no advance, and sent as one
+   `sendMany` batch: kept premoves in order, rerolls as `reroll` actions, and a
+   reroll for anything that last fold dropped after the kept entries. The queue
+   clears and premove mode turns off.
+8. *The UI.* `session.premove` (`src/ui/usePremove.ts`) feeds a bar in the dock
+   strip (`src/ui/PremoveBar.tsx`). When premoving is available the bar shows a
+   Premove toggle. In premove mode it shows "Premoving your next turn · N queued ·
+   Watch live · Clear", the table shows the branch, and presses queue premoves.
+   End turn and prompt answers do nothing there. After a forced rollback it shows
+   "A premove was undone — the turn changed it", which never names a card.
+
+**Why the reroll removes the scouting leak.** The cursor moves past every position
+any preview of the dropped premoves consumed, and every library they revealed is
+reshuffled at a position nobody has seen. So nothing the player was shown predicts
+what they draw, discover or roll next. The reroll is an ordinary intent, so every
+browser applies the identical shuffle, and a replay reproduces it (B119).
+`test/premove.test.ts` pins both sides: with the reroll, the same premoved draw (and
+the same Discover) shows different cards; without the reroll entry, it shows
+exactly the cards the dropped preview showed.
+
+**Randomized paths checked.**
+- Draws and reshuffles (`core/zones.ts` `drawOne`, `reshuffleGyIntoLibrary`,
+  `shuffleLibrary`, `shuffleZone`, random insert positions): covered through
+  library changes and `skipTo`.
+- Reveals and peeks (`reveal` logs library iids, `selectCards` prompts list them):
+  covered through the log and pending-prompt scan.
+- `random`, `discover`, pool `createCard`/`gainCard`/`transform`, random targets
+  and random opponents, random Buff stats (`effects/opkit.ts` `takeRng` callers,
+  `core/play.ts`): covered by `skipTo`.
+- Anomaly start-of-turn rolls (`meta/index.ts`) run inside the advance, before any
+  premove, so they are part of the branch and not a premove.
+- Shop sampling (`core/setup.ts`, `shop/build.ts`) happens only at deal time.
+- Lead's price (`shop/dynamic.ts`) is derived from `seed + turn`, not the cursor,
+  so a reroll cannot change it. A premove shows your next turn's price one turn
+  early. Nothing any player does changes that price, and it is public the moment
+  your turn starts, so this was accepted rather than reworked.
+
+**Out of scope.** Hidden information is already waived at the network layer
+(SB-65): every browser holds every library in order. This protects the honest UI
+path, not devtools. Three more things are accepted:
+- What the branch shows before any premove, such as a start-of-turn draw on your
+  next turn, is shown early but never re-rolled, because no premove was undone.
+- A kept premove that reads the rng resolves at the real cursor on your turn. If
+  the active player consumed randomness in the meantime, that outcome differs from
+  the preview. That is not a leak, because the cursor only moves forward.
+- Hypothetical turns of the seats between the active player and you are played as
+  "end turn at once".
+
+**The trade-off.** A reshuffle discards any deliberate top-of-library placement
+(a card you put on top, a sorted library). That happens only after a rollback, and
+only to the libraries the dropped premoves revealed.
+
+Code: `src/net/premove.ts` (fold, tracker, rollback, submission),
+`src/engine/core/reroll.ts`, `src/ui/usePremove.ts`, `src/ui/PremoveBar.tsx`, and the
+marked `---- premove ----` blocks in `src/engine/types.ts`, `src/engine/index.ts`,
+`src/net/lockstep.ts`, `src/ui/useGame.ts`, `src/ui/App.tsx` and
+`src/ui/logtext.ts`. Tests: `test/premove.test.ts`,
+`test/ui-testid-contract.test.ts`, `e2e/premove.spec.ts`.

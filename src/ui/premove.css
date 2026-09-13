@@ -1,0 +1,86 @@
+/*
+ * The premove bar (SB-68). Imported by PremoveBar.tsx, so it lands before the
+ * global sheets: every rule here that overrides one of theirs is scoped with two
+ * classes or an attribute.
+ *
+ * Everything sits inside `.dock-strip`, a one-row flex box that scrolls
+ * sideways, so nothing here may add height to the dock (SB-63).
+ */
+
+.dock-strip .premove-bar {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--accent-2, #f0c674);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-2, #f0c674) 12%, transparent);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.dock-strip .premove-label {
+  color: var(--accent-2, #f0c674);
+  font-weight: 600;
+}
+
+.dock-strip .premove-count {
+  color: var(--ink-dim, #98a1b3);
+}
+
+.dock-strip .premove-count b {
+  color: var(--ink, #e6e9ef);
+}
+
+.dock-strip .premove-btn,
+.dock-strip .premove-toggle {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.dock-strip .premove-toggle:not(:disabled) {
+  border-color: var(--accent-2, #f0c674);
+  color: var(--accent-2, #f0c674);
+}
+
+.dock-strip .premove-undone {
+  flex: 0 0 auto;
+  color: var(--accent-2, #f0c674);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* The table is showing your next turn: say so at the edge, and make the two
+   things premove mode ignores (ending the turn, answering a prompt) look it. */
+.table[data-premove="true"] .dock {
+  box-shadow: inset 0 2px 0 var(--accent-2, #f0c674);
+}
+
+.table[data-premove="true"] .end-turn,
+.table[data-premove="true"] .prompt-actions button,
+.table[data-premove="true"] .prompt-option {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+@media (max-width: 700px) {
+  /* Phones: the bar takes the strip's full width and wraps, so Watch live and
+     Clear are on screen without scrolling the strip sideways. */
+  .dock-strip .premove-bar {
+    flex: 0 0 100%;
+    max-width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+    border-radius: 14px;
+    padding: 6px 8px;
+  }
+
+  .dock-strip .premove-btn,
+  .dock-strip .premove-toggle {
+    min-height: 44px;
+  }
+}

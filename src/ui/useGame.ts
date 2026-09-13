@@ -43,6 +43,8 @@ import { makeStart, startSession, type LockstepSession } from '@net/lockstep';
 import { ensureRegistry } from '@net/bootstrap';
 import { getCodex, getSettings, noteSeenCards, saveSnapshot, setRoomCode } from '@net/storage';
 import { timeoutMove, timerLimitSeconds, turnKey } from './turntimer';
+// ---- premove ----
+import { usePremove, type PremoveSession } from './usePremove';
 
 export type GameMode = 'hotseat' | 'host' | 'join';
 export type GamePhase = 'lobby' | 'playing';
@@ -138,6 +140,9 @@ export interface GameSession {
    * stays up for the round trip. Zero when there is no session.
    */
   pendingIntents: number;
+  // ---- premove ----
+  /** Premoving your next turn during someone else's (SB-68). Rooms only; inert in hotseat. */
+  premove: PremoveSession;
 }
 
 export const DEFAULT_TURN_SECONDS = 90;
@@ -646,6 +651,17 @@ export function useGame(opts: UseGameOptions): GameSession {
     };
   }, [phase, roster, mode, seatId, roomCode, playerCount, myName, missedByDeal]);
 
+  // ---- premove ---- SB-68: fold the queue on every predicted state; send it on your turn.
+  const submitPremoves = React.useCallback(
+    (actions: GameAction[]) => {
+      const s = sessionRef.current;
+      if (s && actions.length > 0) s.sendMany(seatId, actions);
+    },
+    [seatId],
+  );
+  const premove = usePremove({ networked: mode !== 'hotseat', state, me: myPid, submit: submitPremoves });
+  // ---- end premove ----
+
   const status: GameSession['status'] = error ? 'error' : currentView ? 'playing' : 'connecting';
 
   return {
@@ -671,6 +687,8 @@ export function useGame(opts: UseGameOptions): GameSession {
     seatToMove,
     desynced: core ? core.desynced() : false,
     pendingIntents: core ? core.pendingCount() : 0,
+    // ---- premove ----
+    premove,
   };
 }
 
