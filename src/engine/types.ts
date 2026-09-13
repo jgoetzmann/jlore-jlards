@@ -851,6 +851,8 @@ export type GameAction =
   | { type: 'play'; player: PlayerId; iid: InstanceId }
   | { type: 'buy'; player: PlayerId; pileId: PileId }
   | { type: 'activateAura'; player: PlayerId; auraId: AuraId }
+  // ---- premove ---- SB-68: re-roll what a rolled-back premove preview revealed.
+  | { type: 'reroll'; player: PlayerId; libraries: PlayerId[]; skipTo: number }
   | { type: 'reorderHand'; player: PlayerId; hand: InstanceId[] }
   | { type: 'endTurn'; player: PlayerId }
   | { type: 'resolve'; player: PlayerId; promptId: string; keys: string[] }
