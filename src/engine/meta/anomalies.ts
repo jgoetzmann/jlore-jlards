@@ -239,10 +239,29 @@ function scalePiles(state: GameState, scale: number): GameState {
   return next;
 }
 
+// ---- fix:draft ---- one price scale for the dealt piles, the drafted piles and the draft's option faces
+export interface ShopPriceScale {
+  factor: number;
+  round: 'up' | 'down';
+}
+
+/** The price scale an anomaly puts on every shop pile at setup (B84), or null. */
+export function shopPriceScale(anomaly: string | null): ShopPriceScale | null {
+  if (anomaly === 'dynamic_pricing') return { factor: 2, round: 'up' };
+  if (anomaly === 'fading_blossom') return { factor: 0.5, round: 'down' };
+  return null;
+}
+
+/** `base` under `scale`, never below 0. */
+export function scaleShopCost(base: number, scale: ShopPriceScale): number {
+  const scaled = base * scale.factor;
+  return Math.max(0, scale.round === 'up' ? Math.ceil(scaled) : Math.floor(scaled));
+}
+// ---- /fix:draft ----
+
 function scaleShopCosts(
   state: GameState,
-  factor: number,
-  round: 'up' | 'down',
+  scale: ShopPriceScale,
   /** ---- draft ---- only these piles (the drafted ones); absent means every pile. */
   onlyPiles?: readonly string[],
 ): GameState {
@@ -257,8 +276,7 @@ function scaleShopCosts(
     } catch {
       base = pile.costOverride ?? 0;
     }
-    const scaled = base * factor;
-    pile.costOverride = Math.max(0, round === 'up' ? Math.ceil(scaled) : Math.floor(scaled));
+    pile.costOverride = scaleShopCost(base, scale);
   }
   return next;
 }
@@ -346,9 +364,9 @@ export function applyAnomalySetup(state: GameState, anomalyId: AnomalyId, rng: R
     next = { ...next, config: { ...next.config, turnSeconds: next.config.turnSeconds / 2.5 } };
     next = pushLog(next, 'timeFlail', { turnSeconds: next.config.turnSeconds });
   }
-  if (id === 'dynamic_pricing') next = scaleShopCosts(next, 2, 'up');
+  if (id === 'dynamic_pricing') next = scaleShopCosts(next, shopPriceScale(id)!);
   if (id === 'fading_blossom') {
-    next = scaleShopCosts(next, 0.5, 'down');
+    next = scaleShopCosts(next, shopPriceScale(id)!);
     next = grantFlimsyToAll(next);
     next = setTurnModifiers(next, { buys: 5 });
   }
@@ -406,9 +424,9 @@ export function applyAnomalyToDraftedPiles(state: GameState, pileIds: readonly s
   const id = state.anomaly;
   if (id === null || pileIds.length === 0) return state;
   let next = state;
-  if (id === 'dynamic_pricing') next = scaleShopCosts(next, 2, 'up', pileIds);
+  if (id === 'dynamic_pricing') next = scaleShopCosts(next, shopPriceScale(id)!, pileIds);
   if (id === 'fading_blossom') {
-    next = scaleShopCosts(next, 0.5, 'down', pileIds);
+    next = scaleShopCosts(next, shopPriceScale(id)!, pileIds);
     next = cloneState(next);
     for (const pid of pileIds) {
       for (const iid of next.shop.piles[pid]?.cards ?? []) {

@@ -38,6 +38,7 @@ import { effectiveKeywords, effectiveStats } from '@engine/systems';
 import { safeDef, topOfPile } from './core/zones.js';
 import { getAura, hasAura } from './registry.js';
 import { draftViewFor } from './core/draft.js'; // ---- draft ----
+import { dynamicPriceFor } from './shop/dynamic.js'; // ---- fix:draft ----
 
 const MAX_LOG_ENTRIES = 250;
 const INTERNAL_COUNTER_PREFIXES = ['trg:', 'podChain'];
@@ -156,6 +157,28 @@ function baseCostOf(state: GameState, def: CardDefinition): number | null {
   const variant = state.variants[def.id];
   return def.cost.money + (variant?.costDelta ?? 0);
 }
+
+// ---- fix:draft ----
+/**
+ * One Draft option as a face. A bare defId has no instance, so what the
+ * anomalies bake onto instances and piles has to be applied here: the price the
+ * drafted pile will have (Dynamic Pricing, Fading Blossom, the same scale
+ * `applyAnomalyToDraftedPiles` puts on it) and MEOW MEOW MEOW's text (B89).
+ */
+function draftFace(state: GameState, defId: string, key: string, viewer: PlayerId): CardView {
+  const face: CardView = { ...cardView(state, defId, viewer), iid: key };
+  const scale = Meta.shopPriceScale(state.anomaly);
+  if (scale && typeof face.cost === 'number') {
+    // The pile's price is fixed when it is built, from `costOf` with the first
+    // seat as the buyer (scaleShopCosts): a live price such as Lead's comes first.
+    const dynamic = dynamicPriceFor(state, defId, state.playerOrder[0] ?? viewer);
+    const base = dynamic === null ? face.cost : dynamic + (state.variants[defId]?.costDelta ?? 0);
+    face.cost = Meta.scaleShopCost(base, scale);
+  }
+  if (Meta.isMeowActive(state) && face.text !== '') face.text = Meta.meowify(face.text);
+  return face;
+}
+// ---- /fix:draft ----
 
 export function cardView(
   state: GameState,
@@ -470,6 +493,6 @@ export function viewFor(state: GameState, playerId: PlayerId): GameView {
     doomsdayCounter: state.doomsdayCounter,
     hardEndTurn: state.hardEndTurn,
     // ---- draft ---- your slots only, as printed faces; no instance ids (B111)
-    draft: draftViewFor(state, playerId, (defId, key) => ({ ...cardView(state, defId, playerId), iid: key })),
+    draft: draftViewFor(state, playerId, (defId, key) => draftFace(state, defId, key, playerId)),
   };
 }

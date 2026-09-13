@@ -92,6 +92,26 @@ test.describe('The Draft', () => {
 test.describe('The Draft at phone width', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
+  test('the lobby starts the THE DRAFT line with its checkbox beside it (MOB-5)', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('create-room').click();
+    await expect(page.getByTestId('lobby')).toBeVisible({ timeout: 30_000 });
+
+    const first = await page.locator('.lobby-settings .lobby-caps-label').first().boundingBox();
+    const label = await page.locator('.lobby-draft-label').boundingBox();
+    const box = await page.getByTestId('lobby-draft').boundingBox();
+    expect(first && label && box).toBeTruthy();
+    // The heading starts its own line, level with the row's first heading...
+    expect(Math.abs(label!.x - first!.x)).toBeLessThanOrEqual(2);
+    expect(label!.y).toBeGreaterThan(first!.y + first!.height / 2);
+    // ...and its checkbox sits beside it on that line, not on the next one.
+    expect(box!.x).toBeGreaterThan(label!.x + label!.width);
+    expect(Math.abs(box!.y + box!.height / 2 - (label!.y + label!.height / 2))).toBeLessThanOrEqual(12);
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - 390);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
   test('the pick panel fits a 390px screen and a pick works by tapping', async ({ page }) => {
     await openDraftRoom(page);
     const panel = page.getByTestId('draft-panel');

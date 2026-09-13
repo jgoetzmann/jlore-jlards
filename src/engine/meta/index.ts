@@ -95,6 +95,8 @@ export {
   getAnomaly,
   randomUniverseCards,
   rollableAnomalyIds,
+  scaleShopCost, // ---- fix:draft ----
+  shopPriceScale, // ---- fix:draft ----
 } from './anomalies.js';
 export type { AnomalyDef, AnomalyGroup } from './anomalies.js';
 

@@ -1533,3 +1533,91 @@ premove store in `src/net/storage.ts`, and the marked `---- premove ----` and
 `src/net/lockstep.ts`, `src/ui/useGame.ts`, `src/ui/App.tsx` and
 `src/ui/logtext.ts`. Tests: `test/premove.test.ts`,
 `test/ui-testid-contract.test.ts`, `e2e/premove.spec.ts`.
+
+### SB-69. The Draft
+
+**The question.** The owner asked for a lobby option in which "the Draft Shop and
+Prophet Shop are filled by player choice before the game starts instead of being
+populated normally", with every Draft Shop slot a choice of 4 cards and every
+Prophet Shop slot a choice of 2, all players drafting at once "from one shared
+pool", and "every card shown to every player across every selection is
+distinct". Nothing recorded the rulings the build made to get there, or how a
+draft ends when somebody stops picking.
+
+**The ruling.**
+
+1. *Pools.* "One shared pool" is the catalog partitioned by shop eligibility,
+   because a Prophet Shop slot has to hold a Prophet Shop card. Draft Shop slots
+   are dealt from `draftCandidates(state)`, Prophet Shop slots from
+   `prophetCandidates(state)` (which keeps the SB-28 exclusions). The two sets are
+   disjoint. Both are shuffled once with the seeded rng and dealt front to back
+   without replacement (`dealDraft`, from `createMatch` after the anomaly setup), so
+   no card is shown twice and nothing needs deduping.
+2. *A small pool shrinks the choices.* The owner's rule: "if the pool is too small
+   just dont allow them options like for example if there are 18 cards and 10
+   slots do 2 sets of 4 then 1 set of 3 then 7 sets of chosen". Each slot takes
+   `min(setSize, cardsLeft - slotsLeftAfterIt)` cards, never fewer than 1 while
+   any remain, so 18 cards over 10 slots of 4 is 4, 4, 3 and seven 1-card sets. A
+   1-card set is not a choice and is picked at the deal. A slot past the last card
+   gets none and makes no pile. The sizing walks the slots round-robin by seat, so
+   every seat's choices shrink evenly, not the last player's.
+3. *Slots.* Divided as evenly as possible, with the leftovers going one each to
+   players in seating order (3 players: Draft 10 is 4, 3, 3). Each player's slots
+   are stored together, Draft Shop slots before Prophet Shop slots.
+4. *Picks, and the gate.* `draftPick` comes from anyone, in any order: everyone
+   drafts at once. `reduce` checks, in this order: the game has ended; `draftPick`
+   and `concede` (both exempt from what follows); anything else while
+   `state.draft` is set is refused with `drafting`; the pending-prompt gate; B20.
+   The pick stays out of the log until the shops are built, and `viewFor` shows a
+   player only their own slots (as `draft_<slot>_<i>` faces, no instance ids).
+5. *The shops.* When no slot is left to choose, the picks become the Prophet and
+   Draft piles in slot order, through the same pile construction the sampled shops
+   use (`addSampledPiles`), and `draft` goes back to null.
+6. *Anomalies.* Accelerated and Prolonged already set `pileSizeScale`, which the
+   drafted piles are sized with. Dynamic Pricing, Fading Blossom (prices, Flimsy)
+   and MEOW MEOW MEOW are applied to the drafted piles when they are built
+   (`applyAnomalyToDraftedPiles`). The option faces show what the pile will be:
+   the scaled price (`shopPriceScale`/`scaleShopCost`, the same helper the piles
+   use) and meowified text.
+7. *The clock, and the way out.* The SB-67 turn clock is off while a draft runs
+   and starts when turn play does. The start of turn play gets its own banner
+   sweep, even though the turn number and the seat have not changed.
+   - *Idle deadline.* When the match has a timer (`turnSeconds > 0`), each browser
+     keeps one idle deadline for the seats it controls (`draftIdleKey`,
+     `draftTimeoutMove` in `src/ui/turntimer.ts`). It restarts whenever one of
+     those seats' next open slot changes. When `turnSeconds` pass with no such
+     change, the first such seat, in seating order, has that slot picked with
+     `options[0]`. That is an ordinary `draftPick`, sent once per slot, and the
+     deadline then restarts. In hotseat one browser controls every seat, so one
+     seat's pick restarts the deadline for all of them. No countdown is shown
+     during the draft.
+   - *Concede.* A player who concedes during a draft is eliminated and has their
+     open slots picked with `options[0]` (`applyDraftConcede`). If that leaves
+     nothing to choose, the shops are built as usual. If the concession ends the
+     game, every remaining open slot is picked the same way so the finished table
+     has its shops. If the conceder was the active player, the turn passes as it
+     does for any concession.
+   - *A closed tab with no timer* still stalls the draft, exactly as it stalls a
+     normal turn (SB-67): nobody else may act for that seat. A rejoin replays the
+     room, so the player can come back and finish picking.
+8. *The host's resume snapshot* is replaced once per turn and once more when the
+   draft completes (`snapshotKey`), so a crash after the draft does not resume into
+   a mid-draft table.
+
+**Recorded decisions.**
+- *Offers are an even shuffle, not rarity-weighted (DRAFT-1).* The sampled Draft
+  Shop weights its pull by rarity (`sampleDraftDefs`). The Draft deals from an even
+  shuffle, so what players are offered follows the catalog's rarity mix. The
+  owner's text asks only that every candidate be drawn up front without
+  replacement, and players pick from the offer anyway.
+- *Prophet choices are not banded by threshold (DRAFT-M1).* A sampled Prophet Shop
+  takes one pile per threshold band (SB-14). SB-14's spread does not apply to a
+  drafted Prophet Shop: players choose freely from pairs, so all its piles may sit
+  at low or high thresholds.
+
+Code: `src/engine/core/draft.ts`, the marked `---- draft ----` blocks in
+`src/engine/index.ts`, `src/engine/core/setup.ts`, `src/engine/shop/build.ts`,
+`src/engine/meta/anomalies.ts` and `src/engine/view.ts`, `src/ui/DraftPanel.tsx`,
+`src/ui/draft.css`, `src/ui/turntimer.ts`, `src/ui/useGame.ts`, `src/ui/Lobby.tsx`,
+`src/ui/Opponents.tsx`, `src/net/host.ts`. Tests: `test/draft.test.ts`,
+`test/draft-followups.test.ts`, `e2e/draft.spec.ts`.

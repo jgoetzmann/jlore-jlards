@@ -357,6 +357,7 @@ const Seat = React.memo(function Seat({
   lastTone,
   expanded,
   onToggle,
+  draftBadge = null, // ---- fix:draft ----
 }: {
   o: OpponentView;
   /**
@@ -374,6 +375,8 @@ const Seat = React.memo(function Seat({
   lastTone: string | null;
   expanded: boolean;
   onToggle: (id: string) => void;
+  // ---- fix:draft ---- while a draft runs: still picking, or finished. Null in turn play.
+  draftBadge?: 'drafting' | 'done' | null;
 }): JSX.Element {
   const hue = hueOf(o.name || o.id);
 
@@ -442,6 +445,12 @@ const Seat = React.memo(function Seat({
             <span className={`${isYou ? 'seat-turn-self' : 'opponent-turn'} seat-badge`}>
               <span className="seat-pip" aria-hidden="true" />
               to move
+            </span>
+          )}
+          {/* ---- fix:draft ---- */}
+          {draftBadge && (
+            <span className={`seat-badge seat-badge-${draftBadge}`} data-draft={draftBadge}>
+              {draftBadge}
             </span>
           )}
           {deciding && <span className="seat-badge seat-badge-deciding">deciding…</span>}
@@ -597,6 +606,11 @@ export function Opponents({ view }: { view: GameView }): JSX.Element {
   );
   const selfLast = beatsFor(view.log, self.id, names, 1)[0] ?? null;
   const yourPrompt = pending !== null && 'player' in pending && pending.player === you.id;
+  // ---- fix:draft ---- while drafting nobody is "to move": each seat is still drafting, or done
+  const draft = view.draft;
+  const drafting = draft !== null && draft !== undefined;
+  const draftBadgeOf = (id: string): 'drafting' | 'done' | null =>
+    drafting ? ((draft.remaining[id] ?? 0) > 0 ? 'drafting' : 'done') : null;
 
   return (
     <div className="opponents" data-testid="opponents">
@@ -608,7 +622,8 @@ export function Opponents({ view }: { view: GameView }): JSX.Element {
           key={self.id}
           o={self}
           isYou
-          active={view.activePlayer === self.id}
+          active={!drafting && view.activePlayer === self.id}
+          draftBadge={draftBadgeOf(self.id)}
           deciding={yourPrompt}
           won={view.ended && winners.includes(self.id)}
           lastText={selfLast ? beatText(selfLast) : null}
@@ -622,7 +637,8 @@ export function Opponents({ view }: { view: GameView }): JSX.Element {
             <Seat
               key={o.id}
               o={o}
-              active={view.activePlayer === o.id}
+              active={!drafting && view.activePlayer === o.id}
+              draftBadge={draftBadgeOf(o.id)}
               deciding={waitingOn === o.id}
               won={view.ended && winners.includes(o.id)}
               lastText={last ? beatText(last) : null}

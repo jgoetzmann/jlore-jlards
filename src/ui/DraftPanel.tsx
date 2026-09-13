@@ -122,7 +122,7 @@ export function DraftPanel({
               <h3 className="prompt-title" data-testid="draft-title">
                 {draftSlotTitle(draft, slot)}
               </h3>
-              <div className="prompt-meta">Click one to choose · it joins the shop everyone buys from</div>
+              <div className="prompt-meta">Pick one · it joins the shop everyone buys from</div>
               <div className="prompt-options">
                 {slot.options.map((face, i) => {
                   const hint = digitLabel(i);

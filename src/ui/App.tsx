@@ -322,6 +322,22 @@ export interface TableLayoutProps {
   premove?: PremoveBarProps | null;
 }
 
+// ---- fix:draft ----
+/** A real turn change: the turn, the seat, game over, and whether the Draft still runs (MERGE-4). */
+export function turnBannerKey(view: Pick<GameView, 'turn' | 'activePlayer' | 'ended' | 'draft'>): string {
+  return `${view.turn}:${view.activePlayer}:${view.ended ? 1 : 0}:${view.draft ? 'd' : ''}`;
+}
+
+/**
+ * The banner's one-shot trigger. While a premove branch shows it holds the last
+ * real key, so leaving premove sweeps only if the real turn moved meanwhile
+ * (MERGE-3). Null until a real key has been seen.
+ */
+export function turnBannerTrigger(realKey: string, suppress: boolean, lastReal: string | null): string | null {
+  return suppress ? lastReal : realKey;
+}
+// ---- /fix:draft ----
+
 /**
  * The one moment worth a beat: a turn change replaces the whole board at once.
  * Always in the DOM, invisible, `pointer-events: none`; a turn change runs one
@@ -344,8 +360,13 @@ function TurnBanner({
   const who = names[view.activePlayer] ?? view.activePlayer;
   // In hotseat every seat is "you"; the name is what tells the table whose go it is.
   const label = view.ended ? 'Game over' : yours && mode !== 'hotseat' ? 'Your turn' : `${who}’s turn`;
+  // ---- fix:draft ---- the last real key survives a premove branch (MERGE-3)
+  const lastRealRef = React.useRef<string | null>(null);
+  const realKey = turnBannerKey(view);
+  const trigger = turnBannerTrigger(realKey, suppress, lastRealRef.current);
+  if (!suppress) lastRealRef.current = realKey;
   useOneShot(
-    suppress ? 'premove' : `${view.turn}:${view.activePlayer}:${view.ended ? 1 : 0}`,
+    trigger,
     ref,
     [
       { opacity: 0, transform: 'translateY(10px) scale(0.96)' },
@@ -354,7 +375,7 @@ function TurnBanner({
       { opacity: 0, transform: 'translateY(-8px)' },
     ],
     { duration: MOTION_MS.turn, easing: 'ease-out' },
-    (v) => v !== 'premove',
+    (v) => v !== null,
   );
   return (
     <div ref={ref} className={`turn-banner${yours ? ' turn-banner-yours' : ''}`} data-testid="turn-banner" aria-hidden="true">

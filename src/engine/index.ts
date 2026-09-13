@@ -31,6 +31,7 @@ import { drainQueue, resolvePrompt } from './core/resume.js';
 import { finishGame, noteEndCondition, settleEndedGame } from './core/endgame.js';
 import { computeScores } from './core/scoring.js';
 import { applyDraftPick } from './core/draft.js'; // ---- draft ----
+import { applyDraftConcede } from './core/draft.js'; // ---- fix:draft ----
 // ---- premove ----
 import { applyReroll } from './core/reroll.js';
 
@@ -99,6 +100,10 @@ function dispatch(s: GameState, action: GameAction): GameState {
   // player (everyone drafts at once, so B20 does not apply to them).
   if (action.type === 'draftPick') {
     return applyDraftPick(s, action);
+  }
+  // ---- fix:draft ---- concede is exempt from the gate; the conceder's open slots are auto-picked (SB-69)
+  if (action.type === 'concede' && s.draft) {
+    return applyDraftConcede(s, action.player);
   }
   if (s.draft) {
     return logReject(s, 'drafting', actor, { action: action.type });

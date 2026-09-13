@@ -241,7 +241,8 @@ export function Lobby({
               {timerOn ? `On · ${DEFAULT_TURN_SECONDS}s a turn` : 'Off: no time limit'}
             </span>
           )}
-          {/* ---- draft ---- */}
+          {/* ---- draft ---- one group, so the heading starts its line with the checkbox (MOB-5) */}
+          <span className="lobby-draft-group" data-draft-group="">
           <span className="lobby-caps-label lobby-draft-label">The Draft</span>
           {info.youAreHost && onDraft ? (
             <label className="lobby-draft">
@@ -259,6 +260,7 @@ export function Lobby({
               {draftOn ? 'On: players pick the shops before play' : 'Off: the shops are dealt'}
             </span>
           )}
+          </span>
           {/* ---- /draft ---- */}
         </div>
 

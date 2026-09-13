@@ -194,7 +194,7 @@ export function PromptOverlay({
   }
 
   const meta = oneClick
-    ? 'Click one to choose'
+    ? 'Pick one'
     : ordering
       ? `Click all ${prompt.options.length} in order`
       : min === max

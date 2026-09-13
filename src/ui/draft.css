@@ -22,8 +22,28 @@
   color: var(--ink);
 }
 
-.lobby-draft-label {
+/* The heading and its checkbox are one group, so a wrap never splits them (MOB-5). */
+.lobby-draft-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin-left: 12px;
+}
+
+/* A seat's place in the draft, in the strip's badge style. */
+.seat-badge-drafting,
+.seat-badge-done {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seat-badge-drafting {
+  color: var(--accent-2);
+}
+
+.seat-badge-done {
+  color: var(--ink-dim);
 }
 
 .lobby-draft {
@@ -56,7 +76,9 @@
     width: min(156px, calc((100vw - 76px) / 2));
   }
 
-  .lobby-draft-label {
+  /* The heading starts its own line, with its checkbox beside it (MOB-5). */
+  .lobby-draft-group {
+    flex-basis: 100%;
     margin-left: 0;
   }
 
