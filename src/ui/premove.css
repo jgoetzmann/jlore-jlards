@@ -68,6 +68,17 @@
 }
 
 @media (max-width: 700px) {
+  /* Phones: the bar takes the strip's full width and wraps, so Watch live and
+     Clear are on screen without scrolling the strip sideways. */
+  .dock-strip .premove-bar {
+    flex: 0 0 100%;
+    max-width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+    border-radius: 14px;
+    padding: 6px 8px;
+  }
+
   .dock-strip .premove-btn,
   .dock-strip .premove-toggle {
     min-height: 44px;
