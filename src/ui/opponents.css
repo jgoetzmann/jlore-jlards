@@ -35,12 +35,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.seat-none {
-  color: var(--ink-dim);
-  font-size: 12px;
-  padding: 6px 2px;
-}
-
 /* ------------------------------------------------------------------- seat */
 
 .opponent.seat {
@@ -66,9 +60,17 @@
   opacity: 0.45;
 }
 
+/* Whoever is to move sits at the left edge of the strip. `order`, never the DOM,
+   so the specs' `getByTestId('opponent').first()` keeps meaning the same seat. */
 .opponent.seat.seat-active {
+  order: -1;
   border-color: var(--accent);
   background: linear-gradient(180deg, rgba(127, 212, 160, 0.07), transparent 52px), var(--panel);
+}
+
+/* Your own tile: the same numbers as everyone's, marked as yours. */
+.opponent.seat.seat-you {
+  box-shadow: inset 3px 0 0 hsl(var(--seat-hue) 55% 55%);
 }
 
 .opponent.seat.seat-active::before {
@@ -142,7 +144,8 @@
   min-height: 13px;
 }
 
-.opponent.seat .opponent-turn.seat-badge {
+.opponent.seat .opponent-turn.seat-badge,
+.opponent.seat .seat-turn-self.seat-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -172,6 +175,13 @@
   text-transform: uppercase;
   color: var(--accent-2);
   font-weight: 700;
+}
+
+.seat-badge-you {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--seat-hue) 70% 72%);
 }
 
 .seat-waiting {

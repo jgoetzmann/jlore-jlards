@@ -42,6 +42,7 @@ import { startLobbyHost, type LobbyHostHandle } from '@net/host';
 import { makeStart, startSession, type LockstepSession } from '@net/lockstep';
 import { ensureRegistry } from '@net/bootstrap';
 import { getCodex, getSettings, noteSeenCards, saveSnapshot, setRoomCode } from '@net/storage';
+import { timeoutMove, timerLimitSeconds, turnKey } from './turntimer';
 
 export type GameMode = 'hotseat' | 'host' | 'join';
 export type GamePhase = 'lobby' | 'playing';
@@ -78,6 +79,8 @@ export interface LobbyInfo {
   missed: boolean;
   /** People asking for a seat the room has no room for. */
   knocking: number;
+  /** Whether the match will be dealt with a turn timer. Absent means yes. */
+  timerOn?: boolean;
 }
 
 export interface GameSession {
@@ -106,6 +109,14 @@ export interface GameSession {
   startMatch: () => void;
   /** Host only: change how many seats the room holds. */
   setSeatCap: (cap: number) => void;
+  /** Host only: deal the match with a turn timer, or without one. */
+  setTimerOn: (on: boolean) => void;
+  /**
+   * When the current turn runs out (epoch ms), or null when there is no timer.
+   * At that moment this browser answers its own open prompt with the prompt's
+   * default and, if it controls the active seat, ends the turn (SB-67).
+   */
+  turnEndsAt: number | null;
   /** Hotseat: the seat that has to act now (a prompt's owner, else the active player). */
   seatToMove: string | null;
   /** This browser's state disagreed with the host's and is being repaired. */
@@ -428,7 +439,12 @@ export function useGame(opts: UseGameOptions): GameSession {
       const names = disambiguate(handoff.names);
       const start = makeStart({
         seats: handoff.seats,
-        config: defaultConfig(n, configRef.current),
+        // The lobby's timer choice is frozen into the handoff with the roster,
+        // so what gets dealt is what the room was shown.
+        config: defaultConfig(n, {
+          ...(configRef.current ?? {}),
+          ...(handoff.timerOn === false ? { turnSeconds: 0 } : {}),
+        }),
         seed: seedRef.current,
         players: makePlayers(n, getCodex(), myName, names, handoff.codexes),
       });
@@ -448,6 +464,10 @@ export function useGame(opts: UseGameOptions): GameSession {
 
   const setSeatCap = React.useCallback((cap: number) => {
     if (lobbyHostRef.current) lobbyHostRef.current.setSeatCap(clampSeatCap(cap));
+  }, []);
+
+  const setTimerOn = React.useCallback((on: boolean) => {
+    if (lobbyHostRef.current) lobbyHostRef.current.setTimerOn(on);
   }, []);
 
   // ---- derive everything from the session's predicted state ----
@@ -519,6 +539,50 @@ export function useGame(opts: UseGameOptions): GameSession {
     whenIdle(() => harvestCodex(currentView));
   }, [currentView]);
 
+  // ---- the turn timer (SB-67) ----
+  // The deadline is this browser's own: it starts when this browser sees the
+  // turn begin. When it passes, the same actions a player would send go out —
+  // the open prompt's default first, then End turn from the active seat — so a
+  // player who has stepped away no longer holds up the whole table. Only the
+  // browser that controls a seat acts for it; the engine refuses anyone else.
+  const timerLimit = state && !state.ended ? timerLimitSeconds(state.config.turnSeconds) : 0;
+  const currentTurn = state ? turnKey(state) : null;
+  const [deadline, setDeadline] = React.useState<{ turn: string; endsAt: number } | null>(null);
+  const [expired, setExpired] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (currentTurn === null || timerLimit <= 0) {
+      setDeadline(null);
+      return;
+    }
+    const ms = timerLimit * 1000;
+    setDeadline({ turn: currentTurn, endsAt: Date.now() + ms });
+    const t = setTimeout(() => setExpired(currentTurn), ms);
+    return () => clearTimeout(t);
+  }, [currentTurn, timerLimit]);
+
+  const timedOutRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (expired === null || expired !== currentTurn) return;
+    const s = sessionRef.current;
+    const st = stateRef.current;
+    if (!s || !st) return;
+    const move = timeoutMove(
+      st,
+      (pid) => {
+        const seat = s.core.seatOf(pid);
+        return Boolean(seat) && (mode === 'hotseat' || seat === seatId);
+      },
+      timedOutRef.current,
+    );
+    if (!move) return;
+    timedOutRef.current.add(move.key);
+    const seat = s.core.seatOf(move.player);
+    if (seat) s.send(seat, move.action);
+  }, [expired, currentTurn, state, mode, seatId]);
+
+  const turnEndsAt =
+    deadline !== null && deadline.turn === currentTurn && timerLimit > 0 ? deadline.endsAt : null;
+
   const started = core ? core.started() : false;
   const bound = mode === 'hotseat' ? started : myPid !== null;
   const phase: GamePhase = mode === 'hotseat' ? 'playing' : lobbyOpen || !bound ? 'lobby' : 'playing';
@@ -540,6 +604,7 @@ export function useGame(opts: UseGameOptions): GameSession {
         full: false,
         missed: missedByDeal,
         knocking: 0,
+        timerOn: true,
       };
     }
     const display = disambiguate(roster.members.map((m) => m.name));
@@ -559,6 +624,7 @@ export function useGame(opts: UseGameOptions): GameSession {
       full: !seated && members.length >= roster.seatCap,
       missed: (roster.started && !roster.seats.includes(seatId)) || missedByDeal,
       knocking: typeof roster.knocking === 'number' ? roster.knocking : 0,
+      timerOn: roster.timerOn !== false,
     };
   }, [phase, roster, mode, seatId, roomCode, playerCount, myName, missedByDeal]);
 
@@ -581,6 +647,8 @@ export function useGame(opts: UseGameOptions): GameSession {
     lobby,
     startMatch,
     setSeatCap,
+    setTimerOn,
+    turnEndsAt,
     seatToMove,
     desynced: core ? core.desynced() : false,
     pendingIntents: core ? core.pendingCount() : 0,

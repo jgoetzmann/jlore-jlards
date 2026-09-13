@@ -133,6 +133,12 @@ h3 {
   color: var(--ink-dim);
 }
 
+/* A checkbox row: its label is longer than the field column, so it takes its
+   natural width rather than wrapping. */
+.start-field.start-check > span {
+  width: auto;
+}
+
 .start-actions {
   display: flex;
   gap: 10px;
@@ -357,10 +363,46 @@ h3 {
   text-overflow: ellipsis;
 }
 
+/* The chip only opens the rule; it never grows. Wrapping in place took the
+   topbar from 44px to 57px on the longest anomaly and broke SB-63's budget. */
+.anomaly-chip {
+  cursor: pointer;
+}
+
+.anomaly-chip:hover,
 .anomaly-chip.anomaly-open {
-  white-space: normal;
-  max-width: min(560px, 100%);
-  border-radius: 10px;
+  border-color: #8a63b8;
+}
+
+.anomaly-more {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: #cdb4f0;
+}
+
+.anomaly-panel-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.anomaly-panel-name {
+  color: var(--vp);
+}
+
+.anomaly-panel-text {
+  margin: 4px 0 8px;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.anomaly-panel-note {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--ink-dim);
 }
 
 .topbar-spacer {
@@ -453,8 +495,11 @@ h3 {
 }
 
 .opponent.seat.seat-strip {
-  flex: 0 1 340px;
-  min-width: 240px;
+  /* Every player has a tile now, you included. Four must fit the strip at
+     1280px even with the log drawer open: 4 x 190px plus gaps is under 936px. */
+  flex: 1 1 240px;
+  min-width: 190px;
+  max-width: 380px;
   flex-direction: row;
   align-items: center;
   gap: 8px;

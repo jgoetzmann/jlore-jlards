@@ -10,27 +10,23 @@
  * Every `stat-*` test id exists exactly once on the table; nothing else may
  * render a `Stat`.
  *
- * SB-36: Time Flail divides `config.turnSeconds`. It is a timer modifier and
- * nothing else — no rule and no engine behavior changes, and the timer running
- * out does not end the turn on its own.
+ * SB-36: Time Flail divides `config.turnSeconds` once, in the engine at setup.
+ * The clock shows that number as it stands and must not divide it again: it
+ * used to, and a 36s Time Flail turn read 14s. SB-67: when the clock runs out
+ * the turn passes. `useGame` does that, from the browser that controls the
+ * seat; the clock itself only shows the time. `turnSeconds` 0 means no timer.
  */
 
 import React from 'react';
 import type { GameAction, GameView, PlayerId } from '@engine/types';
 import { useOneShot, usePulse } from './useMotion';
+import { timerLimitSeconds } from './turntimer';
 
-export const TIME_FLAIL_DIVISOR = 2.5;
 export const DEFAULT_TURN_SECONDS = 90;
 
 export function isTimeFlail(anomaly: GameView['anomaly']): boolean {
   if (!anomaly) return false;
   return anomaly.id === 'time_flail' || /time\s*flail/i.test(anomaly.name ?? '');
-}
-
-/** The only thing Time Flail touches. */
-export function effectiveTurnSeconds(base: number, anomaly: GameView['anomaly']): number {
-  const seconds = base > 0 ? base : DEFAULT_TURN_SECONDS;
-  return isTimeFlail(anomaly) ? Math.max(5, Math.round(seconds / TIME_FLAIL_DIVISOR)) : seconds;
 }
 
 export function formatClock(seconds: number): string {
@@ -47,24 +43,46 @@ export function formatClock(seconds: number): string {
 export function TurnClock({
   view,
   turnSeconds = DEFAULT_TURN_SECONDS,
+  endsAt,
 }: {
   view: GameView;
   turnSeconds?: number;
+  /**
+   * When this turn runs out (epoch ms), from the session, so the countdown and
+   * the moment the turn passes agree. Absent, the clock counts down on its
+   * own: the fixtures and the unit tests have no session.
+   */
+  endsAt?: number | null;
 }): JSX.Element {
-  const limit = effectiveTurnSeconds(turnSeconds, view.anomaly);
+  const limit = view.ended ? 0 : timerLimitSeconds(turnSeconds);
   const [remaining, setRemaining] = React.useState(limit);
 
-  // Restart the clock whenever the turn or the active seat changes. The tick is
-  // local to this component so it never re-renders the rest of the table.
+  // Restart whenever the turn, the active seat or the deadline changes. The tick
+  // is local to this component so it never re-renders the rest of the table,
+  // and it stops at 0:00 rather than ticking a no-op for the rest of the turn.
   React.useEffect(() => {
-    setRemaining(limit);
-    const id = setInterval(() => {
-      setRemaining((r) => (r <= 0 ? 0 : r - 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [view.turn, view.activePlayer, limit]);
+    if (limit <= 0) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let local = limit;
+    const read = (): number =>
+      endsAt !== undefined && endsAt !== null ? Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)) : local;
+    const tick = (): void => {
+      const left = read();
+      setRemaining(left);
+      if (left <= 0) return;
+      timer = setTimeout(() => {
+        local -= 1;
+        tick();
+      }, 1000);
+    };
+    tick();
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [view.turn, view.activePlayer, limit, endsAt]);
 
   const low = remaining <= 10;
+  const out = limit > 0 && remaining <= 0;
 
   return (
     <div className="turn-clock">
@@ -75,10 +93,16 @@ export function TurnClock({
         </span>
         <span className="round-value">round {view.round}</span>
       </span>
-      <span className={`turn-timer${low ? ' turn-timer-low' : ''}`} title={`${limit}s per turn`}>
-        {formatClock(remaining)}
-        {isTimeFlail(view.anomaly) && <span className="flail-tag">Time Flail</span>}
-      </span>
+      {limit > 0 && (
+        <span
+          className={`turn-timer${low ? ' turn-timer-low' : ''}${out ? ' turn-timer-out' : ''}`}
+          data-testid="turn-timer"
+          title={out ? 'Out of time: the turn passes' : `${limit}s per turn`}
+        >
+          {formatClock(remaining)}
+          {isTimeFlail(view.anomaly) && <span className="flail-tag">Time Flail</span>}
+        </span>
+      )}
       {view.doomsdayCounter > 0 && (
         <span className="doomsday" title="Doomsday counter">
           ☠ {view.doomsdayCounter}
@@ -91,9 +115,23 @@ export function TurnClock({
   );
 }
 
-/** The anomaly as a topbar chip. Click to read the whole rule in place. */
-export function AnomalyChip({ anomaly }: { anomaly: GameView['anomaly'] }): JSX.Element | null {
-  const [open, setOpen] = React.useState(false);
+/**
+ * The anomaly as a topbar chip. The rule is too long for the bar, so the chip is
+ * the trigger: it opens the whole rule in a panel over the board, which costs
+ * the topbar nothing (SB-63). It used to wrap in place, which nobody found and
+ * which grew the topbar 13px on the longest rules. `title` keeps the full text
+ * too: the native tooltip is a second way to read it, and
+ * e2e/interaction.spec.ts reads it to spot Fading Blossom.
+ */
+export function AnomalyChip({
+  anomaly,
+  open = false,
+  onToggle,
+}: {
+  anomaly: GameView['anomaly'];
+  open?: boolean;
+  onToggle?: () => void;
+}): JSX.Element | null {
   if (!anomaly) return null;
   return (
     <button
@@ -101,11 +139,15 @@ export function AnomalyChip({ anomaly }: { anomaly: GameView['anomaly'] }): JSX.
       className={`anomaly-banner anomaly-chip${open ? ' anomaly-open' : ''}`}
       data-testid="anomaly-banner"
       aria-expanded={open}
+      aria-haspopup="dialog"
       title={`${anomaly.name}: ${anomaly.text}`}
-      onClick={() => setOpen((v) => !v)}
+      onClick={onToggle}
     >
       <span className="anomaly-name">{anomaly.name}</span>
       <span className="anomaly-text">{anomaly.text}</span>
+      <span className="anomaly-more" aria-hidden="true">
+        Read ›
+      </span>
     </button>
   );
 }

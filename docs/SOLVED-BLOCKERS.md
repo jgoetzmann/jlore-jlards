@@ -546,6 +546,11 @@ Play-on-Draw within one resolution chain.
 / 2.5`. It touches no rule and no engine behavior. The engine records it; the
 client enforces it.
 
+*Amended by SB-67:* the engine applies the division once, at setup, and the client
+shows `config.turnSeconds` as it stands. It used to divide a second time, so a
+36-second Time Flail turn read 14 seconds. "Enforces" now means the turn passes
+when the clock runs out.
+
 ### SB-37. What happens when the Library and GY are both empty and a card says draw
 
 **Resolved:** draw as many as possible, then stop. No penalty, no fizzle of the
@@ -1291,3 +1296,46 @@ Code: `src/net/lockstep.ts` (`LockstepCore`, `startSession`, `makeStart`,
 `makeRelay().stream`), `src/relay/roomHandler.ts` (`streamRoom`),
 `src/relay/upstash.ts`. Tests: `test/net-lockstep.test.ts`,
 `test/net-stream.test.ts`, `test/net-host.test.ts` (B111).
+
+### SB-67. The turn timer passes the turn
+
+**The question.** The owner reported that "the time out feature bricks the game
+when someone runs out of time". Measured on the merged branch, the clock never did
+anything at zero: `TurnClock` counted down in local React state and dispatched
+nothing, and no build in this repo's history ever ended a turn on expiry. The
+table was not broken, but a player who had stepped away held the turn forever,
+and a clock sitting at 0:00 reads exactly like a hang.
+
+**The ruling.** When the clock runs out, the turn passes, through the same actions
+a player would send (`src/ui/turntimer.ts` `timeoutMove`):
+
+1. An open prompt is answered with its own `defaultKeys`, the timeout path
+   `core/resume.ts` already documents, by the browser that controls the prompt's
+   owner.
+2. With nothing pending, `endTurn` is sent by the browser that controls the active
+   seat, and by no other. The engine refuses an `endTurn` from anyone but the
+   active player (`notActivePlayer`), and in lockstep every browser's clock runs
+   out (SB-65).
+
+Each move is sent at most once per prompt id or per turn, so an answer the engine
+refuses cannot loop. The deadline is each browser's own, started when it sees the
+turn begin (`useGame` `turnEndsAt`), and the clock renders from it, so the readout
+and the moment the turn passes agree. A player whose browser is closed still holds
+the turn, because nobody else is allowed to end it.
+
+**No timer.** `MatchConfig.turnSeconds` 0 means the match plays without one: no
+countdown, and nothing passes on its own. It is not `null`, because
+`normalizeConfig` coalesces `null` back to 90. A room's host picks On or Off in the
+lobby (`lobby-timer`). The choice rides the roster (`LobbyPayload.timerOn`, optional
+so an older host reads as "on"), so every guest sees it before the deal, and it is
+frozen into the Start handoff. Hotseat takes it from the start screen, as
+`#hotseat:N:t0`. The start message already carries the whole config and checksums
+it, so no protocol change was needed.
+
+**Time Flail (SB-36).** The engine divides `turnSeconds` by 2.5 once, at setup. The
+clock used to divide it again, so a 36-second turn read 14 seconds. It now shows
+the config as it stands.
+
+Code: `src/ui/turntimer.ts`, `src/ui/useGame.ts` (the expiry effect),
+`src/ui/TurnBar.tsx` (`TurnClock`), `src/net/host.ts` (`setTimerOn`),
+`src/ui/Lobby.tsx`. Tests: `test/table-timer.test.ts`, `e2e/timer.spec.ts`.

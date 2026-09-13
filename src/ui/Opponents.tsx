@@ -322,6 +322,7 @@ function DeckStack({ count }: { count: number }): JSX.Element {
  */
 const Seat = React.memo(function Seat({
   o,
+  isYou = false,
   active,
   deciding,
   won,
@@ -331,6 +332,12 @@ const Seat = React.memo(function Seat({
   onToggle,
 }: {
   o: OpponentView;
+  /**
+   * Your own tile. It carries `seat-self`, never `opponent`, and never
+   * `.opponent-turn`: the specs count opponents by that id and read that class
+   * to decide who is active, so your tile must answer to neither.
+   */
+  isYou?: boolean;
   active: boolean;
   /** They owe the table an answer to a prompt. */
   deciding: boolean;
@@ -358,6 +365,7 @@ const Seat = React.memo(function Seat({
   );
 
   const classes = ['opponent', 'seat', 'seat-strip'];
+  if (isYou) classes.push('seat-you');
   if (active) classes.push('seat-active');
   if (deciding) classes.push('seat-deciding');
   if (won) classes.push('seat-won');
@@ -367,8 +375,9 @@ const Seat = React.memo(function Seat({
   return (
     <div
       className={classes.join(' ')}
-      data-testid="opponent"
-      data-opponent-id={o.id}
+      data-testid={isYou ? 'seat-self' : 'opponent'}
+      data-opponent-id={isYou ? undefined : o.id}
+      data-player-id={o.id}
       data-hand-count={o.handCount}
       data-library-count={o.libraryCount}
       data-discard-count={o.gy.length}
@@ -377,17 +386,23 @@ const Seat = React.memo(function Seat({
       data-deciding={deciding ? 'true' : 'false'}
       data-eliminated={o.eliminated ? 'true' : 'false'}
       style={{ ['--seat-hue']: String(hue) } as React.CSSProperties}
-      role="button"
-      tabIndex={0}
-      aria-expanded={expanded}
-      title={expanded ? 'Hide their table' : 'Show their table'}
-      onClick={() => onToggle(o.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onToggle(o.id);
-        }
-      }}
+      // Your own table is already on screen, in the dock and the drawer, so
+      // your tile does not open a second copy of it.
+      role={isYou ? undefined : 'button'}
+      tabIndex={isYou ? undefined : 0}
+      aria-expanded={isYou ? undefined : expanded}
+      title={isYou ? 'You' : expanded ? 'Hide their table' : 'Show their table'}
+      onClick={isYou ? undefined : () => onToggle(o.id)}
+      onKeyDown={
+        isYou
+          ? undefined
+          : (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onToggle(o.id);
+              }
+            }
+      }
     >
       <span className="seat-avatar" aria-hidden="true">
         {initialsOf(o.name || o.id)}
@@ -395,8 +410,9 @@ const Seat = React.memo(function Seat({
       <span className="seat-who">
         <span className="seat-line1">
           <span className="opponent-name seat-name">{o.name}</span>
+          {isYou && <span className="seat-badge seat-badge-you">you</span>}
           {active && (
-            <span className="opponent-turn seat-badge">
+            <span className={`${isYou ? 'seat-turn-self' : 'opponent-turn'} seat-badge`}>
               <span className="seat-pip" aria-hidden="true" />
               to move
             </span>
@@ -533,10 +549,46 @@ export function Opponents({ view }: { view: GameView }): JSX.Element {
   const open = openId !== null ? (view.others.find((o) => o.id === openId) ?? null) : null;
   const onToggle = React.useCallback((id: string) => setOpenId((prev) => (prev === id ? null : id)), []);
 
+  // Every player sits in the strip, you included, with the same numbers on
+  // every tile at all times. Your tile is `view.you` in the opponents' shape.
+  // Its VP is your live score; theirs is what the table can see (publicVp, V3).
+  const you = view.you;
+  const self = React.useMemo<OpponentView>(
+    () => ({
+      id: you.id,
+      name: you.name,
+      handCount: you.hand.length,
+      libraryCount: you.libraryCount,
+      gy: you.gy,
+      play: you.play,
+      field: you.field,
+      vp: you.vp,
+      prophet: you.prophet,
+      eliminated: false,
+    }),
+    [you.id, you.name, you.hand.length, you.libraryCount, you.gy, you.play, you.field, you.vp, you.prophet],
+  );
+  const selfLast = beatsFor(view.log, self.id, names, 1)[0] ?? null;
+  const yourPrompt = pending !== null && 'player' in pending && pending.player === you.id;
+
   return (
     <div className="opponents" data-testid="opponents">
+      {/* The seat to move is pushed to the left edge with CSS `order`, not by
+          reordering the DOM, so `getByTestId('opponent').first()` keeps meaning
+          the same seat in every spec. */}
       <div className="opponents-row">
-        {view.others.length === 0 && <div className="seat-none">nobody else is seated</div>}
+        <Seat
+          key={self.id}
+          o={self}
+          isYou
+          active={view.activePlayer === self.id}
+          deciding={yourPrompt}
+          won={view.ended && winners.includes(self.id)}
+          lastText={selfLast ? beatText(selfLast) : null}
+          lastTone={selfLast ? selfLast.tone : null}
+          expanded={false}
+          onToggle={onToggle}
+        />
         {view.others.map((o) => {
           const last = beatsFor(view.log, o.id, names, 1)[0] ?? null;
           return (

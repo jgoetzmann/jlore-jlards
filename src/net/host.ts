@@ -326,6 +326,8 @@ export interface LobbyHostOptions {
   /** The host's own codex, carried into the deal like everyone else's. */
   hostCodex?: CardDefId[];
   seatCap?: number;
+  /** Deal the match with a turn timer (SB-67). Default on. */
+  timerOn?: boolean;
   /** Called with every roster the host publishes, including the first. */
   onRoster?: (roster: LobbyPayload) => void;
   /** Injectable clock, for tests. */
@@ -346,11 +348,15 @@ export interface LobbyHandoff {
   codexes: CardDefId[][];
   /** Relay cursor the match's host should start polling from. */
   since: number;
+  /** The host's timer choice at the moment it pressed Start (SB-67). */
+  timerOn: boolean;
 }
 
 export interface LobbyHostHandle {
   stop(): void;
   setSeatCap(cap: number): void;
+  /** Deal with a turn timer, or without one. Republishes, so guests see it. */
+  setTimerOn(on: boolean): void;
   roster(): LobbyPayload;
   /**
    * Freeze the roster, tell the room, and stop listening. Everything the match
@@ -408,6 +414,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
   let started = false;
   let rev = 0;
   let seatCap = clampSeatCap(options.seatCap);
+  let timerOn = options.timerOn !== false;
   let frozenSeats: string[] = [];
 
   const members: LobbyMemberRecord[] = [
@@ -432,6 +439,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       started,
       seats: frozenSeats.slice(),
       knocking: turnedAway.size,
+      timerOn,
       rev,
     };
   }
@@ -537,6 +545,13 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       publish();
     },
 
+    setTimerOn(on: boolean) {
+      if (stopped || started) return;
+      if (on === timerOn) return;
+      timerOn = on;
+      publish();
+    },
+
     roster,
 
     start(): LobbyHandoff {
@@ -553,7 +568,7 @@ export function startLobbyHost(relay: Relay, options: LobbyHostOptions): LobbyHo
       clearTimers();
       loop.stop();
       stopped = true;
-      return { seats: frozenSeats.slice(), names, codexes, since };
+      return { seats: frozenSeats.slice(), names, codexes, since, timerOn };
     },
   };
 }

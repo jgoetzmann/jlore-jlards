@@ -136,6 +136,21 @@
   color: var(--accent);
 }
 
+/* The timer choice: a row of its own under the roster head. Every guest sees
+   it before the deal; only the host can press it (SB-67). */
+.lobby-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.lobby-timer-state {
+  font-size: 13px;
+  color: var(--ink);
+}
+
 .lobby-seats {
   list-style: none;
   margin: 0;

@@ -858,6 +858,9 @@ export interface LobbyPayload {
   /** How many people are asking for a seat the room has no room for. The host
    *  can raise the cap; without this the control has nothing to prompt it. */
   knocking: number;
+  /** Whether the match will be dealt with a turn timer (SB-67). Optional: an
+   *  older host sends none, and that reads as "on". */
+  timerOn?: boolean;
   rev: number;
 }
 

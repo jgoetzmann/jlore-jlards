@@ -58,7 +58,8 @@ const MAX_ROOM_SEATS = 4;
 
 type Route =
   | { kind: 'start' }
-  | { kind: 'hotseat'; players: number }
+  /** `turnSeconds` only when the hash names one: `#hotseat:2:t0` deals without a timer. */
+  | { kind: 'hotseat'; players: number; turnSeconds?: number }
   | { kind: 'room'; code: string }
   /** Dev only: a crafted table state (Fixture.tsx). Production shows the start screen. */
   | { kind: 'fixture'; name: string };
@@ -68,10 +69,16 @@ export function parseHash(hash: string): Route {
   if (raw === '') return { kind: 'start' };
   const fixture = /^fixture:([a-z-]+)$/i.exec(raw);
   if (fixture) return { kind: 'fixture', name: fixture[1]!.toLowerCase() };
-  const hot = /^hotseat(?::(\d))?$/i.exec(raw);
+  const hot = /^hotseat(?::(\d))?(?::t(\d{1,4}))?$/i.exec(raw);
   if (hot) {
     const n = hot[1] ? Number(hot[1]) : 2;
-    return { kind: 'hotseat', players: n >= 2 && n <= 4 ? n : 2 };
+    const route: { kind: 'hotseat'; players: number; turnSeconds?: number } = {
+      kind: 'hotseat',
+      players: n >= 2 && n <= 4 ? n : 2,
+    };
+    // Only when the hash names one: `:t0` deals without a timer (SB-67).
+    if (hot[2] !== undefined) route.turnSeconds = Number(hot[2]);
+    return route;
   }
   return { kind: 'room', code: raw.toUpperCase() };
 }
@@ -101,6 +108,7 @@ function StartScreen({
 }): JSX.Element {
   const [name, setName] = React.useState(() => getSettings().playerName);
   const [players, setPlayers] = React.useState(2);
+  const [timerOn, setTimerOn] = React.useState(true);
   const [joinCode, setJoinCode] = React.useState('');
   const snapshot = React.useMemo(() => loadSnapshot(), []);
 
@@ -137,6 +145,16 @@ function StartScreen({
         Nothing is dealt until the host starts it.
       </p>
 
+      <label className="start-field start-check">
+        <span>Hotseat turn timer</span>
+        <input
+          type="checkbox"
+          data-testid="hotseat-timer"
+          checked={timerOn}
+          onChange={(e) => setTimerOn(e.target.checked)}
+        />
+      </label>
+
       <div className="start-actions">
         <button
           type="button"
@@ -156,7 +174,7 @@ function StartScreen({
           className="secondary"
           data-testid="hotseat"
           onClick={() => {
-            window.location.hash = `#hotseat:${players}`;
+            window.location.hash = timerOn ? `#hotseat:${players}` : `#hotseat:${players}:t0`;
           }}
         >
           Hotseat
@@ -292,6 +310,8 @@ export interface TableLayoutProps {
    */
   sendMany?: (actions: GameAction[]) => void;
   turnSeconds: number;
+  /** When this turn runs out (epoch ms), from the session; absent, the clock counts down alone. */
+  turnEndsAt?: number | null;
   /** Own intents the relay has not echoed yet; drives the Buy busy state (TURN-8). */
   pendingIntents?: number;
 }
@@ -387,6 +407,40 @@ function KeyHelp({ onClose }: { onClose: () => void }): JSX.Element {
 }
 
 /**
+ * The anomaly's whole rule, opened from its chip. It sits where the key sheet
+ * does, over the board region only, so reading it costs the topbar nothing
+ * (SB-63). The text is the catalog's own prose, shown as it is.
+ */
+export function AnomalyPanel({
+  anomaly,
+  onClose,
+}: {
+  anomaly: NonNullable<GameView['anomaly']>;
+  onClose: () => void;
+}): JSX.Element {
+  return (
+    <div className="prompt-panel-host anomaly-panel-host">
+      <div
+        className="key-help anomaly-panel"
+        data-testid="anomaly-panel"
+        role="dialog"
+        aria-label={`Anomaly: ${anomaly.name}`}
+      >
+        <p className="anomaly-panel-eyebrow">Anomaly · this match</p>
+        <h3 className="anomaly-panel-name">{anomaly.name}</h3>
+        <p className="anomaly-panel-text">{anomaly.text}</p>
+        <p className="anomaly-panel-note">It changes the rules for every player, for the whole match.</p>
+        <div className="prompt-actions">
+          <button type="button" className="prompt-confirm" data-testid="anomaly-panel-close" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The table, as one viewport-bound grid (SB-63):
  *
  *   topbar  (auto)          brand, seats, whose turn, clock, anomaly, drawer toggle
@@ -420,6 +474,7 @@ export function TableLayout({
   send,
   sendMany,
   turnSeconds,
+  turnEndsAt,
   pendingIntents = 0,
 }: TableLayoutProps): JSX.Element {
   const viewRef = React.useRef(view);
@@ -464,6 +519,21 @@ export function TableLayout({
     setGyWanted(false);
   }, [drawerOpen, gyWanted]);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  // The anomaly's rule opens where the key sheet does, over the board, so the
+  // two share that spot: opening one closes the other.
+  const [anomalyOpen, setAnomalyOpen] = React.useState(false);
+  const hasAnomaly = view.anomaly !== null;
+  React.useEffect(() => {
+    if (!hasAnomaly) setAnomalyOpen(false);
+  }, [hasAnomaly]);
+  const toggleHelp = React.useCallback(() => {
+    setAnomalyOpen(false);
+    setHelpOpen((v) => !v);
+  }, []);
+  const toggleAnomaly = React.useCallback(() => {
+    setHelpOpen(false);
+    setAnomalyOpen((v) => !v);
+  }, []);
 
   // --- your prompt ------------------------------------------------------------
   const prompt = ownPrompt(view.pending, me);
@@ -641,7 +711,7 @@ export function TableLayout({
     (intent: KeyIntent) => {
       switch (intent.kind) {
         case 'toggleHelp':
-          setHelpOpen((v) => !v);
+          toggleHelp();
           return;
         case 'toggleLog':
           setDrawerOpen((v) => !v);
@@ -748,11 +818,11 @@ export function TableLayout({
             >
               {ownerLabel}
             </span>
-            <TurnClock view={view} turnSeconds={turnSeconds} />
+            <TurnClock view={view} turnSeconds={turnSeconds} endsAt={turnEndsAt} />
             {waitingOn !== null && (
               <PromptOverlay pending={view.pending} playerId={me} names={names} onAction={send} onPass={onPass} />
             )}
-            <AnomalyChip anomaly={view.anomaly} />
+            <AnomalyChip anomaly={view.anomaly} open={anomalyOpen} onToggle={toggleAnomaly} />
             <span className="topbar-spacer" />
             <span className="who" data-testid="you-are" data-you-id={me}>
               You are <strong>{view.you.name}</strong>
@@ -763,7 +833,7 @@ export function TableLayout({
               data-testid="key-help-toggle"
               title="Keyboard shortcuts (?)"
               aria-pressed={helpOpen}
-              onClick={() => setHelpOpen((v) => !v)}
+              onClick={toggleHelp}
             >
               ?
             </button>
@@ -809,6 +879,9 @@ export function TableLayout({
           )}
 
           {helpOpen && <KeyHelp onClose={() => setHelpOpen(false)} />}
+          {anomalyOpen && view.anomaly && (
+            <AnomalyPanel anomaly={view.anomaly} onClose={() => setAnomalyOpen(false)} />
+          )}
 
           <aside className="drawer table-side" data-testid="drawer" hidden={!drawerOpen}>
             {drawerOpen && (
@@ -952,6 +1025,7 @@ function Table({
   seatId,
   playerCount,
   resumeState,
+  turnSeconds,
   onDealt,
 }: {
   mode: GameMode;
@@ -959,9 +1033,12 @@ function Table({
   seatId: string;
   playerCount: number;
   resumeState: GameState | null;
+  /** Hotseat only: the timer the start screen chose (0 = none). A room's lobby decides its own. */
+  turnSeconds?: number;
   onDealt?: () => void;
 }): JSX.Element {
-  const session = useGame({ mode, roomCode: code, seatId, playerCount, resumeState });
+  const config = React.useMemo(() => (turnSeconds === undefined ? undefined : { turnSeconds }), [turnSeconds]);
+  const session = useGame({ mode, roomCode: code, seatId, playerCount, resumeState, config });
 
   // Fires once, when this room stops being a lobby and becomes a match.
   const phase = session.phase;
@@ -1026,6 +1103,7 @@ function Table({
         info={session.lobby}
         onStart={session.startMatch}
         onSeatCap={session.setSeatCap}
+        onTimer={session.setTimerOn}
         onLeave={() => {
           window.location.hash = '';
         }}
@@ -1055,6 +1133,7 @@ function Table({
       send={send}
       sendMany={sendMany}
       turnSeconds={session.turnSeconds}
+      turnEndsAt={session.turnEndsAt}
       pendingIntents={session.pendingIntents}
     />
   );
@@ -1103,6 +1182,7 @@ export function App(): JSX.Element {
         seatId={seatId}
         playerCount={route.players}
         resumeState={null}
+        turnSeconds={route.turnSeconds}
       />
     );
   }

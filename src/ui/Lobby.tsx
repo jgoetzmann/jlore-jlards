@@ -11,6 +11,7 @@
 
 import React from 'react';
 import type { LobbyInfo, LobbyMemberInfo } from './useGame';
+import { DEFAULT_TURN_SECONDS } from './useGame';
 import './lobby.css';
 
 /** Stable per-seat hue, so the same person keeps the same colour all session. */
@@ -85,11 +86,14 @@ export function Lobby({
   info,
   onStart,
   onSeatCap,
+  onTimer,
   onLeave,
 }: {
   info: LobbyInfo;
   onStart: () => void;
   onSeatCap: (cap: number) => void;
+  /** Host only: deal with a turn timer, or without one (SB-67). */
+  onTimer?: (on: boolean) => void;
   onLeave: () => void;
 }): JSX.Element {
   const [copied, setCopied] = React.useState(false);
@@ -109,6 +113,7 @@ export function Lobby({
   const state = info.missed ? 'missed' : info.full ? 'full' : info.waiting ? 'waiting' : 'open';
   const here = info.members.length;
   const open = Math.max(0, info.seatCap - here);
+  const timerOn = info.timerOn !== false;
 
   function copyLink(): void {
     try {
@@ -201,6 +206,32 @@ export function Lobby({
                   {n}
                 </button>
               ))}
+            </span>
+          )}
+        </div>
+
+        {/* Everyone sees the choice before the deal; only the host can change it. */}
+        <div className="lobby-settings" data-testid="lobby-settings">
+          <span className="lobby-caps-label">Turn timer</span>
+          {info.youAreHost && onTimer ? (
+            <span className="lobby-caps">
+              {[true, false].map((on) => (
+                <button
+                  key={on ? 'on' : 'off'}
+                  type="button"
+                  className={`lobby-cap lobby-timer${timerOn === on ? ' lobby-cap-on' : ''}`}
+                  data-testid="lobby-timer"
+                  data-on={on ? 'true' : 'false'}
+                  aria-pressed={timerOn === on}
+                  onClick={() => onTimer(on)}
+                >
+                  {on ? `On · ${DEFAULT_TURN_SECONDS}s` : 'Off'}
+                </button>
+              ))}
+            </span>
+          ) : (
+            <span className="lobby-timer-state" data-testid="lobby-timer-state">
+              {timerOn ? `On · ${DEFAULT_TURN_SECONDS}s a turn` : 'Off: no time limit'}
             </span>
           )}
         </div>
