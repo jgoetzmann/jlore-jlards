@@ -31,6 +31,11 @@ import { Lobby } from '@ui/Lobby';
 import { Log } from '@ui/Log';
 import { PromptOverlay } from '@ui/PromptOverlay';
 import { seedMatch, type LobbyInfo } from '@ui/useGame';
+// ---- mobile ----
+import { PreviewSheet } from '@ui/CardPreview';
+import { TapTipBubble } from '@ui/TapTip';
+import { printedCardView } from '@ui/cardview';
+// ---- end mobile ----
 
 const noop = (): void => undefined;
 
@@ -228,6 +233,23 @@ describe('the data-testid contract the browser suite reads', () => {
     const mine = viewFor(s, owner);
     expect(testIdsIn(renderTable(mine, owner))).toContain('prompt');
   });
+
+  // ---- mobile ----
+  test('the touch preview sheet and the tap bubble carry the ids e2e/mobile.spec.ts reads', () => {
+    const face = printedCardView('astrologist', 'k');
+    expect(face).not.toBeNull();
+    const sheet = testIdsIn(
+      renderToStaticMarkup(React.createElement(PreviewSheet, { card: face!, onClose: noop })),
+    );
+    for (const id of ['card-preview-sheet', 'card-preview', 'card-preview-close', 'card-links']) {
+      expect(sheet, `the preview sheet lost data-testid="${id}"`).toContain(id);
+    }
+    const tip = testIdsIn(
+      renderToStaticMarkup(React.createElement(TapTipBubble, { text: 'Not your turn', x: 100, y: 300, viewportWidth: 390 })),
+    );
+    expect(tip).toContain('tap-tip');
+  });
+  // ---- end mobile ----
 
   test('no seat is rendered another seat’s hand or library', () => {
     // The property `e2e/multiplayer.spec.ts` asserts across two browsers, held

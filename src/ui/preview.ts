@@ -8,11 +8,18 @@
  * hovered element, so it never takes a click and never hides the card you are
  * pointing at. That rule is what keeps it clear of SB-63's failure modes.
  *
+ * Touch has no hover, so the same card can also be opened as a **sheet**
+ * (touch.ts: long-press any card, or tap one that has no click action). A
+ * sheet is the one deliberate exception to "never takes the pointer": the
+ * player asked for it, it covers the screen with its own backdrop, and it stays
+ * until they close it. Hover calls never close or replace a sheet.
+ *
  * A tiny external store rather than React state on the table: hovering must not
  * re-render the whole table, only the preview layer.
  */
 
 import type { CardView } from '@engine/types';
+import { clearLinkSource } from './links';
 
 export interface PreviewState {
   card: CardView;
@@ -20,6 +27,8 @@ export interface PreviewState {
   side: 'left' | 'right';
   /** Viewport y of the preview's top edge. */
   top: number;
+  /** `hover` is the pointer-events:none layer; `sheet` is the touch dialog. Absent means hover. */
+  mode?: 'hover' | 'sheet';
 }
 
 /** A short delay so sweeping the pointer across a row doesn't strobe the layer. */
@@ -31,6 +40,10 @@ const listeners = new Set<() => void>();
 
 function emit(): void {
   for (const fn of listeners) fn();
+}
+
+function isSheet(): boolean {
+  return current !== null && current.mode === 'sheet';
 }
 
 export function subscribePreview(fn: () => void): () => void {
@@ -61,6 +74,7 @@ export function placePreview(
 
 export function showPreview(card: CardView, el: Element | null): void {
   if (typeof window === 'undefined') return;
+  if (isSheet()) return;
   if (timer !== null) clearTimeout(timer);
   const rect = el ? el.getBoundingClientRect() : null;
   const board = document.querySelector('.board-region');
@@ -68,13 +82,14 @@ export function showPreview(card: CardView, el: Element | null): void {
   const place = placePreview(rect, window.innerWidth, boardTop);
   timer = setTimeout(() => {
     timer = null;
-    current = { card, ...place };
+    current = { card, ...place, mode: 'hover' };
     emit();
   }, PREVIEW_DELAY_MS);
 }
 
-/** Hide the preview. With an iid, only if that card is the one showing. */
+/** Hide the hover preview. With an iid, only if that card is the one showing. Never closes a sheet. */
 export function hidePreview(iid?: string): void {
+  if (isSheet()) return;
   if (iid !== undefined && current !== null && current.card.iid !== iid) return;
   if (timer !== null) {
     clearTimeout(timer);
@@ -82,5 +97,23 @@ export function hidePreview(iid?: string): void {
   }
   if (current === null) return;
   current = null;
+  emit();
+}
+
+/** Open the whole card as a touch sheet (replaces any hover preview). */
+export function openPreviewSheet(card: CardView): void {
+  if (timer !== null) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  current = { card, side: 'right', top: 0, mode: 'sheet' };
+  emit();
+}
+
+/** Close the sheet, and the link highlight it was showing. */
+export function closePreviewSheet(): void {
+  if (!isSheet()) return;
+  current = null;
+  clearLinkSource();
   emit();
 }

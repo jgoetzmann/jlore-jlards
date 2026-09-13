@@ -164,6 +164,46 @@ export function insertionIndexFromX(x: number, mids: readonly number[]): number 
 }
 
 /**
+ * `insertionIndexFromX` for a row that may wrap onto several lines (the hand is
+ * a three-column grid on phones). The pointer picks the line whose vertical
+ * span is nearest, then the gap inside that line by midpoint. When every slot
+ * sits on one line this is exactly `insertionIndexFromX`.
+ */
+export function insertionIndexFromPoint(
+  x: number,
+  y: number,
+  slots: readonly { left: number; top: number; width: number; height: number }[],
+): number {
+  if (slots.length === 0) return 0;
+  // Group consecutive slots into lines: a slot starting below the previous
+  // slot's vertical middle starts a new line.
+  const lines: { from: number; to: number; top: number; bottom: number }[] = [];
+  slots.forEach((s, i) => {
+    const line = lines[lines.length - 1];
+    const prev = slots[i - 1];
+    if (!line || !prev || s.top >= prev.top + prev.height / 2) {
+      lines.push({ from: i, to: i, top: s.top, bottom: s.top + s.height });
+    } else {
+      line.to = i;
+      line.top = Math.min(line.top, s.top);
+      line.bottom = Math.max(line.bottom, s.top + s.height);
+    }
+  });
+  let best = lines[0]!;
+  let bestDistance = Infinity;
+  for (const line of lines) {
+    const d = y < line.top ? line.top - y : y > line.bottom ? y - line.bottom : 0;
+    if (d < bestDistance) {
+      best = line;
+      bestDistance = d;
+    }
+  }
+  let pos = best.from;
+  while (pos <= best.to && x > slots[pos]!.left + slots[pos]!.width / 2) pos += 1;
+  return pos;
+}
+
+/**
  * The `moveInOrder` destination for dropping the card at `from` into gap `pos`.
  *
  * Lifting the dragged card out first shifts every gap to its right down by one.
@@ -210,15 +250,13 @@ export function reconcileOrder(
   return { order: local, pending };
 }
 
-/** Horizontal midpoint of every hand slot, in client coordinates. */
-function slotMidpoints(row: HTMLElement | null): number[] {
+/** Every hand slot's box, in client coordinates. */
+function slotRects(row: HTMLElement | null): { left: number; top: number; width: number; height: number }[] {
   if (!row) return [];
-  const out: number[] = [];
-  for (const el of Array.from(row.querySelectorAll<HTMLElement>('[data-hand-index]'))) {
+  return Array.from(row.querySelectorAll<HTMLElement>('[data-hand-index]'), (el) => {
     const r = el.getBoundingClientRect();
-    out.push(r.left + r.width / 2);
-  }
-  return out;
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  });
 }
 
 /** The one-line status the dock prints above the hand. */
@@ -606,7 +644,7 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     if (dragFromRef.current === null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const pos = insertionIndexFromX(e.clientX, slotMidpoints(rowRef.current));
+    const pos = insertionIndexFromPoint(e.clientX, e.clientY, slotRects(rowRef.current));
     setDropPos((prev) => (prev === pos ? prev : pos));
   }
 
@@ -623,7 +661,7 @@ const HandImpl = React.forwardRef<HandHandle, HandProps>(function Hand(
     const startedOn = dragHandRef.current;
     if (from === null) return;
     e.preventDefault();
-    const pos = insertionIndexFromX(e.clientX, slotMidpoints(rowRef.current));
+    const pos = insertionIndexFromPoint(e.clientX, e.clientY, slotRects(rowRef.current));
     endDrag();
     if (isNoopDrop(from, pos)) return;
     if (startedOn !== null && startedOn !== contentSignature(hand)) return;
