@@ -81,11 +81,47 @@ test.describe('The Draft', () => {
     // And an ordinary turn plays: money, then End turn.
     await expect(page.getByTestId('turn-number')).toHaveText('1');
     const playMoney = page.getByTestId('play-money');
-    if (await playMoney.isEnabled()) await playMoney.click();
+    const acted = await playMoney.isEnabled();
+    if (acted) await playMoney.click();
+    // MERGE-5: the first change after the Draft ends refreshes the resume
+    // snapshot, still on turn 1. Keyed on the turn alone it waited for turn 2.
+    if (acted) {
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const raw = localStorage.getItem('jlore_snapshot');
+              if (!raw) return 'none';
+              const snap = JSON.parse(raw) as { state?: { turn?: number; draft?: unknown } };
+              return `turn ${snap.state?.turn}: ${snap.state?.draft == null ? 'playing' : 'drafting'}`;
+            }),
+          { timeout: 15_000 },
+        )
+        .toBe('turn 1: playing');
+    }
     await page.getByTestId('end-turn').click();
     await expect(page.getByTestId('turn-number')).toHaveText('2');
 
     expect(errors, errors.join(' | ')).toHaveLength(0);
+  });
+
+  test('a timed room picks the first option for a seat that sits out the turn timer (DRAFT-4)', async ({ page }) => {
+    // The lobby's timer is on by default (90 s). The page clock runs normally
+    // until it is fast-forwarded past that deadline.
+    await page.clock.install();
+    await openDraftRoom(page);
+    await expect(page.getByTestId('draft-progress')).toHaveText('You: 14 left');
+    const first = await shownSlot(page);
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('draft-progress')).toHaveText('You: 14 left');
+
+    // Nobody picks. Past the deadline, the slot is picked for this seat...
+    await page.clock.fastForward('01:35');
+    await expect.poll(() => shownSlot(page), { timeout: 15_000 }).not.toBe(first);
+    await expect(page.getByTestId('draft-progress')).toHaveText('You: 13 left');
+    // ...and the deadline starts again for the next one.
+    await page.clock.fastForward('01:35');
+    await expect(page.getByTestId('draft-progress')).toHaveText('You: 12 left', { timeout: 15_000 });
   });
 });
 
