@@ -27,6 +27,7 @@ import {
 } from '@ui/links';
 import { insertionIndexFromPoint, insertionIndexFromX } from '@ui/Hand';
 import { placeTip } from '@ui/TapTip';
+import { linksOnTable } from '@ui/touch';
 
 ensureRegistry();
 
@@ -146,5 +147,24 @@ describe('phone-width helpers', () => {
       expect(p.above).toBe(true);
     }
     expect(placeTip(100, 40, 390).above).toBe(false);
+  });
+});
+
+describe('tap sheet gate', () => {
+  // fdaf445: The Trilogy, Soul Shard Lapidary and Goblin Gang Boss name only
+  // tokens nobody holds, so with no referenced face on the table a tap must
+  // take the sheet path (linksOnTable false) instead of lighting nothing.
+  const tokenOnly: string[] = ['the_trilogy', 'soul_shard_lapidary', 'goblin_gang_boss'];
+
+  test('T2: no referenced face on the table takes the sheet path', () => {
+    for (const defId of tokenOnly) {
+      expect(linksOnTable(defId, () => false)).toBe(false);
+    }
+  });
+
+  test('T3: a referenced face on the table takes the lighting path', () => {
+    expect(linksOnTable('the_trilogy', (id) => id === 'book_of_flame')).toBe(true);
+    expect(linksOnTable('soul_shard_lapidary', (id) => id === 'soul_shard')).toBe(true);
+    expect(linksOnTable('goblin_gang_boss', (id) => id === 'grubbing_goblin')).toBe(true);
   });
 });
