@@ -11,3 +11,4 @@ telemetry/
 test-results/
 playwright-report/
 shots/
+trajectory-*.json
