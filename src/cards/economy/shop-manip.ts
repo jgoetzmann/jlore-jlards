@@ -1168,18 +1168,35 @@ export const cards: CardDefinition[] = [
         pick: 1,
         prompt: 'Set the banner',
         then: [
-          // The printed rider needs three things at once: the discovered pile
-          // remembered past this node, that pile's cost remembered as a number,
-          // and a later buy compared against it. A player counter can carry a
-          // number but the Discover's `then` cannot read the pick's cost
-          // (`selfCost` is this card), a pile-selector filter does not resolve
-          // expression bounds, and a buy-side `appendEffects` is never read
-          // (`peekBuyMods` takes costDelta, costFloor and buyTo only). This mod
-          // is inert — `gy` is already the buy destination — and is kept only
-          // so the node the rider will hang from stays in place.
+          // The banner's live shop price is parked the Freeze Tag way: `forEach`
+          // rebinds `self` to the pile top, so `selfCost` is the price actually
+          // charged, and the turn number fences the rider to this turn. Two
+          // Banner Days in one turn share the counter (counters add), so the
+          // second banner's price governs both — one memory, no way to keep two.
+          {
+            op: 'forEach',
+            over: { zone: 'shop', filter: { defId: '$discovered' }, count: 1 },
+            effects: [
+              { op: 'addCounter', scope: 'player', key: 'turn:bannerCost', amount: { expr: 'selfCost' } },
+              { op: 'addCounter', scope: 'player', key: 'turn:bannerTurn', amount: { expr: 'currentTurn' } },
+            ],
+          },
+          // `filter.not` is the "different card": a banner-pile purchase
+          // neither consumes this nor receives it, exactly like a filtered
+          // play mod. The conditional is the buy-side comparison against the
+          // parked price. `uses: 9` is the Scripture idiom for "the rest of
+          // the turn": non-qualifying buys spend a use without firing, and a
+          // mod that leaks past the turn can never fire again because its
+          // `turn:` counters are gone.
           {
             op: 'nextCardModifier',
-            mod: { appliesTo: 'buy', buyTo: 'gy', uses: 1 },
+            mod: { appliesTo: 'buy', uses: 9, filter: { not: { defId: '$discovered' } }, appendEffects: [
+              { op: 'conditional',
+                if: { all: [{ expr: 'currentTurn == bannerTurn' }, { expr: 'selfCost >= bannerCost' }] },
+                then: [
+                  { op: 'moveTo', target: { zone: 'shop', filter: { defId: '$discovered' }, count: 1, pick: 'top' }, zone: 'gy' },
+                ] },
+            ] },
           },
         ],
       },
@@ -1317,6 +1334,10 @@ export const cards: CardDefinition[] = [
   {
     id: 'glubby_gloob_the_auctioneer',
     name: 'Glubby Gloob the Auctioneer',
+    // No-bid stand-in, documented so the fiction is visible: there is no
+    // auction machinery (no chip bidding, no opponent offers), so the delayed
+    // node runs a plain Discover-3-pick-1 and the pick goes to the GY. A real
+    // blind auction needs an S-AUCTION engine before this text is true.
     cost: { money: 3 },
     types: ['Action'],
     subtypes: [],

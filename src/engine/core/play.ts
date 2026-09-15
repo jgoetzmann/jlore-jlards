@@ -77,6 +77,13 @@ export function canPlayCard(state: GameState, player: PlayerId, iid: InstanceId)
   if (inst.owner !== player) return false;
   if (inst.zone !== 'hand') return false;
   if (!p.hand.includes(iid)) return false;
+  // Aspect of Ares: the holder may play no Action but War!. legalActions,
+  // reduce, and the view's playable flag all read this gate, so the ban
+  // applies everywhere a player-initiated play is offered or resolved (B25).
+  // Effect-driven plays (playCard op) are card abilities, not player plays.
+  if (inst.defId !== 'war' && safeDef(inst.defId).types.includes('Action')) {
+    if (p.field.some((a) => a.auraId === 'aspect_of_ares')) return false;
+  }
   return p.actions >= actionCostOf(state, iid);
 }
 

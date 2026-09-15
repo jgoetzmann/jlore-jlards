@@ -8,8 +8,9 @@
  */
 
 import { beforeAll, describe, expect, test } from 'vitest';
-import { createMatch, reduce } from '@engine/index';
-import { registerAuras, registerCards } from '@engine/registry';
+import { createMatch, legalActions, reduce } from '@engine/index';
+import { getCard, registerAuras, registerCards } from '@engine/registry';
+import { auraStartOfTurn } from '@engine/meta';
 import { allAuraDefinitions, allCardDefinitions } from '@cards/index';
 import { NAMED_FILTERS } from '@engine/effects';
 import type {
@@ -297,5 +298,84 @@ describe('SB-52: every filter name a card expression uses is registered', () => 
     }
     const unregistered = [...names].filter((n) => !NAMED_FILTERS[n]);
     expect(unregistered).toEqual([]);
+  });
+});
+
+describe('card-text audit: Aspect of Ares bans non-War Actions for its holder', () => {
+  function holdAres(state: GameState, me: PlayerId): void {
+    state.players[me]!.field.push({
+      auraId: 'aspect_of_ares',
+      owner: me,
+      usedThisTurn: false,
+      counters: {},
+    });
+  }
+
+  function offeredPlays(state: GameState, me: PlayerId): InstanceId[] {
+    return legalActions(state, me)
+      .filter((a) => a.type === 'play')
+      .map((a) => (a as unknown as { iid: InstanceId }).iid);
+  }
+
+  test('a non-War Action in a holding hand is not offered and rejects on play', () => {
+    const { state, me } = start();
+    holdAres(state, me);
+    state.players[me]!.actions = 5;
+    const war = mint(state, 'war', me, 'hand');
+    const other = mint(state, 'energize', me, 'hand');
+    const copper = mint(state, 'copper', me, 'hand');
+    const plays = offeredPlays(state, me);
+    expect(plays).toContain(war);
+    expect(plays).toContain(copper);
+    expect(plays).not.toContain(other);
+    const rejected = reduce(state, { type: 'play', player: me, iid: other });
+    expect(rejected.instances[other]!.zone).toBe('hand');
+    expect(rejected.players[me]!.hand).toContain(other);
+  });
+
+  test('without the aura the same Action is offered', () => {
+    const { state, me } = start();
+    state.players[me]!.actions = 5;
+    const other = mint(state, 'energize', me, 'hand');
+    expect(offeredPlays(state, me)).toContain(other);
+  });
+});
+
+describe('card-text audit: Outstanding Debt debits once per turn', () => {
+  test('start of turn applies -X exactly once, not twice', () => {
+    const { state, me } = start();
+    const p2 = state.playerOrder.find((x) => x !== me)!;
+    state.players[me]!.field.push({
+      auraId: 'outstanding_debt',
+      owner: me,
+      usedThisTurn: false,
+      counters: {},
+    });
+    // Money resets at turn end, so the debit reads what survives the reset:
+    // carryMoney. X = ceil((20 - 10) / 4) = 3, debited once.
+    state.players[me]!.carryMoney = 10;
+    let after = reduce(state, { type: 'endTurn', player: me });
+    after = reduce(after, { type: 'endTurn', player: p2 });
+    expect(after.activePlayer).toBe(me);
+    // X = ceil((20 - 10) / 4) = 3, debited once. The deleted data trigger paid it twice.
+    expect(after.players[me]!.money).toBe(7);
+  });
+});
+
+describe('card-text audit: March of Progress creates a card costing the current turn', () => {
+  test('the created Entire Universe card costs exactly the turn number', () => {
+    const { state, me } = start();
+    state.players[me]!.field.push({
+      auraId: 'march_of_progress',
+      owner: me,
+      usedThisTurn: false,
+      counters: {},
+    });
+    state.turn = 5;
+    const before = new Set(state.players[me]!.hand);
+    const after = auraStartOfTurn(state, me);
+    const gained = after.players[me]!.hand.filter((iid) => !before.has(iid));
+    expect(gained.length).toBe(1);
+    expect(getCard(after.instances[gained[0]!]!.defId).cost.money).toBe(5);
   });
 });

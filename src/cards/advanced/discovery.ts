@@ -523,23 +523,37 @@ export const cards: CardDefinition[] = [
     keywords: ['Flimsy'],
     stats: { buys: 1 },
     effects: [
-      // Both clauses are still engine-blocked, and the mods below are the
-      // closest inert placeholders. `appendEffects` is only read by
-      // `consumePlayMods` (core/play.ts), which skips every `appliesTo:'buy'`
-      // mod, and the buy path's own `peekBuyMods`/`consumeBuyMods`
-      // (core/buy.ts) read costDelta, costFloor and buyTo alone — so the refund
-      // never pays out, and `selfCost` would read Frankenstein's (3) rather
-      // than the purchase's cost even if it did.
+      // Buy-path rider effects resolve sourced at the bought card
+      // (core/buy.ts), so `selfCost` below is the purchase's printed cost,
+      // never Frankenstein's (3). `max(0, ...)` is load-bearing for the
+      // same reason it is on Rebate: costs are signed, and refunding a
+      // negative price would CHARGE the buyer.
       {
         op: 'nextCardModifier',
-        mod: { appliesTo: 'buy', uses: 1, costDelta: 0, appendEffects: [{ op: 'gain', stat: 'money', amount: { expr: 'floor(selfCost / 2)' } }] },
+        mod: { appliesTo: 'buy', uses: 1, appendEffects: [
+          { op: 'gain', stat: 'money', amount: { expr: 'max(0, floor(selfCost / 2))' } },
+          // A fresh window: drop stale marks, then mark this purchase as
+          // the one the next purchase fuses with. The guard keeps the clear
+          // from falling back onto the bought card when nothing is marked.
+          { op: 'conditional', if: { has: { target: { who: 'self', zone: ['hand', 'library', 'gy', 'play'], filter: { counter: { key: 'frankPrev', gte: 1 } } }, atLeast: 1 } }, then: [
+            { op: 'addCounter', target: { who: 'self', zone: ['hand', 'library', 'gy', 'play'], filter: { counter: { key: 'frankPrev', gte: 1 } } }, key: 'frankPrev', amount: -1 },
+          ] },
+          { op: 'addCounter', target: { self: true }, key: 'frankPrev', amount: 1 },
+        ] },
       },
-      // `consumeBuyMods` decrements every `appliesTo:'buy'` mod on the FIRST
-      // purchase, so this lands there too instead of on the second one, and
-      // NextCardMod has no ordering or skip field to say otherwise.
+      // `skip: 1` holds this off the first purchase so it lands on the
+      // second, where it marks the new purchase and fuses the two marked
+      // cards. The host is the first match in zone order, so the composite
+      // takes the previous purchase's place.
       {
         op: 'nextCardModifier',
-        mod: { appliesTo: 'buy', uses: 1, buyTo: 'hand' },
+        mod: { appliesTo: 'buy', uses: 1, skip: 1, appendEffects: [
+          { op: 'addCounter', target: { self: true }, key: 'frankPrev', amount: 1 },
+          { op: 'fuse', target: { who: 'self', zone: ['hand', 'library', 'gy', 'play'], filter: { counter: { key: 'frankPrev', gte: 1 } }, count: 2 } },
+          { op: 'conditional', if: { has: { target: { who: 'self', zone: ['hand', 'library', 'gy', 'play'], filter: { counter: { key: 'frankPrev', gte: 1 } } }, atLeast: 1 } }, then: [
+            { op: 'addCounter', target: { who: 'self', zone: ['hand', 'library', 'gy', 'play'], filter: { counter: { key: 'frankPrev', gte: 1 } } }, key: 'frankPrev', amount: -1 },
+          ] },
+        ] },
       },
     ],
     triggers: [],

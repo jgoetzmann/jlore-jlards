@@ -31,7 +31,7 @@ export const auras: AuraDefinition[] = [
     name: 'Evolve',
     tier: 'heroic',
     activationCost: 2,
-    text: 'Trash a card from your hand, then add a random Known Universe card costing (3) more.',
+    text: 'Trash a card from your hand, then add a random Known Universe card to your hand.',
     effects: [
       { op: 'trash', target: { who: 'self', zone: 'hand', count: 1, pick: 'choose', chooser: 'self' } },
       { op: 'createCard', defId: { pool: { scope: 'knownUniverse' } }, to: 'hand' },
@@ -283,12 +283,12 @@ export const auras: AuraDefinition[] = [
     id: 'march_of_progress',
     name: 'March of Progress',
     tier: 'celestial',
-    text: 'Start of turn: add a random Entire Universe card costing ({currentTurn}) to your hand.',
+    text: 'Start of turn: add a random Entire Universe card costing ({turn}) to your hand.',
     effects: [],
     triggers: [
       {
         on: 'startOfTurn',
-        effects: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse' } }, to: 'hand' }],
+        effects: [{ op: 'createCard', defId: { pool: { scope: 'entireUniverse', filter: { cost: { eq: { expr: 'currentTurn' } } } } }, to: 'hand' }],
       },
     ],
     art: { key: 'aura_march_of_progress', status: 'final', artist: 'LCM Dreamshaper v7' },
@@ -298,13 +298,11 @@ export const auras: AuraDefinition[] = [
     name: 'Outstanding Debt',
     tier: 'celestial',
     text: '-X Money for 4 turns, where X = ceil((20 - your unspent Money) / 4).',
+    // Paid by engine machinery (outstandingDebtAmount in meta/auras.ts, which
+    // also owns the 4-turn clock): a data trigger here would pay a second time
+    // in the same start-of-turn window.
     effects: [],
-    triggers: [
-      {
-        on: 'startOfTurn',
-        effects: [{ op: 'gain', stat: 'money', amount: { expr: '0 - ceil((20 - moneyUnspent) / 4)' } }],
-      },
-    ],
+    triggers: [],
     art: { key: 'aura_outstanding_debt', status: 'final', artist: 'LCM Dreamshaper v7' },
   },
   {
@@ -350,7 +348,7 @@ export const auras: AuraDefinition[] = [
     id: 'market_manipulation',
     name: 'Market Manipulation',
     tier: 'celestial',
-    text: 'Money from Resources is doubled, and Resources cost (0) in the Resource Shop.',
+    text: 'Money from cards you play is doubled, and Resources cost (0) in the Resource Shop.',
     effects: [],
     triggers: [
       {
@@ -423,7 +421,7 @@ export const auras: AuraDefinition[] = [
     id: 'lotus_solutions',
     name: 'Lotus Solutions',
     tier: 'hypercelestial',
-    text: 'After your turn, an AI plays a second turn with your deck.',
+    text: 'After your turn, you play a second turn with your deck.',
     effects: [],
     triggers: [
       {

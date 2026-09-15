@@ -329,7 +329,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: '+1 Action. Add 2 Felinors to your hand. If you trash a Felinor this turn, +1 Buy.',
+    text: '+1 Action. Add 2 Felinors to your hand. If you trashed a Felinor earlier this turn, +1 Buy.',
     flavor: 'Free to a good home. Any home. Please.',
     complexity: 'T2',
     subsystems: ['S-TOKEN'],

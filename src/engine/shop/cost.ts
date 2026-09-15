@@ -16,7 +16,8 @@
  * Funding at -3 credits the buyer 3 Money.
  */
 
-import type { CostMod, Duration, GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
+import type { CostMod, Duration, EffectNode, GameState, InstanceId, Keyword, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
+import { matchesFilter } from '@engine/effects';
 import { pileDefId, safeGetCard } from './util';
 import { expiryTurnFor } from './locks';
 import { dynamicPriceFor } from './dynamic';
@@ -126,7 +127,7 @@ export function canAffordMoney(money: number, cost: number): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * A player's pending "your next buy costs N less" modifiers, folded together.
+ * A player's pending next-buy modifiers, folded together.
  *
  * This lives here, next to `costOf`, because it is part of the price: every
  * reader that asks what a pile costs a given buyer has to apply it, and the two
@@ -137,19 +138,36 @@ export interface BuyMods {
   costDelta: number;
   costFloor: number | null;
   buyTo: Zone | null;
+  grantKeywords: Keyword[];
+  appendEffects: EffectNode[];
 }
 
-export function peekBuyMods(state: GameState, player: PlayerId): BuyMods {
-  const out: BuyMods = { costDelta: 0, costFloor: null, buyTo: null };
+// A buy mod skipped past (`skip`) or naming a card this purchase is not
+// (`filter`) contributes nothing anywhere: not to the price a peek shows,
+// not to the destination, and not to the effects a purchase runs. The play
+// path already treats filtered play mods this way; the buy path mirrors it
+// so a gated price and a gated charge can never disagree (B19).
+export function buyModApplies(state: GameState, mod: NextCardMod, iid: InstanceId | null): boolean {
+  const skip = mod.skip ?? 0;
+  if (skip > 0) return false;
+  if (mod.filter && iid && !matchesFilter(state, iid, mod.filter)) return false;
+  return true;
+}
+
+export function peekBuyMods(state: GameState, player: PlayerId, iid: InstanceId | null = null): BuyMods {
+  const out: BuyMods = { costDelta: 0, costFloor: null, buyTo: null, grantKeywords: [], appendEffects: [] };
   const p = state.players[player];
   if (!p) return out;
   for (const mod of p.nextCardMods as NextCardMod[]) {
     if (mod.appliesTo !== 'buy') continue;
+    if (!buyModApplies(state, mod, iid)) continue;
     if (mod.costDelta) out.costDelta += mod.costDelta;
     if (mod.costFloor !== undefined) {
       out.costFloor = out.costFloor === null ? mod.costFloor : Math.max(out.costFloor, mod.costFloor);
     }
     if (mod.buyTo) out.buyTo = mod.buyTo;
+    if (mod.grantKeyword) out.grantKeywords.push(mod.grantKeyword);
+    if (mod.appendEffects) out.appendEffects.push(...mod.appendEffects);
   }
   return out;
 }
@@ -171,5 +189,7 @@ export function applyBuyMods(base: number, mods: BuyMods): number {
  */
 export function priceOfPileFor(state: GameState, pileId: PileId, buyer: PlayerId): number {
   const base = costOf(state, pileId, buyer);
-  return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer));
+  const pile = state.shop.piles[pileId];
+  const top = pile && pile.cards.length > 0 ? pile.cards[0]! : null;
+  return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer, top));
 }
