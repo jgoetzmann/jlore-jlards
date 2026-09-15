@@ -12,9 +12,10 @@
  * B92 A bought defId enters the buyer's codex.
  */
 
-import type { GameState, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
+import type { GameState, InstanceId, NextCardMod, PileId, PlayerId, Zone } from '@engine/types';
 import {
   applyBuyMods,
+  buyModApplies,
   canBuy as shopCanBuy,
   costOf,
   isLocked,
@@ -28,8 +29,10 @@ import {
   fireInstanceTriggers,
   fireOwnedTriggers,
   firePlayTriggers,
+  makeContext,
+  runEffects,
 } from './triggers.js';
-import { hasKeyword } from '@engine/systems';
+import { grantKeyword, hasKeyword } from '@engine/systems';
 import { moveInstance, safeDef, topOfPile } from './zones.js';
 import { playCard } from './play.js';
 import { noteEndCondition } from './endgame.js';
@@ -40,13 +43,24 @@ function allowsNegativeProphet(defId: string): boolean {
   return defId.includes('unconcerned_lion');
 }
 
-function consumeBuyMods(state: GameState, player: PlayerId): BuyMods {
+// Spend one purchase worth of next-buy modifiers: skipped and filtered-out
+// mods are kept untouched (see buyModApplies), everything else loses a use.
+function consumeBuyMods(state: GameState, player: PlayerId, iid: InstanceId | null): BuyMods {
   const p = state.players[player];
-  const out = peekBuyMods(state, player);
+  const out = peekBuyMods(state, player, iid);
   if (!p) return out;
   const keep: NextCardMod[] = [];
   for (const mod of p.nextCardMods) {
     if (mod.appliesTo !== 'buy') {
+      keep.push(mod);
+      continue;
+    }
+    const skip = mod.skip ?? 0;
+    if (skip > 0) {
+      keep.push({ ...mod, skip: skip - 1 });
+      continue;
+    }
+    if (!buyModApplies(state, mod, iid)) {
       keep.push(mod);
       continue;
     }
@@ -70,7 +84,7 @@ export function priceFor(state: GameState, pileId: PileId, buyer: PlayerId): num
     const iid = topOfPile(state, pileId);
     const def = iid ? safeDef(state.instances[iid]!.defId) : null;
     const base = def?.cost.money ?? 0;
-    return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer));
+    return applyBuyMods(Number.isFinite(base) ? base : 0, peekBuyMods(state, buyer, iid));
   }
 }
 
@@ -141,7 +155,7 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
   // priced the card against a state the discount had already been taken out of,
   // so a Silver the table showed at (1) under Miracle Prep charged its full 3.
   const price = priceFor(s, pileId, player);
-  const mods = consumeBuyMods(s, player);
+  const mods = consumeBuyMods(s, player, iid);
   let paid = 0;
   let prophetPaid = 0;
 
@@ -208,6 +222,18 @@ export function buyCard(state: GameState, player: PlayerId, pileId: PileId): Gam
   for (const other of s.playerOrder) {
     if (other === player) continue;
     s = fireOwnedTriggers(s, 'onOpponentBuy', other, 0);
+  }
+
+  // Granted keywords land on the purchase before anything reads them, so a
+  // bought card that gains Play on Buy is played free below.
+  for (const kw of mods.grantKeywords) s = grantKeyword(s, iid, kw);
+
+  // Appended modifier effects resolve here, sourced at the bought card,
+  // after every trigger window and before any free play: a fused-away
+  // purchase never reaches PlayOnBuy, and `selfCost`/`selfPricePaid` read
+  // the purchase rather than the card that armed the modifier.
+  if (mods.appendEffects.length > 0) {
+    s = runEffects(s, mods.appendEffects, makeContext(player, iid, 0, 1, {}));
   }
 
   // PlayOnBuy fires on purchase, for free.

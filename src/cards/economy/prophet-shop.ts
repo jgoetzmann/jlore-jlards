@@ -433,7 +433,7 @@ export const cards: CardDefinition[] = [
       { op: 'lockPile', target: { shop: 'prophet' }, duration: { turns: 1 } },
     ],
     triggers: [],
-    text: 'Cast on Buy, Flimsy. Replace your hand with random Legendaries. Lock the Prophet Shop until end of turn.',
+    text: 'Cast on Buy, Flimsy. Discard your hand, then add 5 random Legendaries to your hand. Lock the Prophet Shop until end of turn.',
     flavor: 'Wrong god. Right rewards.',
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-LOCK'],
@@ -528,14 +528,10 @@ export const cards: CardDefinition[] = [
         duration: 'turn',
       },
       {
-        // Still dormant, and kept as the correct authoring shape. `peekBuyMods`
-        // and `consumeBuyMods` read only costDelta/costFloor/buyTo off an
-        // `appliesTo:'buy'` mod, and `consumePlayMods` — the one place
-        // grantKeyword IS honoured — skips buy-scoped mods, so no bought card
-        // ever gains PlayOnBuy. The card-side alternative would be `setKeyword`
-        // over the pile's cards, but a Selector has no pile axis (only
-        // `zone:'shop'`, which is every pile in every shop) and setKeyword has
-        // no duration, so it would grant the keyword shop-wide and forever.
+        // The buy path grants `grantKeyword` onto the purchase before the
+        // PlayOnBuy window (core/buy.ts), so each of the next nine buys from
+        // anywhere plays itself free. `uses: 9` bounds it to the buys of an
+        // ordinary turn; the discount half is fenced by `duration: turn`.
         op: 'nextCardModifier',
         mod: { appliesTo: 'buy', grantKeyword: 'PlayOnBuy', uses: 9 },
       },

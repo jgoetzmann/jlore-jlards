@@ -117,6 +117,7 @@ export {
   DEFAULT_COST_FLOOR,
   applyBuyMods,
   applyCostMod,
+  buyModApplies,
   canAffordMoney,
   costModExpiryFor,
   costModIsActive,

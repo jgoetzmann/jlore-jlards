@@ -313,7 +313,7 @@ export const cards: CardDefinition[] = [
       },
     ],
     triggers: [],
-    text: 'Discard the cards adjacent to this in your hand. +1 Action for each (1)-cost card discarded. If your hand is then empty, +2 Prophet.',
+    text: 'Discard 2 cards from your hand. +1 Action for each (1)-cost card discarded. If your hand is then empty, +2 Prophet.',
     flavor: 'Rinse cycle for the soul.',
     complexity: 'T3',
     subsystems: ['S-PROPHET', 'S-CORE'],

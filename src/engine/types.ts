@@ -481,7 +481,7 @@ export interface NextCardMod {
   /** Cost reduction on the next purchase. */
   costDelta?: number;
   costFloor?: number;
-  /** Grant a keyword to the next card played. */
+  /** Grant a keyword to the next card played or bought, per `appliesTo`. */
   grantKeyword?: Keyword;
   /** Grant a subtype — RCT CN makes the next card played a CN card. */
   grantSubtype?: string;
@@ -494,7 +494,7 @@ export interface NextCardMod {
    * consumes the modifier nor receives it.
    */
   filter?: CardFilter;
-  /** Effects appended to the next card played. */
+  /** Effects appended to the next card played or bought, per `appliesTo`. */
   appendEffects?: EffectNode[];
   /** Buff the next card played N times. */
   buffTimes?: number;
@@ -518,6 +518,13 @@ export interface NextCardMod {
   who?: Who;
   /** How many upcoming cards this applies to. Default 1. */
   uses?: number;
+  /**
+   * Skip this many upcoming matching cards before applying. Frankenstein arms
+   * its first-purchase refund and its second-purchase rider together, and
+   * without this both would land on the first purchase. Skipped cards neither
+   * consume the modifier nor receive it.
+   */
+  skip?: number;
 }
 
 export interface Condition {
